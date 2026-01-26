@@ -1,0 +1,22 @@
+[
+  {
+    "source": "codex",
+    "file": "crypto/xmss/src/xmss_address.c",
+    "line": "34-36",
+    "severity": "high",
+    "title": "XmssAdrs_SetType leaves stale fields in address",
+    "problem": "XmssAdrs_SetType only writes the type field and does not clear the type-specific portion (bytes 16–31). This leaves stale keyPair/chain/hash/keyAndMask values when switching address types, breaking RFC 8391 domain separation and producing incorrect hashes/signatures/verification results.",
+    "code": "void XmssAdrs_SetType(XmssAdrs *adrs, uint32_t type)\n{\n    PUT_UINT32_BE(type, adrs->fields.type, 0);\n}",
+    "fix": "void XmssAdrs_SetType(XmssAdrs *adrs, uint32_t type)\n{\n    PUT_UINT32_BE(type, adrs->fields.type, 0);\n    (void)memset_s(adrs->fields.keyPairAddr, sizeof(adrs->fields.keyPairAddr), 0,\n                   sizeof(adrs->fields.keyPairAddr));\n    (void)memset_s(adrs->fields.chainAddr, sizeof(adrs->fields.chainAddr), 0,\n                   sizeof(adrs->fields.chainAddr));\n    (void)memset_s(adrs->fields.hashAddr, sizeof(adrs->fields.hashAddr), 0,\n                   sizeof(adrs->fields.hashAddr));\n    (void)memset_s(adrs->fields.keyAndMask, sizeof(adrs->fields.keyAndMask), 0,\n                   sizeof(adrs->fields.keyAndMask));\n}"
+  },
+  {
+    "source": "codex",
+    "file": "crypto/xmss/src/xmss_core.c",
+    "line": "176-182",
+    "severity": "medium",
+    "title": "Verification accepts oversized signatures",
+    "problem": "Verification only rejects signatures shorter than the expected size and accepts longer buffers, which allows trailing garbage/malleability and deviates from fixed-length XMSS signatures.",
+    "code": "if (sigLen < ctx->params.sigBytes) {\n    BSL_ERR_PUSH_ERROR(CRYPT_XMSS_ERR_INVALID_SIG_LEN);\n    return CRYPT_XMSS_ERR_INVALID_SIG_LEN;\n}",
+    "fix": "if (sigLen != ctx->params.sigBytes) {\n    BSL_ERR_PUSH_ERROR(CRYPT_XMSS_ERR_INVALID_SIG_LEN);\n    return CRYPT_XMSS_ERR_INVALID_SIG_LEN;\n}"
+  }
+]

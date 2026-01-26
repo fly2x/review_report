@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Code Review: openHiTLS/openhitls#1004 - CODEX</title>
+    <style>
+        :root { --critical: #dc2626; --high: #ea580c; --medium: #ca8a04; --low: #65a30d; }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: system-ui, sans-serif; background: #f8fafc; color: #1e293b; padding: 2rem; line-height: 1.6; }
+        .container { max-width: 900px; margin: 0 auto; }
+        h1 { font-size: 1.5rem; margin-bottom: 0.5rem; }
+        .subtitle { color: #64748b; margin-bottom: 2rem; }
+        .section { margin-bottom: 2rem; }
+        .section-title { font-size: 1.1rem; font-weight: 600; padding: 0.5rem 1rem; border-radius: 0.5rem 0.5rem 0 0; color: white; }
+        .section-title.critical { background: var(--critical); }
+        .section-title.high { background: var(--high); }
+        .section-title.medium { background: var(--medium); }
+        .section-title.low { background: var(--low); }
+        .issue { background: white; border: 1px solid #e2e8f0; border-top: none; padding: 1rem; }
+        .issue:last-child { border-radius: 0 0 0.5rem 0.5rem; }
+        .issue-title { font-weight: 600; margin-bottom: 0.25rem; }
+        .issue-location { font-family: monospace; font-size: 0.875rem; color: #64748b; margin-bottom: 0.75rem; }
+        .issue-source { font-size: 0.75rem; color: #94a3b8; margin-top: 0.5rem; }
+        pre { background: #1e293b; color: #e2e8f0; padding: 0.75rem; border-radius: 0.375rem; overflow-x: auto; font-size: 0.875rem; margin: 0.5rem 0; }
+        .problem { margin: 0.75rem 0; }
+        .fix-label { font-weight: 600; margin-top: 0.75rem; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Code Review: openHiTLS/openhitls#1004 - CODEX</h1>
+        <div class="subtitle"></div>
+<div class="section"><div class="section-title high">High</div>
+<div class="issue">
+                <div class="issue-title">RegisterFd can leave a freed node in the list</div>
+                <div class="issue-location">bsl/async/src/async_notify.c:142-161</div>
+                <pre>newFd-&gt;next = ctx-&gt;fds;
+ctx-&gt;fds = newFd;
+
+if (ctx-&gt;fdChangeList != NULL) {
+    struct AsyncFdEvent *event = (struct AsyncFdEvent *)BSL_SAL_Calloc(1, sizeof(struct AsyncFdEvent));
+    if (event == NULL) {
+        BSL_SAL_FREE(newFd);
+        ...
+    }
+    ...
+    if (BSL_LIST_AddElement(ctx-&gt;fdChangeList, event, BSL_LIST_POS_END) != BSL_SUCCESS) {
+        BSL_SAL_FREE(event);
+        BSL_SAL_FREE(newFd);
+        return BSL_ASYNC_ERR;
+    }
+}</pre>
+                <div class="problem"><strong>Issue:</strong> The new FD node is linked into `ctx->fds` before the change event is created. If event allocation or list insertion fails, the node is freed but `ctx->fds` still points to it, causing list corruption and use-after-free.</div>
+                <div class="fix-label">Fix:</div><pre>struct AsyncFdEvent *event = NULL;
+if (ctx-&gt;fdChangeList != NULL) {
+    event = (struct AsyncFdEvent *)BSL_SAL_Calloc(1, sizeof(struct AsyncFdEvent));
+    if (event == NULL) {
+        BSL_SAL_FREE(newFd);
+        BSL_ERR_PUSH_ERROR(BSL_MALLOC_FAIL);
+        return BSL_MALLOC_FAIL;
+    }
+    event-&gt;fd = fd;
+    event-&gt;type = ASYNC_EVENT_ADD;
+    if (BSL_LIST_AddElement(ctx-&gt;fdChangeList, event, BSL_LIST_POS_END) != BSL_SUCCESS) {
+        BSL_SAL_FREE(event);
+        BSL_SAL_FREE(newFd);
+        return BSL_ASYNC_ERR;
+    }
+}
+
+newFd-&gt;next = ctx-&gt;fds;
+ctx-&gt;fds = newFd;</pre>
+                <div class="issue-source">Reviewer: codex</div>
+            </div>
+</div>
+<div class="section"><div class="section-title medium">Medium</div>
+<div class="issue">
+                <div class="issue-title">Coroutine ID generation never updates the shared counter</div>
+                <div class="issue-location">bsl/async/src/async.c:108-116</div>
+                <pre>BSL_SAL_RefCount threadStartNum = {
+    .count = ScheduleGet()-&gt;idGen
+};
+ret = BSL_SAL_AtomicUpReferences(&amp;threadStartNum, &amp;ref);</pre>
+                <div class="problem"><strong>Issue:</strong> The atomic increment is applied to a local copy of `idGen`, so the shared counter in the scheduler is never updated. This returns duplicate IDs and is not thread-safe.</div>
+                <div class="fix-label">Fix:</div><pre>/* async_local.h */
+struct AsyncSchedule {
+    int32_t state;
+    BSL_SAL_RefCount idGen;
+    size_t stackSize;
+    unsigned int corpoolCoroutineNum;
+    bool stackProtect;
+    struct CoroutinePool pool;
+    BSL_SAL_ThreadLockHandle poolLock;
+};
+
+/* async.c */
+static struct AsyncSchedule *ScheduleAlloc(void)
+{
+    struct AsyncSchedule *schedule = (struct AsyncSchedule *)BSL_SAL_Calloc(1, sizeof(struct AsyncSchedule));
+    if (schedule == NULL) {
+        ...
+    }
+    (void)BSL_SAL_ReferencesInit(&amp;schedule-&gt;idGen);
+    schedule-&gt;state = SCHEDULE_INIT;
+    return schedule;
+}
+
+static int32_t CoroutineNewid(void)
+{
+    int32_t ref = 0;
+    struct AsyncSchedule *schedule = ScheduleGet();
+    if (schedule == NULL) {
+        return 0;
+    }
+    (void)BSL_SAL_AtomicUpReferences(&amp;schedule-&gt;idGen, &amp;ref);
+    return ref;
+}
+
+void BSL_ASYNC_ScheduleFree(void)
+{
+    struct AsyncSchedule *schedule = ScheduleGet();
+    if (schedule == NULL) {
+        return;
+    }
+    schedule-&gt;state = SCHEDULE_EXITING;
+    CoroutinePoolDestroy(schedule);
+    BSL_SAL_ReferencesFree(&amp;schedule-&gt;idGen);
+    BSL_SAL_FREE(schedule);
+    ScheduleSet(NULL);
+}</pre>
+                <div class="issue-source">Reviewer: codex</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">Swapcontext failure check is inverted</div>
+                <div class="issue-location">bsl/async/src/async.c:553-560</div>
+                <pre>job-&gt;status = ASYNC_JOB_STOPPING;
+if (AsyncSwapcontext(&amp;job-&gt;ctx, &amp;ctx-&gt;dispatcher) == 0) {
+    BSL_ERR_PUSH_ERROR(BSL_ASYNC_UCONTEXT_SWAP_FAIL);
+    BSL_LOG_BINLOG_FIXLEN(...);
+}</pre>
+                <div class="problem"><strong>Issue:</strong> `AsyncSwapcontext` returns `BSL_SUCCESS` (0) on success, but the code logs an error when it succeeds and ignores real failures. On failure, the coroutine continues looping and re-executes the job.</div>
+                <div class="fix-label">Fix:</div><pre>job-&gt;status = ASYNC_JOB_STOPPING;
+int32_t swapRet = AsyncSwapcontext(&amp;job-&gt;ctx, &amp;ctx-&gt;dispatcher);
+if (swapRet != BSL_SUCCESS) {
+    BSL_ERR_PUSH_ERROR(BSL_ASYNC_UCONTEXT_SWAP_FAIL);
+    BSL_LOG_BINLOG_FIXLEN(BINLOG_ID05103, BSL_LOG_LEVEL_ERR, BSL_LOG_BINLOG_TYPE_RUN,
+                          "async start run func swap context fail.", 0, 0, 0, 0);
+}</pre>
+                <div class="issue-source">Reviewer: codex</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">Missing status handling causes infinite loop</div>
+                <div class="issue-location">bsl/async/src/async.c:636-669</div>
+                <pre>while (true) {
+    int status = ctx-&gt;currjob-&gt;status;
+    if (status == ASYNC_JOB_STOPPING) { ... }
+    if (status == ASYNC_JOB_READY) { ... }
+    if (status == ASYNC_JOB_PAUSING) { ... }
+    if (status == ASYNC_JOB_PAUSED) { ... }
+}</pre>
+                <div class="problem"><strong>Issue:</strong> If `status` is `ASYNC_JOB_RUNNING` or any unexpected value, the loop never changes state and spins forever. This can deadlock a caller that accidentally re-enters `BSL_ASYNC_Start`.</div>
+                <div class="fix-label">Fix:</div><pre>while (true) {
+    int status = ctx-&gt;currjob-&gt;status;
+    switch (status) {
+        case ASYNC_JOB_STOPPING:
+            ...
+            return BSL_ASYNC_FINISH;
+        case ASYNC_JOB_READY:
+            ...
+            continue;
+        case ASYNC_JOB_PAUSING:
+            ...
+            return BSL_ASYNC_PAUSE;
+        case ASYNC_JOB_PAUSED:
+            ...
+            continue;
+        default:
+            BSL_ERR_PUSH_ERROR(BSL_ASYNC_ERR);
+            ctx-&gt;currjob = NULL;
+            return BSL_ASYNC_ERR;
+    }
+}</pre>
+                <div class="issue-source">Reviewer: codex</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">Removed FDs are still visible to Lookup and Collect</div>
+                <div class="issue-location">bsl/async/src/async_notify.c:168-214</div>
+                <pre>while (curr != NULL) {
+    if (curr-&gt;key == key) {
+        *fd = curr-&gt;fd;
+        ...
+        return BSL_SUCCESS;
+    }
+    curr = curr-&gt;next;
+}</pre>
+                <div class="problem"><strong>Issue:</strong> `RemoveFd` only marks entries as deleted, but `BSL_NOTIFY_CTX_LookupFd` and `BSL_NOTIFY_CTX_CollectAllFds` ignore `del`, so removed FDs remain visible and contradict the expected behavior (tests expect NOT_FOUND after removal).</div>
+                <div class="fix-label">Fix:</div><pre>while (curr != NULL) {
+    if (curr-&gt;del) {
+        curr = curr-&gt;next;
+        continue;
+    }
+    if (curr-&gt;key == key) {
+        *fd = curr-&gt;fd;
+        if (customData != NULL) {
+            *customData = curr-&gt;customData;
+        }
+        return BSL_SUCCESS;
+    }
+    curr = curr-&gt;next;
+}</pre>
+                <div class="issue-source">Reviewer: codex</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">PollFdChanges never consumes the change list</div>
+                <div class="issue-location">bsl/async/src/async_notify.c:218-259</div>
+                <pre>*addedCount = addTotal;
+*removedCount = delTotal;
+
+return BSL_SUCCESS;</pre>
+                <div class="problem"><strong>Issue:</strong> The function returns the same events on every call and the list grows unbounded. This contradicts the API comment (consume when arrays are provided) and keeps deleted entries from being finalized unless a coroutine yield occurs.</div>
+                <div class="fix-label">Fix:</div><pre>*addedCount = addTotal;
+*removedCount = delTotal;
+
+if (addedFds != NULL || removedFds != NULL) {
+    AsyncCleanupFdChanges(ctx);
+}
+
+return BSL_SUCCESS;</pre>
+                <div class="issue-source">Reviewer: codex</div>
+            </div>
+</div>
+<div class="section"><div class="section-title low">Low</div>
+<div class="issue">
+                <div class="issue-title">RemoveFd path skips cleanup callback</div>
+                <div class="issue-location">bsl/async/src/async_notify.c:314-319</div>
+                <pre>if (*pp == target) {
+    *pp = target-&gt;next;
+    BSL_SAL_FREE(target);
+    return true;
+}</pre>
+                <div class="problem"><strong>Issue:</strong> When a newly-added FD is removed before being polled, `NotifyCtxDetachFdNode` frees the node without calling the cleanup callback, leaking resources such as the FD or associated data.</div>
+                <div class="fix-label">Fix:</div><pre>if (*pp == target) {
+    if (target-&gt;cleanup != NULL) {
+        target-&gt;cleanup(ctx, target-&gt;fd);
+    }
+    *pp = target-&gt;next;
+    BSL_SAL_FREE(target);
+    return true;
+}</pre>
+                <div class="issue-source">Reviewer: codex</div>
+            </div>
+</div>
+</div></body></html>

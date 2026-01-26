@@ -1,0 +1,52 @@
+[
+  {
+    "source": "claude",
+    "file": "apps/src/app_tls_common.c",
+    "line": "331",
+    "severity": "high",
+    "title": "Wrong size used for secure clearing of decrypted private key",
+    "problem": "The decrypted private key (`plain`) is cleared using `cipherLen` instead of `plainLen`. The decrypted data length (`plainLen`) is typically smaller than the ciphertext length (`cipherLen`). This means sensitive plaintext private key bytes beyond the actual data may not be cleared, and the operation is using the wrong size parameter, which could leave sensitive key material in memory if `plainLen < cipherLen`.",
+    "code": "CRYPT_EAL_PkeyFreeCtx(signKey);\n    BSL_SAL_Free(cipher);\n    BSL_SAL_ClearFree(plain, cipherLen);\n    return encKey;",
+    "fix": "CRYPT_EAL_PkeyFreeCtx(signKey);\n    BSL_SAL_Free(cipher);\n    BSL_SAL_ClearFree(plain, plainLen);\n    return encKey;"
+  },
+  {
+    "source": "claude",
+    "file": "apps/src/app_tls_common.c",
+    "line": "345",
+    "severity": "high",
+    "title": "Wrong size used for secure clearing of decrypted private key in error path",
+    "problem": "Same issue as above - in the error path, `plain` is cleared using `cipherLen` instead of `plainLen`. This is inconsistent and uses the wrong size for secure memory clearing of the sensitive private key material.",
+    "code": "if (plain != NULL) {\n        BSL_SAL_ClearFree(plain, cipherLen);\n    }",
+    "fix": "if (plain != NULL) {\n        BSL_SAL_ClearFree(plain, plainLen);\n    }"
+  },
+  {
+    "source": "claude",
+    "file": "apps/src/app_tls_common.c",
+    "line": "254",
+    "severity": "medium",
+    "title": "Missing NULL check for cipherFile parameter",
+    "problem": "The `ReadEncKeyCipher` function passes `cipherFile` directly to `BSL_SAL_ReadFile` and also uses it in the error message with `%s` format specifier without checking if it's NULL. If `cipherFile` is NULL, this could cause undefined behavior in `BSL_SAL_ReadFile` or a crash when printing the error message.",
+    "code": "static int32_t ReadEncKeyCipher(const char *cipherFile, uint8_t **cipher, uint32_t *cipherLen)\n{\n    int32_t ret = BSL_SAL_ReadFile(cipherFile, cipher, cipherLen);\n    if (ret != BSL_SUCCESS) {\n        AppPrintError(\"Failed to read encrypted private key from %s\\n\", cipherFile);\n    }\n    return ret;\n}",
+    "fix": "static int32_t ReadEncKeyCipher(const char *cipherFile, uint8_t **cipher, uint32_t *cipherLen)\n{\n    if (cipherFile == NULL) {\n        AppPrintError(\"Failed to read encrypted private key: file path is NULL\\n\");\n        return BSL_NULL_INPUT;\n    }\n    int32_t ret = BSL_SAL_ReadFile(cipherFile, cipher, cipherLen);\n    if (ret != BSL_SUCCESS) {\n        AppPrintError(\"Failed to read encrypted private key from %s\\n\", cipherFile);\n    }\n    return ret;\n}"
+  },
+  {
+    "source": "claude",
+    "file": "apps/src/app_tls_common.c",
+    "line": "283",
+    "severity": "medium",
+    "title": "Missing NULL check for provider parameter",
+    "problem": "The `CreateSm2PkeyFromPrv` function does not check if `provider` is NULL before accessing `provider->providerAttr`. If the caller passes NULL provider, this will cause a null pointer dereference and crash.",
+    "code": "static CRYPT_EAL_PkeyCtx *CreateSm2PkeyFromPrv(AppProvider *provider, uint8_t *plain, uint32_t plainLen)\n{\n    CRYPT_EAL_PkeyCtx *encKey = CRYPT_EAL_ProviderPkeyNewCtx(APP_GetCurrent_LibCtx(), CRYPT_PKEY_SM2, 0,\n        provider->providerAttr);",
+    "fix": "static CRYPT_EAL_PkeyCtx *CreateSm2PkeyFromPrv(AppProvider *provider, uint8_t *plain, uint32_t plainLen)\n{\n    if (provider == NULL || plain == NULL || plainLen == 0) {\n        AppPrintError(\"Invalid parameters for creating SM2 pkey from private key\\n\");\n        return NULL;\n    }\n    CRYPT_EAL_PkeyCtx *encKey = CRYPT_EAL_ProviderPkeyNewCtx(APP_GetCurrent_LibCtx(), CRYPT_PKEY_SM2, 0,\n        provider->providerAttr);"
+  },
+  {
+    "source": "claude",
+    "file": "apps/src/app_tls_common.c",
+    "line": "370",
+    "severity": "medium",
+    "title": "Missing NULL check for smParam before dereferencing",
+    "problem": "The code checks `certConfig->smParam->smTag` without first verifying that `smParam` is not NULL. If `smParam` is NULL, this will cause a null pointer dereference.",
+    "code": "if (!isSignKey && certConfig->smParam->smTag == 1) {\n        pkey = LoadEncKeyBySignKey(certConfig);\n        if (pkey != NULL) {\n            return pkey;\n        }\n    }",
+    "fix": "if (!isSignKey && certConfig->smParam != NULL && certConfig->smParam->smTag == 1) {\n        pkey = LoadEncKeyBySignKey(certConfig);\n        if (pkey != NULL) {\n            return pkey;\n        }\n    }"
+  }
+]

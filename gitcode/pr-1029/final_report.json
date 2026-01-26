@@ -1,0 +1,66 @@
+{
+  "context": {
+    "owner": "openHiTLS",
+    "repo": "openhitls",
+    "pr_id": "1029",
+    "title": "",
+    "reviewers": [
+      "claude",
+      "gemini",
+      "codex"
+    ]
+  },
+  "statistics": {
+    "total": 4,
+    "critical": 0,
+    "high": 2,
+    "medium": 1,
+    "low": 1
+  },
+  "issues": [
+    {
+      "file": "apps/src/app_tls_common.c",
+      "line": "331",
+      "severity": "high",
+      "title": "Wrong size used for secure clearing of decrypted private key",
+      "reviewers": "CLAUDE",
+      "confidence": "trusted",
+      "problem": "The decrypted private key buffer (`plain`) is cleared using `cipherLen` instead of `plainLen`. The decrypted plaintext length is typically smaller than the ciphertext length. Using `cipherLen` means: (1) on the success path (line 331), the function passes a size larger than the actual allocated buffer content that needs clearing, though the buffer was allocated with `cipherLen` size so this won't cause a buffer overrun, but it's semantically incorrect; (2) more critically, the code is inconsistent - `plainLen` contains the actual decrypted data length and should be used for secure clearing to properly zero out the sensitive private key material.",
+      "code": "BSL_SAL_ClearFree(plain, cipherLen);\n    return encKey;\n\nERR:\n    ...\n    if (plain != NULL) {\n        BSL_SAL_ClearFree(plain, cipherLen);\n    }",
+      "fix": "BSL_SAL_ClearFree(plain, plainLen);\n    return encKey;\n\nERR:\n    ...\n    if (plain != NULL) {\n        BSL_SAL_ClearFree(plain, plainLen);\n    }"
+    },
+    {
+      "file": "apps/src/app_tls_common.c",
+      "line": "364",
+      "severity": "high",
+      "title": "Missing NULL check for smParam before dereferencing",
+      "reviewers": "CLAUDE, GEMINI, CODEX",
+      "confidence": "trusted",
+      "problem": "The code dereferences `certConfig->smParam` to access `smTag` without checking if `smParam` is NULL. Both line 364 (`isSignKey && certConfig->smParam->smTag == 1`) and line 370 (`!isSignKey && certConfig->smParam->smTag == 1`) access `smParam->smTag` directly. If `HITLS_APP_SM_MODE` is enabled but `smParam` is not initialized (e.g., in non-SM modes or partial config), this will cause a null pointer dereference and crash.",
+      "code": "if (isSignKey && certConfig->smParam->smTag == 1) {\n        int32_t ret = GetPkeyCtxFromUuid(provider, certConfig->smParam, keyFile, &pkey);\n        if (ret == HITLS_APP_SUCCESS) {\n            return pkey;\n        }\n    }\n    if (!isSignKey && certConfig->smParam->smTag == 1) {\n        pkey = LoadEncKeyBySignKey(certConfig);\n        if (pkey != NULL) {\n            return pkey;\n        }\n    }",
+      "fix": "if (isSignKey && certConfig->smParam != NULL && certConfig->smParam->smTag == 1) {\n        int32_t ret = GetPkeyCtxFromUuid(provider, certConfig->smParam, keyFile, &pkey);\n        if (ret == HITLS_APP_SUCCESS) {\n            return pkey;\n        }\n    }\n    if (!isSignKey && certConfig->smParam != NULL && certConfig->smParam->smTag == 1) {\n        pkey = LoadEncKeyBySignKey(certConfig);\n        if (pkey != NULL) {\n            return pkey;\n        }\n    }"
+    },
+    {
+      "file": "apps/src/app_tls_common.c",
+      "line": "292-293",
+      "severity": "medium",
+      "title": "Ignored return value of BSL_PARAM_InitValue",
+      "reviewers": "GEMINI",
+      "confidence": "likely",
+      "problem": "The return value of `BSL_PARAM_InitValue` is explicitly cast to void and ignored. If initialization fails (e.g., invalid arguments), `prvParam` will be incorrectly initialized, potentially causing `CRYPT_EAL_PkeySetPrvEx` to fail or behave unpredictably. While `CRYPT_EAL_PkeySetPrvEx` may catch some errors, it's better to validate the parameter initialization explicitly.",
+      "code": "BSL_Param prvParam[] = {{0}, BSL_PARAM_END};\n    (void)BSL_PARAM_InitValue(&prvParam[0], CRYPT_PARAM_EC_PRVKEY, BSL_PARAM_TYPE_OCTETS,\n        (void *)plain, plainLen);\n    int32_t ret = CRYPT_EAL_PkeySetPrvEx(encKey, prvParam);",
+      "fix": "BSL_Param prvParam[] = {{0}, BSL_PARAM_END};\n    if (BSL_PARAM_InitValue(&prvParam[0], CRYPT_PARAM_EC_PRVKEY, BSL_PARAM_TYPE_OCTETS,\n        (void *)plain, plainLen) != BSL_SUCCESS) {\n        AppPrintError(\"Failed to init private key param\\n\");\n        CRYPT_EAL_PkeyFreeCtx(encKey);\n        return NULL;\n    }\n    int32_t ret = CRYPT_EAL_PkeySetPrvEx(encKey, prvParam);"
+    },
+    {
+      "file": "apps/src/app_tls_common.c",
+      "line": "254-260",
+      "severity": "low",
+      "title": "Missing NULL check for cipherFile parameter",
+      "reviewers": "CLAUDE",
+      "confidence": "evaluate",
+      "problem": "The `ReadEncKeyCipher` function passes `cipherFile` directly to `BSL_SAL_ReadFile` and uses it in the error message with `%s` format specifier without checking if it's NULL. If `cipherFile` is NULL, this could cause undefined behavior in `BSL_SAL_ReadFile` or a crash when printing the error message. However, the caller `LoadEncKeyBySignKey` sets `cipherFile` from `certConfig->tlcpEncKey`, and it's reasonable to expect the caller to provide valid input for this internal static function.",
+      "code": "static int32_t ReadEncKeyCipher(const char *cipherFile, uint8_t **cipher, uint32_t *cipherLen)\n{\n    int32_t ret = BSL_SAL_ReadFile(cipherFile, cipher, cipherLen);\n    if (ret != BSL_SUCCESS) {\n        AppPrintError(\"Failed to read encrypted private key from %s\\n\", cipherFile);\n    }\n    return ret;\n}",
+      "fix": "static int32_t ReadEncKeyCipher(const char *cipherFile, uint8_t **cipher, uint32_t *cipherLen)\n{\n    if (cipherFile == NULL) {\n        AppPrintError(\"Failed to read encrypted private key: file path is NULL\\n\");\n        return BSL_NULL_INPUT;\n    }\n    int32_t ret = BSL_SAL_ReadFile(cipherFile, cipher, cipherLen);\n    if (ret != BSL_SUCCESS) {\n        AppPrintError(\"Failed to read encrypted private key from %s\\n\", cipherFile);\n    }\n    return ret;\n}"
+    }
+  ]
+}

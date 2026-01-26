@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Code Review: openHiTLS/openhitls#1029 - CLAUDE</title>
+    <style>
+        :root { --critical: #dc2626; --high: #ea580c; --medium: #ca8a04; --low: #65a30d; }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: system-ui, sans-serif; background: #f8fafc; color: #1e293b; padding: 2rem; line-height: 1.6; }
+        .container { max-width: 900px; margin: 0 auto; }
+        h1 { font-size: 1.5rem; margin-bottom: 0.5rem; }
+        .subtitle { color: #64748b; margin-bottom: 2rem; }
+        .section { margin-bottom: 2rem; }
+        .section-title { font-size: 1.1rem; font-weight: 600; padding: 0.5rem 1rem; border-radius: 0.5rem 0.5rem 0 0; color: white; }
+        .section-title.critical { background: var(--critical); }
+        .section-title.high { background: var(--high); }
+        .section-title.medium { background: var(--medium); }
+        .section-title.low { background: var(--low); }
+        .issue { background: white; border: 1px solid #e2e8f0; border-top: none; padding: 1rem; }
+        .issue:last-child { border-radius: 0 0 0.5rem 0.5rem; }
+        .issue-title { font-weight: 600; margin-bottom: 0.25rem; }
+        .issue-location { font-family: monospace; font-size: 0.875rem; color: #64748b; margin-bottom: 0.75rem; }
+        .issue-source { font-size: 0.75rem; color: #94a3b8; margin-top: 0.5rem; }
+        pre { background: #1e293b; color: #e2e8f0; padding: 0.75rem; border-radius: 0.375rem; overflow-x: auto; font-size: 0.875rem; margin: 0.5rem 0; }
+        .problem { margin: 0.75rem 0; }
+        .fix-label { font-weight: 600; margin-top: 0.75rem; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Code Review: openHiTLS/openhitls#1029 - CLAUDE</h1>
+        <div class="subtitle"></div>
+<div class="section"><div class="section-title high">High</div>
+<div class="issue">
+                <div class="issue-title">Wrong size used for secure clearing of decrypted private key</div>
+                <div class="issue-location">apps/src/app_tls_common.c:331</div>
+                <pre>CRYPT_EAL_PkeyFreeCtx(signKey);
+    BSL_SAL_Free(cipher);
+    BSL_SAL_ClearFree(plain, cipherLen);
+    return encKey;</pre>
+                <div class="problem"><strong>Issue:</strong> The decrypted private key (`plain`) is cleared using `cipherLen` instead of `plainLen`. The decrypted data length (`plainLen`) is typically smaller than the ciphertext length (`cipherLen`). This means sensitive plaintext private key bytes beyond the actual data may not be cleared, and the operation is using the wrong size parameter, which could leave sensitive key material in memory if `plainLen < cipherLen`.</div>
+                <div class="fix-label">Fix:</div><pre>CRYPT_EAL_PkeyFreeCtx(signKey);
+    BSL_SAL_Free(cipher);
+    BSL_SAL_ClearFree(plain, plainLen);
+    return encKey;</pre>
+                <div class="issue-source">Reviewer: claude</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">Wrong size used for secure clearing of decrypted private key in error path</div>
+                <div class="issue-location">apps/src/app_tls_common.c:345</div>
+                <pre>if (plain != NULL) {
+        BSL_SAL_ClearFree(plain, cipherLen);
+    }</pre>
+                <div class="problem"><strong>Issue:</strong> Same issue as above - in the error path, `plain` is cleared using `cipherLen` instead of `plainLen`. This is inconsistent and uses the wrong size for secure memory clearing of the sensitive private key material.</div>
+                <div class="fix-label">Fix:</div><pre>if (plain != NULL) {
+        BSL_SAL_ClearFree(plain, plainLen);
+    }</pre>
+                <div class="issue-source">Reviewer: claude</div>
+            </div>
+</div>
+<div class="section"><div class="section-title medium">Medium</div>
+<div class="issue">
+                <div class="issue-title">Missing NULL check for cipherFile parameter</div>
+                <div class="issue-location">apps/src/app_tls_common.c:254</div>
+                <pre>static int32_t ReadEncKeyCipher(const char *cipherFile, uint8_t **cipher, uint32_t *cipherLen)
+{
+    int32_t ret = BSL_SAL_ReadFile(cipherFile, cipher, cipherLen);
+    if (ret != BSL_SUCCESS) {
+        AppPrintError("Failed to read encrypted private key from %s\n", cipherFile);
+    }
+    return ret;
+}</pre>
+                <div class="problem"><strong>Issue:</strong> The `ReadEncKeyCipher` function passes `cipherFile` directly to `BSL_SAL_ReadFile` and also uses it in the error message with `%s` format specifier without checking if it's NULL. If `cipherFile` is NULL, this could cause undefined behavior in `BSL_SAL_ReadFile` or a crash when printing the error message.</div>
+                <div class="fix-label">Fix:</div><pre>static int32_t ReadEncKeyCipher(const char *cipherFile, uint8_t **cipher, uint32_t *cipherLen)
+{
+    if (cipherFile == NULL) {
+        AppPrintError("Failed to read encrypted private key: file path is NULL\n");
+        return BSL_NULL_INPUT;
+    }
+    int32_t ret = BSL_SAL_ReadFile(cipherFile, cipher, cipherLen);
+    if (ret != BSL_SUCCESS) {
+        AppPrintError("Failed to read encrypted private key from %s\n", cipherFile);
+    }
+    return ret;
+}</pre>
+                <div class="issue-source">Reviewer: claude</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">Missing NULL check for provider parameter</div>
+                <div class="issue-location">apps/src/app_tls_common.c:283</div>
+                <pre>static CRYPT_EAL_PkeyCtx *CreateSm2PkeyFromPrv(AppProvider *provider, uint8_t *plain, uint32_t plainLen)
+{
+    CRYPT_EAL_PkeyCtx *encKey = CRYPT_EAL_ProviderPkeyNewCtx(APP_GetCurrent_LibCtx(), CRYPT_PKEY_SM2, 0,
+        provider-&gt;providerAttr);</pre>
+                <div class="problem"><strong>Issue:</strong> The `CreateSm2PkeyFromPrv` function does not check if `provider` is NULL before accessing `provider->providerAttr`. If the caller passes NULL provider, this will cause a null pointer dereference and crash.</div>
+                <div class="fix-label">Fix:</div><pre>static CRYPT_EAL_PkeyCtx *CreateSm2PkeyFromPrv(AppProvider *provider, uint8_t *plain, uint32_t plainLen)
+{
+    if (provider == NULL || plain == NULL || plainLen == 0) {
+        AppPrintError("Invalid parameters for creating SM2 pkey from private key\n");
+        return NULL;
+    }
+    CRYPT_EAL_PkeyCtx *encKey = CRYPT_EAL_ProviderPkeyNewCtx(APP_GetCurrent_LibCtx(), CRYPT_PKEY_SM2, 0,
+        provider-&gt;providerAttr);</pre>
+                <div class="issue-source">Reviewer: claude</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">Missing NULL check for smParam before dereferencing</div>
+                <div class="issue-location">apps/src/app_tls_common.c:370</div>
+                <pre>if (!isSignKey &amp;&amp; certConfig-&gt;smParam-&gt;smTag == 1) {
+        pkey = LoadEncKeyBySignKey(certConfig);
+        if (pkey != NULL) {
+            return pkey;
+        }
+    }</pre>
+                <div class="problem"><strong>Issue:</strong> The code checks `certConfig->smParam->smTag` without first verifying that `smParam` is not NULL. If `smParam` is NULL, this will cause a null pointer dereference.</div>
+                <div class="fix-label">Fix:</div><pre>if (!isSignKey &amp;&amp; certConfig-&gt;smParam != NULL &amp;&amp; certConfig-&gt;smParam-&gt;smTag == 1) {
+        pkey = LoadEncKeyBySignKey(certConfig);
+        if (pkey != NULL) {
+            return pkey;
+        }
+    }</pre>
+                <div class="issue-source">Reviewer: claude</div>
+            </div>
+</div>
+</div></body></html>

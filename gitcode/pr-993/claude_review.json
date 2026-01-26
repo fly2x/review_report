@@ -1,0 +1,72 @@
+[
+  {
+    "source": "claude",
+    "file": "crypto/xmss/src/xmss_tree.c",
+    "line": "519-522",
+    "severity": "high",
+    "title": "Static variable causes shared state and potential thread safety issue",
+    "problem": "The `XmssTree_InitCtx` function uses a static variable `g_xmssCryptAdrsOps` to store address operation function pointers. This causes multiple issues:\n\n1. All `TreeCtx` instances share the same static variable, even though `CryptXmssCtx` has its own `adrsOps` member that was initialized in `CRYPT_XMSS_InitInternal`.\n\n2. The static variable is re-initialized on every call to `XmssTree_InitCtx`, creating unnecessary work and a potential race condition in multi-threaded environments.\n\n3. The `ctx->adrsOps` member in `CryptXmssCtx` is initialized but never used - the code always points to the static variable instead.",
+    "code": "void XmssTree_InitCtx(TreeCtx *treeCtx, const CryptXmssCtx *ctx)\n{\n    ...\n    /* Initialize address operations */\n    static CryptAdrsOps g_xmssCryptAdrsOps = {0};\n    const XmssAdrsOps *xmssOps = XmssAdrs_GetDefaultOps();\n    XmssAdrsOps_ToCryptAdrsOps(&g_xmssCryptAdrsOps, xmssOps);\n    treeCtx->adrsOps = &g_xmssCryptAdrsOps;\n    ...\n}",
+    "fix": "void XmssTree_InitCtx(TreeCtx *treeCtx, const CryptXmssCtx *ctx)\n{\n    ...\n    /* Initialize address operations - use ctx's adrsOps that was initialized in CRYPT_XMSS_InitInternal */\n    treeCtx->adrsOps = &ctx->adrsOps;\n    ...\n}"
+  },
+  {
+    "source": "claude",
+    "file": "crypto/xmss/src/xmss_core.c",
+    "line": "201",
+    "severity": "medium",
+    "title": "Inconsistent shift operation (UL vs ULL)",
+    "problem": "Line 201 uses `1UL` for the shift operation, while line 153 uses `1ULL`. While the current implementation has `hp <= 20` (so no overflow), the inconsistency should be fixed for clarity and future-proofing.",
+    "code": "// Line 153 in CRYPT_XMSS_SignInternal:\nuint32_t leafIdx = (uint32_t)(index & ((1ULL << hp) - 1));\n\n// Line 201 in CRYPT_XMSS_VerifyInternal:\nuint32_t leafIdx = index & ((1UL << hp) - 1);",
+    "fix": "// Use consistent 1ULL for both:\nuint32_t leafIdx = index & ((1ULL << hp) - 1);"
+  },
+  {
+    "source": "claude",
+    "file": "crypto/xmss/src/xmss_tree.c",
+    "line": "380",
+    "severity": "medium",
+    "title": "Inconsistent shift operation (UL vs ULL in HyperTree_Sign)",
+    "problem": "Line 380 uses `1UL` for the shift operation. While `hp <= 20`, this should be consistent with other uses.",
+    "code": "leafIdxTmp = (uint32_t)(treeIdxTmp & ((1UL << hp) - 1));",
+    "fix": "leafIdxTmp = (uint32_t)(treeIdxTmp & ((1ULL << hp) - 1));"
+  },
+  {
+    "source": "claude",
+    "file": "crypto/xmss/src/xmss_tree.c",
+    "line": "494",
+    "severity": "low",
+    "title": "Misleading variable name for XMSS hash function table",
+    "problem": "The static variable `g_slhdsaCryptHashFuncs` is named as if it belongs to SLH-DSA, but it's actually the hash function table for XMSS (in `xmss_tree.c`). This is confusing copy-paste residue.",
+    "code": "/* Static CryptHashFuncs table for XMSS */\nstatic const CryptHashFuncs g_slhdsaCryptHashFuncs = {",
+    "fix": "/* Static CryptHashFuncs table for XMSS */\nstatic const CryptHashFuncs g_xmssCryptHashFuncs = {"
+  },
+  {
+    "source": "claude",
+    "file": "crypto/xmss/src/xmss_tree.c",
+    "line": "421",
+    "severity": "low",
+    "title": "Inconsistent use of explicit uint64_t cast",
+    "problem": "Line 421 explicitly casts to `uint64_t`, but line 380 doesn't. This inconsistency should be fixed.",
+    "code": "// Line 380:\nleafIdxTmp = (uint32_t)(treeIdxTmp & ((1UL << hp) - 1));\n\n// Line 421:\nleafIdx = (uint32_t)(treeIdx & (((uint64_t)1 << hp) - 1));",
+    "fix": "// Line 380:\nleafIdxTmp = (uint32_t)(treeIdxTmp & ((1ULL << hp) - 1));\n\n// Line 421:\nleafIdx = (uint32_t)(treeIdx & ((1ULL << hp) - 1));"
+  },
+  {
+    "source": "claude",
+    "file": "crypto/slh_dsa/src/slh_dsa.c",
+    "line": "315",
+    "severity": "low",
+    "title": "Unnecessary uintptr_t cast",
+    "problem": "The cast `(void *)(uintptr_t)ctx` is unnecessary. A direct cast from `const CryptSlhDsaCtx *` to `void *` would work fine.",
+    "code": "treeCtx->originalCtx = (void *)(uintptr_t)ctx;",
+    "fix": "treeCtx->originalCtx = (void *)ctx;"
+  },
+  {
+    "source": "claude",
+    "file": "crypto/xmss/src/xmss_tree.c",
+    "line": "523",
+    "severity": "low",
+    "title": "Unnecessary uintptr_t cast",
+    "problem": "Same as above - the cast through `uintptr_t` is unnecessary.",
+    "code": "treeCtx->originalCtx = (void *)(uintptr_t)ctx;",
+    "fix": "treeCtx->originalCtx = (void *)ctx;"
+  }
+]

@@ -1,0 +1,12 @@
+[
+  {
+    "source": "codex",
+    "file": "apps/src/app_tls_common.c",
+    "line": "370-374",
+    "severity": "medium",
+    "title": "Missing NULL check for smParam in new SM enc-key path",
+    "problem": "The new SM-mode branch dereferences `certConfig->smParam` without verifying it is non-NULL. If an `APP_CertConfig` is constructed without SM parameters (e.g., SM mode compiled but caller does not set `smParam`), this will crash when loading the encryption key, before falling back to the normal key loader.",
+    "code": "if (!isSignKey && certConfig->smParam->smTag == 1) {\n        pkey = LoadEncKeyBySignKey(certConfig);\n        if (pkey != NULL) {\n            return pkey;\n        }\n    }",
+    "fix": "if (!isSignKey && certConfig->smParam != NULL && certConfig->smParam->smTag == 1) {\n        pkey = LoadEncKeyBySignKey(certConfig);\n        if (pkey != NULL) {\n            return pkey;\n        }\n    }"
+  }
+]

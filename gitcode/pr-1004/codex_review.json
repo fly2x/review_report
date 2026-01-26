@@ -1,0 +1,72 @@
+[
+  {
+    "source": "codex",
+    "file": "bsl/async/src/async_notify.c",
+    "line": "142-161",
+    "severity": "high",
+    "title": "RegisterFd can leave a freed node in the list",
+    "problem": "The new FD node is linked into `ctx->fds` before the change event is created. If event allocation or list insertion fails, the node is freed but `ctx->fds` still points to it, causing list corruption and use-after-free.",
+    "code": "newFd->next = ctx->fds;\nctx->fds = newFd;\n\nif (ctx->fdChangeList != NULL) {\n    struct AsyncFdEvent *event = (struct AsyncFdEvent *)BSL_SAL_Calloc(1, sizeof(struct AsyncFdEvent));\n    if (event == NULL) {\n        BSL_SAL_FREE(newFd);\n        ...\n    }\n    ...\n    if (BSL_LIST_AddElement(ctx->fdChangeList, event, BSL_LIST_POS_END) != BSL_SUCCESS) {\n        BSL_SAL_FREE(event);\n        BSL_SAL_FREE(newFd);\n        return BSL_ASYNC_ERR;\n    }\n}",
+    "fix": "struct AsyncFdEvent *event = NULL;\nif (ctx->fdChangeList != NULL) {\n    event = (struct AsyncFdEvent *)BSL_SAL_Calloc(1, sizeof(struct AsyncFdEvent));\n    if (event == NULL) {\n        BSL_SAL_FREE(newFd);\n        BSL_ERR_PUSH_ERROR(BSL_MALLOC_FAIL);\n        return BSL_MALLOC_FAIL;\n    }\n    event->fd = fd;\n    event->type = ASYNC_EVENT_ADD;\n    if (BSL_LIST_AddElement(ctx->fdChangeList, event, BSL_LIST_POS_END) != BSL_SUCCESS) {\n        BSL_SAL_FREE(event);\n        BSL_SAL_FREE(newFd);\n        return BSL_ASYNC_ERR;\n    }\n}\n\nnewFd->next = ctx->fds;\nctx->fds = newFd;"
+  },
+  {
+    "source": "codex",
+    "file": "bsl/async/src/async.c",
+    "line": "108-116",
+    "severity": "medium",
+    "title": "Coroutine ID generation never updates the shared counter",
+    "problem": "The atomic increment is applied to a local copy of `idGen`, so the shared counter in the scheduler is never updated. This returns duplicate IDs and is not thread-safe.",
+    "code": "BSL_SAL_RefCount threadStartNum = {\n    .count = ScheduleGet()->idGen\n};\nret = BSL_SAL_AtomicUpReferences(&threadStartNum, &ref);",
+    "fix": "/* async_local.h */\nstruct AsyncSchedule {\n    int32_t state;\n    BSL_SAL_RefCount idGen;\n    size_t stackSize;\n    unsigned int corpoolCoroutineNum;\n    bool stackProtect;\n    struct CoroutinePool pool;\n    BSL_SAL_ThreadLockHandle poolLock;\n};\n\n/* async.c */\nstatic struct AsyncSchedule *ScheduleAlloc(void)\n{\n    struct AsyncSchedule *schedule = (struct AsyncSchedule *)BSL_SAL_Calloc(1, sizeof(struct AsyncSchedule));\n    if (schedule == NULL) {\n        ...\n    }\n    (void)BSL_SAL_ReferencesInit(&schedule->idGen);\n    schedule->state = SCHEDULE_INIT;\n    return schedule;\n}\n\nstatic int32_t CoroutineNewid(void)\n{\n    int32_t ref = 0;\n    struct AsyncSchedule *schedule = ScheduleGet();\n    if (schedule == NULL) {\n        return 0;\n    }\n    (void)BSL_SAL_AtomicUpReferences(&schedule->idGen, &ref);\n    return ref;\n}\n\nvoid BSL_ASYNC_ScheduleFree(void)\n{\n    struct AsyncSchedule *schedule = ScheduleGet();\n    if (schedule == NULL) {\n        return;\n    }\n    schedule->state = SCHEDULE_EXITING;\n    CoroutinePoolDestroy(schedule);\n    BSL_SAL_ReferencesFree(&schedule->idGen);\n    BSL_SAL_FREE(schedule);\n    ScheduleSet(NULL);\n}"
+  },
+  {
+    "source": "codex",
+    "file": "bsl/async/src/async.c",
+    "line": "553-560",
+    "severity": "medium",
+    "title": "Swapcontext failure check is inverted",
+    "problem": "`AsyncSwapcontext` returns `BSL_SUCCESS` (0) on success, but the code logs an error when it succeeds and ignores real failures. On failure, the coroutine continues looping and re-executes the job.",
+    "code": "job->status = ASYNC_JOB_STOPPING;\nif (AsyncSwapcontext(&job->ctx, &ctx->dispatcher) == 0) {\n    BSL_ERR_PUSH_ERROR(BSL_ASYNC_UCONTEXT_SWAP_FAIL);\n    BSL_LOG_BINLOG_FIXLEN(...);\n}",
+    "fix": "job->status = ASYNC_JOB_STOPPING;\nint32_t swapRet = AsyncSwapcontext(&job->ctx, &ctx->dispatcher);\nif (swapRet != BSL_SUCCESS) {\n    BSL_ERR_PUSH_ERROR(BSL_ASYNC_UCONTEXT_SWAP_FAIL);\n    BSL_LOG_BINLOG_FIXLEN(BINLOG_ID05103, BSL_LOG_LEVEL_ERR, BSL_LOG_BINLOG_TYPE_RUN,\n                          \"async start run func swap context fail.\", 0, 0, 0, 0);\n}"
+  },
+  {
+    "source": "codex",
+    "file": "bsl/async/src/async.c",
+    "line": "636-669",
+    "severity": "medium",
+    "title": "Missing status handling causes infinite loop",
+    "problem": "If `status` is `ASYNC_JOB_RUNNING` or any unexpected value, the loop never changes state and spins forever. This can deadlock a caller that accidentally re-enters `BSL_ASYNC_Start`.",
+    "code": "while (true) {\n    int status = ctx->currjob->status;\n    if (status == ASYNC_JOB_STOPPING) { ... }\n    if (status == ASYNC_JOB_READY) { ... }\n    if (status == ASYNC_JOB_PAUSING) { ... }\n    if (status == ASYNC_JOB_PAUSED) { ... }\n}",
+    "fix": "while (true) {\n    int status = ctx->currjob->status;\n    switch (status) {\n        case ASYNC_JOB_STOPPING:\n            ...\n            return BSL_ASYNC_FINISH;\n        case ASYNC_JOB_READY:\n            ...\n            continue;\n        case ASYNC_JOB_PAUSING:\n            ...\n            return BSL_ASYNC_PAUSE;\n        case ASYNC_JOB_PAUSED:\n            ...\n            continue;\n        default:\n            BSL_ERR_PUSH_ERROR(BSL_ASYNC_ERR);\n            ctx->currjob = NULL;\n            return BSL_ASYNC_ERR;\n    }\n}"
+  },
+  {
+    "source": "codex",
+    "file": "bsl/async/src/async_notify.c",
+    "line": "168-214",
+    "severity": "medium",
+    "title": "Removed FDs are still visible to Lookup and Collect",
+    "problem": "`RemoveFd` only marks entries as deleted, but `BSL_NOTIFY_CTX_LookupFd` and `BSL_NOTIFY_CTX_CollectAllFds` ignore `del`, so removed FDs remain visible and contradict the expected behavior (tests expect NOT_FOUND after removal).",
+    "code": "while (curr != NULL) {\n    if (curr->key == key) {\n        *fd = curr->fd;\n        ...\n        return BSL_SUCCESS;\n    }\n    curr = curr->next;\n}",
+    "fix": "while (curr != NULL) {\n    if (curr->del) {\n        curr = curr->next;\n        continue;\n    }\n    if (curr->key == key) {\n        *fd = curr->fd;\n        if (customData != NULL) {\n            *customData = curr->customData;\n        }\n        return BSL_SUCCESS;\n    }\n    curr = curr->next;\n}"
+  },
+  {
+    "source": "codex",
+    "file": "bsl/async/src/async_notify.c",
+    "line": "218-259",
+    "severity": "medium",
+    "title": "PollFdChanges never consumes the change list",
+    "problem": "The function returns the same events on every call and the list grows unbounded. This contradicts the API comment (consume when arrays are provided) and keeps deleted entries from being finalized unless a coroutine yield occurs.",
+    "code": "*addedCount = addTotal;\n*removedCount = delTotal;\n\nreturn BSL_SUCCESS;",
+    "fix": "*addedCount = addTotal;\n*removedCount = delTotal;\n\nif (addedFds != NULL || removedFds != NULL) {\n    AsyncCleanupFdChanges(ctx);\n}\n\nreturn BSL_SUCCESS;"
+  },
+  {
+    "source": "codex",
+    "file": "bsl/async/src/async_notify.c",
+    "line": "314-319",
+    "severity": "low",
+    "title": "RemoveFd path skips cleanup callback",
+    "problem": "When a newly-added FD is removed before being polled, `NotifyCtxDetachFdNode` frees the node without calling the cleanup callback, leaking resources such as the FD or associated data.",
+    "code": "if (*pp == target) {\n    *pp = target->next;\n    BSL_SAL_FREE(target);\n    return true;\n}",
+    "fix": "if (*pp == target) {\n    if (target->cleanup != NULL) {\n        target->cleanup(ctx, target->fd);\n    }\n    *pp = target->next;\n    BSL_SAL_FREE(target);\n    return true;\n}"
+  }
+]

@@ -1,0 +1,52 @@
+[
+  {
+    "source": "gemini",
+    "file": "bsl/async/src/async_notify.c",
+    "line": "159-163",
+    "severity": "critical",
+    "title": "Use-after-free / Dangling pointer in RegisterFd",
+    "problem": "`newFd` is linked to `ctx->fds` before the `BSL_LIST_AddElement` call. If `BSL_LIST_AddElement` fails, `newFd` is freed, but `ctx->fds` still points to it. This leaves a dangling pointer in the linked list, leading to use-after-free or double-free later.",
+    "code": "newFd->next = ctx->fds;\n    ctx->fds = newFd;\n\n    if (ctx->fdChangeList != NULL) {\n        struct AsyncFdEvent *event = (struct AsyncFdEvent *)BSL_SAL_Calloc(1, sizeof(struct AsyncFdEvent));\n        if (event == NULL) {\n            BSL_SAL_FREE(newFd);\n            BSL_ERR_PUSH_ERROR(BSL_MALLOC_FAIL);\n            return BSL_MALLOC_FAIL;\n        }\n        event->fd = fd;\n        event->type = ASYNC_EVENT_ADD;\n        if (BSL_LIST_AddElement(ctx->fdChangeList, event, BSL_LIST_POS_END) != BSL_SUCCESS) {\n            BSL_SAL_FREE(event);\n            BSL_SAL_FREE(newFd);\n            return BSL_ASYNC_ERR;\n        }\n    }",
+    "fix": "if (ctx->fdChangeList != NULL) {\n        struct AsyncFdEvent *event = (struct AsyncFdEvent *)BSL_SAL_Calloc(1, sizeof(struct AsyncFdEvent));\n        if (event == NULL) {\n            BSL_SAL_FREE(newFd);\n            BSL_ERR_PUSH_ERROR(BSL_MALLOC_FAIL);\n            return BSL_MALLOC_FAIL;\n        }\n        event->fd = fd;\n        event->type = ASYNC_EVENT_ADD;\n        if (BSL_LIST_AddElement(ctx->fdChangeList, event, BSL_LIST_POS_END) != BSL_SUCCESS) {\n            BSL_SAL_FREE(event);\n            BSL_SAL_FREE(newFd);\n            return BSL_ASYNC_ERR;\n        }\n    }\n\n    newFd->next = ctx->fds;\n    ctx->fds = newFd;"
+  },
+  {
+    "source": "gemini",
+    "file": "bsl/async/src/async.c",
+    "line": "491-496",
+    "severity": "critical",
+    "title": "Race condition in BSL_ASYNC_ScheduleNew due to local lock",
+    "problem": "`BSL_ASYNC_ScheduleNew` creates a new lock (`scheduleNewLock`) on every call using `BSL_SAL_ThreadLockNew`. This local lock fails to synchronize multiple threads attempting to initialize the global `g_schedule`, leading to race conditions, memory leaks (multiple allocations of `schedule`), and undefined behavior.",
+    "code": "BSL_SAL_ThreadLockHandle scheduleNewLock = NULL;\n    int32_t ret = BSL_SAL_ThreadLockNew(&scheduleNewLock);\n    if (ret != BSL_SUCCESS) {\n        UnlockAndFree(scheduleNewLock);\n        scheduleNewLock = NULL;\n        return ret;\n    }\n\n    int32_t err = BSL_SUCCESS;\n    struct AsyncSchedule *schedule = NULL;\n    do {\n        BSL_SAL_ThreadWriteLock(scheduleNewLock);\n        schedule = ScheduleAlloc();",
+    "fix": "/* Use a static/global lock or atomic compare-and-swap to protect initialization */\n    static BSL_SAL_ThreadLockHandle g_initLock = NULL;\n    /* (Initialization of g_initLock logic needed, e.g., via pthread_once or atomic) */\n    \n    /* Alternatively, assume single-threaded initialization or use atomic check first */\n    if (ScheduleGet() != NULL) {\n         return BSL_SUCCESS;\n    }\n    \n    /* Proper fix requires a persistent lock, not a local one. \n       If BSL_SAL provides a global lock mechanism, use it. \n       Otherwise: */\n    // ... Implementation depends on BSL_SAL capabilities for global locks ..."
+  },
+  {
+    "source": "gemini",
+    "file": "bsl/async/src/async_notify.c",
+    "line": "218-220",
+    "severity": "high",
+    "title": "Buffer overflow in BSL_NOTIFY_CTX_PollFdChanges",
+    "problem": "The function accepts pointers `addedFds` and `removedFds` but no arguments specifying their buffer sizes. It writes to these arrays based on the number of events in the list (`addTotal`, `delTotal`). If the caller provides a buffer smaller than the number of events, a heap/stack overflow will occur.",
+    "code": "int32_t BSL_NOTIFY_CTX_PollFdChanges(HITLS_NOTIFY_Ctx *ctx, int *addedFds, uint32_t *addedCount,\n    int *removedFds, uint32_t *removedCount)",
+    "fix": "int32_t BSL_NOTIFY_CTX_PollFdChanges(HITLS_NOTIFY_Ctx *ctx, int *addedFds, uint32_t *addedCount,\n    int *removedFds, uint32_t *removedCount)\n{\n    // ...\n    // Treat addedCount and removedCount as IN/OUT or add new size parameters\n    uint32_t maxAdd = (addedCount != NULL) ? *addedCount : 0;\n    uint32_t maxDel = (removedCount != NULL) ? *removedCount : 0;\n    // ...\n    if (addedFds != NULL && addWriteIdx < maxAdd) {\n        addedFds[addWriteIdx++] = event->fd;\n    }\n    // ...\n}"
+  },
+  {
+    "source": "gemini",
+    "file": "bsl/async/src/async.c",
+    "line": "704",
+    "severity": "high",
+    "title": "BSL_ASYNC_Free destroys thread-local context breaking other coroutines",
+    "problem": "`BSL_ASYNC_Free` calls `AsyncCtxFree()`, which frees the thread-local `AsyncCtx` (`g_coroutineCtxKey`). If this is called while other coroutines are active on the same thread (e.g., from within another coroutine), it destroys the shared execution environment/dispatcher, causing subsequent crashes or inability to yield/schedule.",
+    "code": "void BSL_ASYNC_Free(HITLS_Coroutine *job)\n{\n    AsyncCtxFree();\n    if (job == NULL) {\n        return;\n    }\n    AsyncReleaseJob(job);\n}",
+    "fix": "void BSL_ASYNC_Free(HITLS_Coroutine *job)\n{\n    /* Do not free the thread-local context here. \n       It should be freed only when the thread exits or via a specific cleanup API. */\n    // AsyncCtxFree(); \n    if (job == NULL) {\n        return;\n    }\n    AsyncReleaseJob(job);\n}"
+  },
+  {
+    "source": "gemini",
+    "file": "testcode/sdv/testcase/bsl/async/test_suite_sdv_async_notify_ctx.c",
+    "line": "531",
+    "severity": "medium",
+    "title": "Invalid assertion in test UT_BSL_NOTIFY_CTX_POLL_REMOVED_FD_TC001",
+    "problem": "The test expects `removedCount` to be 0, but then checks `removedFds[0] == fd`. If `removedCount` is 0, `removedFds` contains initialized zeros (from line 523), so `removedFds[0]` is 0, which does not equal `fd` (10). This test is logically inconsistent.",
+    "code": "ASSERT_EQ(addedCount, 0);\n    ASSERT_EQ(removedCount, 0);\n    ASSERT_EQ(removedFds[0], fd);",
+    "fix": "ASSERT_EQ(addedCount, 0);\n    ASSERT_EQ(removedCount, 0);\n    /* Since removedCount is 0, checking removedFds[0] is invalid/meaningless unless we expect it to be 0 */\n    // ASSERT_EQ(removedFds[0], fd);"
+  }
+]

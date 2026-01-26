@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Code Review: openHiTLS/openhitls#1004 - GEMINI</title>
+    <style>
+        :root { --critical: #dc2626; --high: #ea580c; --medium: #ca8a04; --low: #65a30d; }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: system-ui, sans-serif; background: #f8fafc; color: #1e293b; padding: 2rem; line-height: 1.6; }
+        .container { max-width: 900px; margin: 0 auto; }
+        h1 { font-size: 1.5rem; margin-bottom: 0.5rem; }
+        .subtitle { color: #64748b; margin-bottom: 2rem; }
+        .section { margin-bottom: 2rem; }
+        .section-title { font-size: 1.1rem; font-weight: 600; padding: 0.5rem 1rem; border-radius: 0.5rem 0.5rem 0 0; color: white; }
+        .section-title.critical { background: var(--critical); }
+        .section-title.high { background: var(--high); }
+        .section-title.medium { background: var(--medium); }
+        .section-title.low { background: var(--low); }
+        .issue { background: white; border: 1px solid #e2e8f0; border-top: none; padding: 1rem; }
+        .issue:last-child { border-radius: 0 0 0.5rem 0.5rem; }
+        .issue-title { font-weight: 600; margin-bottom: 0.25rem; }
+        .issue-location { font-family: monospace; font-size: 0.875rem; color: #64748b; margin-bottom: 0.75rem; }
+        .issue-source { font-size: 0.75rem; color: #94a3b8; margin-top: 0.5rem; }
+        pre { background: #1e293b; color: #e2e8f0; padding: 0.75rem; border-radius: 0.375rem; overflow-x: auto; font-size: 0.875rem; margin: 0.5rem 0; }
+        .problem { margin: 0.75rem 0; }
+        .fix-label { font-weight: 600; margin-top: 0.75rem; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Code Review: openHiTLS/openhitls#1004 - GEMINI</h1>
+        <div class="subtitle"></div>
+<div class="section"><div class="section-title critical">Critical</div>
+<div class="issue">
+                <div class="issue-title">Use-after-free / Dangling pointer in RegisterFd</div>
+                <div class="issue-location">bsl/async/src/async_notify.c:159-163</div>
+                <pre>newFd-&gt;next = ctx-&gt;fds;
+    ctx-&gt;fds = newFd;
+
+    if (ctx-&gt;fdChangeList != NULL) {
+        struct AsyncFdEvent *event = (struct AsyncFdEvent *)BSL_SAL_Calloc(1, sizeof(struct AsyncFdEvent));
+        if (event == NULL) {
+            BSL_SAL_FREE(newFd);
+            BSL_ERR_PUSH_ERROR(BSL_MALLOC_FAIL);
+            return BSL_MALLOC_FAIL;
+        }
+        event-&gt;fd = fd;
+        event-&gt;type = ASYNC_EVENT_ADD;
+        if (BSL_LIST_AddElement(ctx-&gt;fdChangeList, event, BSL_LIST_POS_END) != BSL_SUCCESS) {
+            BSL_SAL_FREE(event);
+            BSL_SAL_FREE(newFd);
+            return BSL_ASYNC_ERR;
+        }
+    }</pre>
+                <div class="problem"><strong>Issue:</strong> `newFd` is linked to `ctx->fds` before the `BSL_LIST_AddElement` call. If `BSL_LIST_AddElement` fails, `newFd` is freed, but `ctx->fds` still points to it. This leaves a dangling pointer in the linked list, leading to use-after-free or double-free later.</div>
+                <div class="fix-label">Fix:</div><pre>if (ctx-&gt;fdChangeList != NULL) {
+        struct AsyncFdEvent *event = (struct AsyncFdEvent *)BSL_SAL_Calloc(1, sizeof(struct AsyncFdEvent));
+        if (event == NULL) {
+            BSL_SAL_FREE(newFd);
+            BSL_ERR_PUSH_ERROR(BSL_MALLOC_FAIL);
+            return BSL_MALLOC_FAIL;
+        }
+        event-&gt;fd = fd;
+        event-&gt;type = ASYNC_EVENT_ADD;
+        if (BSL_LIST_AddElement(ctx-&gt;fdChangeList, event, BSL_LIST_POS_END) != BSL_SUCCESS) {
+            BSL_SAL_FREE(event);
+            BSL_SAL_FREE(newFd);
+            return BSL_ASYNC_ERR;
+        }
+    }
+
+    newFd-&gt;next = ctx-&gt;fds;
+    ctx-&gt;fds = newFd;</pre>
+                <div class="issue-source">Reviewer: gemini</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">Race condition in BSL_ASYNC_ScheduleNew due to local lock</div>
+                <div class="issue-location">bsl/async/src/async.c:491-496</div>
+                <pre>BSL_SAL_ThreadLockHandle scheduleNewLock = NULL;
+    int32_t ret = BSL_SAL_ThreadLockNew(&amp;scheduleNewLock);
+    if (ret != BSL_SUCCESS) {
+        UnlockAndFree(scheduleNewLock);
+        scheduleNewLock = NULL;
+        return ret;
+    }
+
+    int32_t err = BSL_SUCCESS;
+    struct AsyncSchedule *schedule = NULL;
+    do {
+        BSL_SAL_ThreadWriteLock(scheduleNewLock);
+        schedule = ScheduleAlloc();</pre>
+                <div class="problem"><strong>Issue:</strong> `BSL_ASYNC_ScheduleNew` creates a new lock (`scheduleNewLock`) on every call using `BSL_SAL_ThreadLockNew`. This local lock fails to synchronize multiple threads attempting to initialize the global `g_schedule`, leading to race conditions, memory leaks (multiple allocations of `schedule`), and undefined behavior.</div>
+                <div class="fix-label">Fix:</div><pre>/* Use a static/global lock or atomic compare-and-swap to protect initialization */
+    static BSL_SAL_ThreadLockHandle g_initLock = NULL;
+    /* (Initialization of g_initLock logic needed, e.g., via pthread_once or atomic) */
+    
+    /* Alternatively, assume single-threaded initialization or use atomic check first */
+    if (ScheduleGet() != NULL) {
+         return BSL_SUCCESS;
+    }
+    
+    /* Proper fix requires a persistent lock, not a local one. 
+       If BSL_SAL provides a global lock mechanism, use it. 
+       Otherwise: */
+    // ... Implementation depends on BSL_SAL capabilities for global locks ...</pre>
+                <div class="issue-source">Reviewer: gemini</div>
+            </div>
+</div>
+<div class="section"><div class="section-title high">High</div>
+<div class="issue">
+                <div class="issue-title">Buffer overflow in BSL_NOTIFY_CTX_PollFdChanges</div>
+                <div class="issue-location">bsl/async/src/async_notify.c:218-220</div>
+                <pre>int32_t BSL_NOTIFY_CTX_PollFdChanges(HITLS_NOTIFY_Ctx *ctx, int *addedFds, uint32_t *addedCount,
+    int *removedFds, uint32_t *removedCount)</pre>
+                <div class="problem"><strong>Issue:</strong> The function accepts pointers `addedFds` and `removedFds` but no arguments specifying their buffer sizes. It writes to these arrays based on the number of events in the list (`addTotal`, `delTotal`). If the caller provides a buffer smaller than the number of events, a heap/stack overflow will occur.</div>
+                <div class="fix-label">Fix:</div><pre>int32_t BSL_NOTIFY_CTX_PollFdChanges(HITLS_NOTIFY_Ctx *ctx, int *addedFds, uint32_t *addedCount,
+    int *removedFds, uint32_t *removedCount)
+{
+    // ...
+    // Treat addedCount and removedCount as IN/OUT or add new size parameters
+    uint32_t maxAdd = (addedCount != NULL) ? *addedCount : 0;
+    uint32_t maxDel = (removedCount != NULL) ? *removedCount : 0;
+    // ...
+    if (addedFds != NULL &amp;&amp; addWriteIdx &lt; maxAdd) {
+        addedFds[addWriteIdx++] = event-&gt;fd;
+    }
+    // ...
+}</pre>
+                <div class="issue-source">Reviewer: gemini</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">BSL_ASYNC_Free destroys thread-local context breaking other coroutines</div>
+                <div class="issue-location">bsl/async/src/async.c:704</div>
+                <pre>void BSL_ASYNC_Free(HITLS_Coroutine *job)
+{
+    AsyncCtxFree();
+    if (job == NULL) {
+        return;
+    }
+    AsyncReleaseJob(job);
+}</pre>
+                <div class="problem"><strong>Issue:</strong> `BSL_ASYNC_Free` calls `AsyncCtxFree()`, which frees the thread-local `AsyncCtx` (`g_coroutineCtxKey`). If this is called while other coroutines are active on the same thread (e.g., from within another coroutine), it destroys the shared execution environment/dispatcher, causing subsequent crashes or inability to yield/schedule.</div>
+                <div class="fix-label">Fix:</div><pre>void BSL_ASYNC_Free(HITLS_Coroutine *job)
+{
+    /* Do not free the thread-local context here. 
+       It should be freed only when the thread exits or via a specific cleanup API. */
+    // AsyncCtxFree(); 
+    if (job == NULL) {
+        return;
+    }
+    AsyncReleaseJob(job);
+}</pre>
+                <div class="issue-source">Reviewer: gemini</div>
+            </div>
+</div>
+<div class="section"><div class="section-title medium">Medium</div>
+<div class="issue">
+                <div class="issue-title">Invalid assertion in test UT_BSL_NOTIFY_CTX_POLL_REMOVED_FD_TC001</div>
+                <div class="issue-location">testcode/sdv/testcase/bsl/async/test_suite_sdv_async_notify_ctx.c:531</div>
+                <pre>ASSERT_EQ(addedCount, 0);
+    ASSERT_EQ(removedCount, 0);
+    ASSERT_EQ(removedFds[0], fd);</pre>
+                <div class="problem"><strong>Issue:</strong> The test expects `removedCount` to be 0, but then checks `removedFds[0] == fd`. If `removedCount` is 0, `removedFds` contains initialized zeros (from line 523), so `removedFds[0]` is 0, which does not equal `fd` (10). This test is logically inconsistent.</div>
+                <div class="fix-label">Fix:</div><pre>ASSERT_EQ(addedCount, 0);
+    ASSERT_EQ(removedCount, 0);
+    /* Since removedCount is 0, checking removedFds[0] is invalid/meaningless unless we expect it to be 0 */
+    // ASSERT_EQ(removedFds[0], fd);</pre>
+                <div class="issue-source">Reviewer: gemini</div>
+            </div>
+</div>
+</div></body></html>

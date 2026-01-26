@@ -1,0 +1,154 @@
+{
+  "context": {
+    "owner": "openHiTLS",
+    "repo": "openhitls",
+    "pr_id": "1004",
+    "title": "",
+    "reviewers": [
+      "claude",
+      "gemini",
+      "codex"
+    ]
+  },
+  "statistics": {
+    "total": 12,
+    "critical": 1,
+    "high": 3,
+    "medium": 5,
+    "low": 3
+  },
+  "issues": [
+    {
+      "file": "bsl/async/src/async_notify.c",
+      "line": "146-162",
+      "severity": "critical",
+      "title": "Use-after-free in RegisterFd when event allocation fails",
+      "reviewers": "CLAUDE, GEMINI, CODEX",
+      "confidence": "trusted",
+      "problem": "The newFd node is linked into ctx->fds (lines 146-147) before attempting to create and add the change event. If event allocation (line 150) or BSL_LIST_AddElement (line 158) fails, newFd is freed (lines 152, 160) but ctx->fds still points to the freed memory. This leaves a dangling pointer in the linked list, causing use-after-free or corruption on subsequent list traversals.",
+      "code": "newFd->next = ctx->fds;\nctx->fds = newFd;\n\nif (ctx->fdChangeList != NULL) {\n    struct AsyncFdEvent *event = (struct AsyncFdEvent *)BSL_SAL_Calloc(1, sizeof(struct AsyncFdEvent));\n    if (event == NULL) {\n        BSL_SAL_FREE(newFd);  // ctx->fds still points to freed newFd\n        BSL_ERR_PUSH_ERROR(BSL_MALLOC_FAIL);\n        return BSL_MALLOC_FAIL;\n    }\n    event->fd = fd;\n    event->type = ASYNC_EVENT_ADD;\n    if (BSL_LIST_AddElement(ctx->fdChangeList, event, BSL_LIST_POS_END) != BSL_SUCCESS) {\n        BSL_SAL_FREE(event);\n        BSL_SAL_FREE(newFd);  // ctx->fds still points to freed newFd\n        return BSL_ASYNC_ERR;\n    }\n}",
+      "fix": "if (ctx->fdChangeList != NULL) {\n    struct AsyncFdEvent *event = (struct AsyncFdEvent *)BSL_SAL_Calloc(1, sizeof(struct AsyncFdEvent));\n    if (event == NULL) {\n        BSL_SAL_FREE(newFd);\n        BSL_ERR_PUSH_ERROR(BSL_MALLOC_FAIL);\n        return BSL_MALLOC_FAIL;\n    }\n    event->fd = fd;\n    event->type = ASYNC_EVENT_ADD;\n    if (BSL_LIST_AddElement(ctx->fdChangeList, event, BSL_LIST_POS_END) != BSL_SUCCESS) {\n        BSL_SAL_FREE(event);\n        BSL_SAL_FREE(newFd);\n        return BSL_ASYNC_ERR;\n    }\n}\n\n// Only insert into list after all allocations succeed\nnewFd->next = ctx->fds;\nctx->fds = newFd;"
+    },
+    {
+      "file": "bsl/async/src/async.c",
+      "line": "483-489",
+      "severity": "high",
+      "title": "Race condition in BSL_ASYNC_ScheduleNew due to local lock",
+      "reviewers": "CLAUDE, GEMINI",
+      "confidence": "trusted",
+      "problem": "BSL_ASYNC_ScheduleNew creates a new local lock on each call (line 484), then acquires it (line 494). Since each thread creates its own local lock instance, multiple threads calling this function concurrently will each hold different locks, providing no synchronization. This can lead to multiple scheduler initializations, memory leaks, and race conditions on the global g_schedule. Additionally, if BSL_SAL_ThreadLockNew fails, it calls UnlockAndFree on an undefined lock handle.",
+      "code": "BSL_SAL_ThreadLockHandle scheduleNewLock = NULL;\nint32_t ret = BSL_SAL_ThreadLockNew(&scheduleNewLock);\nif (ret != BSL_SUCCESS) {\n    UnlockAndFree(scheduleNewLock);\n    scheduleNewLock = NULL;\n    return ret;\n}",
+      "fix": "// Use a static lock for proper synchronization across threads\nstatic BSL_SAL_ThreadLockHandle g_scheduleInitLock = NULL;\nstatic bool g_lockInitialized = false;\n\nint32_t BSL_ASYNC_ScheduleNew(const struct ScheduleAttr *scheAttr)\n{\n    if (ScheduleGet() != NULL) {\n        return BSL_SUCCESS;\n    }\n\n    // Initialize the global lock once (could use pthread_once or similar)\n    if (!g_lockInitialized) {\n        int32_t ret = BSL_SAL_ThreadLockNew(&g_scheduleInitLock);\n        if (ret != BSL_SUCCESS) {\n            return ret;\n        }\n        g_lockInitialized = true;\n    }\n\n    BSL_SAL_ThreadWriteLock(g_scheduleInitLock);\n    \n    // Re-check after acquiring lock\n    if (ScheduleGet() != NULL) {\n        BSL_SAL_ThreadUnlock(g_scheduleInitLock);\n        return BSL_SUCCESS;\n    }\n    \n    // ... rest of initialization"
+    },
+    {
+      "file": "bsl/async/src/async.c",
+      "line": "658",
+      "severity": "high",
+      "title": "Struct copy overwrites caller's job pointer contents",
+      "reviewers": "CLAUDE",
+      "confidence": "likely",
+      "problem": "In BSL_ASYNC_Start, when status is ASYNC_JOB_PAUSING (line 655), the code performs `*job = *ctx->currjob` which copies the entire Coroutine struct by value to the caller's pointer location. This overwrites the caller's job struct. If the caller later calls BSL_ASYNC_Free on the job, it may double-free resources or corrupt memory since both the original and the copy have pointers to the same resources (stack, args, notifyctx).",
+      "code": "if (status == ASYNC_JOB_PAUSING) {\n    BSL_LOG_BINLOG_FIXLEN(BINLOG_ID05093, BSL_LOG_LEVEL_DEBUG, BSL_LOG_BINLOG_TYPE_RUN,\n                          \"async start job enter the [pausing] branch.\", 0, 0, 0, 0);\n    *job = *ctx->currjob;\n    ctx->currjob->status = ASYNC_JOB_PAUSED;\n    ctx->currjob = NULL;\n    return BSL_ASYNC_PAUSE;\n}",
+      "fix": "if (status == ASYNC_JOB_PAUSING) {\n    BSL_LOG_BINLOG_FIXLEN(BINLOG_ID05093, BSL_LOG_LEVEL_DEBUG, BSL_LOG_BINLOG_TYPE_RUN,\n                          \"async start job enter the [pausing] branch.\", 0, 0, 0, 0);\n    ctx->currjob->status = ASYNC_JOB_PAUSED;\n    ctx->currjob = NULL;\n    return BSL_ASYNC_PAUSE;\n}"
+    },
+    {
+      "file": "bsl/async/src/async.c",
+      "line": "704-706",
+      "severity": "high",
+      "title": "BSL_ASYNC_Free destroys thread-local context breaking other coroutines",
+      "reviewers": "GEMINI",
+      "confidence": "likely",
+      "problem": "BSL_ASYNC_Free unconditionally calls AsyncCtxFree(), which frees the thread-local AsyncCtx (g_coroutineCtxKey). If called while other coroutines are active on the same thread, this destroys the shared dispatcher context, causing subsequent coroutine switches to crash or fail. The thread-local context should only be freed when the thread exits or via explicit cleanup.",
+      "code": "void BSL_ASYNC_Free(HITLS_Coroutine *job)\n{\n    AsyncCtxFree();\n    if (job == NULL) {\n        return;\n    }\n    AsyncReleaseJob(job);\n}",
+      "fix": "void BSL_ASYNC_Free(HITLS_Coroutine *job)\n{\n    // Do not free the thread-local context here.\n    // It should be freed only when the thread exits or via explicit cleanup API.\n    // AsyncCtxFree();\n    if (job == NULL) {\n        return;\n    }\n    AsyncReleaseJob(job);\n}"
+    },
+    {
+      "file": "bsl/async/src/async.c",
+      "line": "637-670",
+      "severity": "medium",
+      "title": "Missing status handling causes infinite loop",
+      "reviewers": "CLAUDE, CODEX",
+      "confidence": "trusted",
+      "problem": "The while(true) loop in BSL_ASYNC_Start handles ASYNC_JOB_STOPPING, ASYNC_JOB_READY, ASYNC_JOB_PAUSING, and ASYNC_JOB_PAUSED states. If status is ASYNC_JOB_RUNNING or any unexpected value, no branch is taken, the loop never exits, and the code spins forever. The unreachable code after the loop (lines 672-674) also indicates this logic error.",
+      "code": "while (true) {\n    int status = ctx->currjob->status;\n    if (status == ASYNC_JOB_STOPPING) { ... return BSL_ASYNC_FINISH; }\n    if (status == ASYNC_JOB_READY) { ... continue; }\n    if (status == ASYNC_JOB_PAUSING) { ... return BSL_ASYNC_PAUSE; }\n    if (status == ASYNC_JOB_PAUSED) { ... continue; }\n}\n// Unreachable code\nAsyncReleaseJob(ctx->currjob);\nctx->currjob = NULL;\nreturn BSL_ASYNC_ERR;",
+      "fix": "while (true) {\n    int status = ctx->currjob->status;\n    if (status == ASYNC_JOB_STOPPING) {\n        *ret = ctx->currjob->coError;\n        ctx->currjob = NULL;\n        return BSL_ASYNC_FINISH;\n    }\n    if (status == ASYNC_JOB_READY) {\n        ctx->currjob->status = ASYNC_JOB_RUNNING;\n        AsyncSwapcontext(&ctx->dispatcher, &ctx->currjob->ctx);\n        continue;\n    }\n    if (status == ASYNC_JOB_PAUSING) {\n        ctx->currjob->status = ASYNC_JOB_PAUSED;\n        ctx->currjob = NULL;\n        return BSL_ASYNC_PAUSE;\n    }\n    if (status == ASYNC_JOB_PAUSED) {\n        ctx->currjob = job;\n        AsyncSwapcontext(&ctx->dispatcher, &ctx->currjob->ctx);\n        continue;\n    }\n    // Handle unexpected status - prevents infinite loop\n    BSL_ERR_PUSH_ERROR(BSL_ASYNC_ERR);\n    AsyncReleaseJob(ctx->currjob);\n    ctx->currjob = NULL;\n    return BSL_ASYNC_ERR;\n}"
+    },
+    {
+      "file": "bsl/async/src/async.c",
+      "line": "108-122",
+      "severity": "medium",
+      "title": "Coroutine ID generation never updates the shared counter",
+      "reviewers": "CODEX",
+      "confidence": "likely",
+      "problem": "CoroutineNewid() creates a local BSL_SAL_RefCount struct initialized with a copy of ScheduleGet()->idGen (line 113-115). The atomic increment operates on this local copy, not the actual idGen field in the scheduler. This means the shared counter is never updated, and all coroutines will get duplicate IDs. Additionally, this is not thread-safe.",
+      "code": "static int32_t CoroutineNewid(void)\n{\n    int32_t ref = 0;\n    int32_t ret = 0;\n    BSL_SAL_RefCount threadStartNum = {\n        .count = ScheduleGet()->idGen\n    };\n    ret = BSL_SAL_AtomicUpReferences(&threadStartNum, &ref);\n    if (ret != BSL_SUCCESS) {\n        BSL_LOG_BINLOG_FIXLEN(BINLOG_ID05101, BSL_LOG_LEVEL_ERR, BSL_LOG_BINLOG_TYPE_RUN,\n                              \"croutine new id in atomic mode faile.\", 0, 0, 0, 0);\n    }\n    return ref;\n}",
+      "fix": "// In async_local.h, change idGen to BSL_SAL_RefCount type:\nstruct AsyncSchedule {\n    int32_t state;\n    BSL_SAL_RefCount idGen;  // Changed from int32_t\n    // ...\n};\n\n// In async.c, update ScheduleAlloc:\nstatic struct AsyncSchedule *ScheduleAlloc(void)\n{\n    struct AsyncSchedule *schedule = (struct AsyncSchedule *)BSL_SAL_Calloc(1, sizeof(struct AsyncSchedule));\n    if (schedule == NULL) { ... }\n    (void)BSL_SAL_ReferencesInit(&schedule->idGen);\n    schedule->state = SCHEDULE_INIT;\n    return schedule;\n}\n\n// Fix CoroutineNewid to use the actual scheduler's idGen:\nstatic int32_t CoroutineNewid(void)\n{\n    int32_t ref = 0;\n    struct AsyncSchedule *schedule = ScheduleGet();\n    if (schedule == NULL) {\n        return 0;\n    }\n    (void)BSL_SAL_AtomicUpReferences(&schedule->idGen, &ref);\n    return ref;\n}"
+    },
+    {
+      "file": "bsl/async/src/async.c",
+      "line": "555",
+      "severity": "medium",
+      "title": "Swapcontext failure check is inverted",
+      "reviewers": "CODEX",
+      "confidence": "likely",
+      "problem": "In AsyncStartRunFunc, AsyncSwapcontext returns 0 (BSL_SUCCESS) on success. However, the code logs an error when the return value is 0 (success case) and ignores actual failures (non-zero returns). This means real swap failures go unhandled.",
+      "code": "job->status = ASYNC_JOB_STOPPING;\nif (AsyncSwapcontext(&job->ctx, &ctx->dispatcher) == 0) {\n    BSL_ERR_PUSH_ERROR(BSL_ASYNC_UCONTEXT_SWAP_FAIL);\n    BSL_LOG_BINLOG_FIXLEN(BINLOG_ID05103, BSL_LOG_LEVEL_ERR, BSL_LOG_BINLOG_TYPE_RUN,\n                          \"async start run func swap context fail.\", 0, 0, 0, 0);\n}",
+      "fix": "job->status = ASYNC_JOB_STOPPING;\nint32_t swapRet = AsyncSwapcontext(&job->ctx, &ctx->dispatcher);\nif (swapRet != 0) {\n    BSL_ERR_PUSH_ERROR(BSL_ASYNC_UCONTEXT_SWAP_FAIL);\n    BSL_LOG_BINLOG_FIXLEN(BINLOG_ID05103, BSL_LOG_LEVEL_ERR, BSL_LOG_BINLOG_TYPE_RUN,\n                          \"async start run func swap context fail.\", 0, 0, 0, 0);\n}"
+    },
+    {
+      "file": "bsl/async/src/async_notify.c",
+      "line": "174-184",
+      "severity": "medium",
+      "title": "LookupFd and CollectAllFds return deleted FDs",
+      "reviewers": "CLAUDE, CODEX",
+      "confidence": "trusted",
+      "problem": "BSL_NOTIFY_CTX_LookupFd does not check the `del` flag when searching for FDs by key. It may return an FD that has been marked for deletion (curr->del == true), which leads to the caller using a stale/invalid file descriptor. Similarly, BSL_NOTIFY_CTX_CollectAllFds counts and copies all FDs including deleted ones.",
+      "code": "HITLS_ASYNC_NotifyFd *curr = ctx->fds;\nwhile (curr != NULL) {\n    if (curr->key == key) {  // No check for curr->del\n        *fd = curr->fd;\n        if (customData != NULL) {\n            *customData = curr->customData;\n        }\n        return BSL_SUCCESS;\n    }\n    curr = curr->next;\n}",
+      "fix": "HITLS_ASYNC_NotifyFd *curr = ctx->fds;\nwhile (curr != NULL) {\n    if (curr->key == key && !curr->del) {\n        *fd = curr->fd;\n        if (customData != NULL) {\n            *customData = curr->customData;\n        }\n        return BSL_SUCCESS;\n    }\n    curr = curr->next;\n}"
+    },
+    {
+      "file": "bsl/async/src/async_notify.c",
+      "line": "218-260",
+      "severity": "medium",
+      "title": "PollFdChanges never consumes the change list",
+      "reviewers": "CODEX",
+      "confidence": "likely",
+      "problem": "BSL_NOTIFY_CTX_PollFdChanges iterates through fdChangeList and reports added/removed FDs, but never removes events from the list. This means the same events are returned on every poll call, and the list grows unbounded. The function should consume (clear) the events after reporting them, similar to how AsyncCleanupFdChanges works during yield.",
+      "code": "*addedCount = addTotal;\n*removedCount = delTotal;\n\nreturn BSL_SUCCESS;\n// Missing: cleanup of consumed events",
+      "fix": "*addedCount = addTotal;\n*removedCount = delTotal;\n\n// Consume the change list after reporting\nif (addedFds != NULL || removedFds != NULL) {\n    AsyncCleanupFdChanges(ctx);\n}\n\nreturn BSL_SUCCESS;"
+    },
+    {
+      "file": "bsl/async/include/async_local.h",
+      "line": "110-118",
+      "severity": "low",
+      "title": "Static variable g_pageSize declared in header creates per-TU copies",
+      "reviewers": "CLAUDE",
+      "confidence": "likely",
+      "problem": "The g_pageSize static variable is declared with file-scope static storage in a header file. When this header is included in multiple translation units, each unit gets its own separate copy of g_pageSize. This is wasteful and could lead to redundant SAL_GetPageSize calls. Additionally, GetPageSize() has a race condition where multiple threads could simultaneously see g_pageSize as 0.",
+      "code": "static size_t g_pageSize;\n\nstatic inline size_t GetPageSize(void)\n{\n    if (g_pageSize == 0) {\n        g_pageSize = (size_t)SAL_GetPageSize();\n    }\n    return g_pageSize;\n}",
+      "fix": "// In async_local.h - declare extern\nextern size_t g_pageSize;\n\nstatic inline size_t GetPageSize(void)\n{\n    if (g_pageSize == 0) {\n        g_pageSize = (size_t)SAL_GetPageSize();\n    }\n    return g_pageSize;\n}\n\n// In async.c - define the variable\nsize_t g_pageSize = 0;"
+    },
+    {
+      "file": "bsl/async/src/async_notify.c",
+      "line": "314-319",
+      "severity": "low",
+      "title": "RemoveFd path skips cleanup callback for newly-added FDs",
+      "reviewers": "CODEX",
+      "confidence": "likely",
+      "problem": "When a newly-added FD is removed before being polled, NotifyCtxDetachFdNode is called which frees the node directly without invoking the cleanup callback. This could leak resources (e.g., file descriptors) that the cleanup callback was meant to release.",
+      "code": "static bool NotifyCtxDetachFdNode(HITLS_NOTIFY_Ctx *ctx, HITLS_ASYNC_NotifyFd *target)\n{\n    // ...\n    if (*pp == target) {\n        *pp = target->next;\n        BSL_SAL_FREE(target);  // Cleanup callback not called\n        return true;\n    }\n    // ...\n}",
+      "fix": "static bool NotifyCtxDetachFdNode(HITLS_NOTIFY_Ctx *ctx, HITLS_ASYNC_NotifyFd *target)\n{\n    if (ctx == NULL || target == NULL) {\n        return false;\n    }\n\n    HITLS_ASYNC_NotifyFd **pp = &ctx->fds;\n    while (*pp != NULL) {\n        if (*pp == target) {\n            if (target->cleanup != NULL) {\n                target->cleanup(ctx, target->fd);\n            }\n            *pp = target->next;\n            BSL_SAL_FREE(target);\n            return true;\n        }\n        pp = &(*pp)->next;\n    }\n\n    return false;\n}"
+    },
+    {
+      "file": "testcode/sdv/testcase/bsl/async/test_suite_sdv_async_notify_ctx.c",
+      "line": "530-532",
+      "severity": "low",
+      "title": "Test assertion is logically inconsistent",
+      "reviewers": "GEMINI",
+      "confidence": "likely",
+      "problem": "The test UT_BSL_NOTIFY_CTX_POLL_REMOVED_FD_TC001 expects removedCount to be 0 (line 531), but then asserts that removedFds[0] equals fd (line 532). If removedCount is 0, checking removedFds[0] is meaningless - the array was zero-initialized, so removedFds[0] is 0, not fd (10). This test is logically inconsistent.",
+      "code": "ASSERT_EQ(addedCount, 0);\nASSERT_EQ(removedCount, 0);\nASSERT_EQ(removedFds[0], fd);  // fd is 10, but removedFds[0] is 0",
+      "fix": "ASSERT_EQ(addedCount, 0);\n// Either expect removedCount to be 1 and check removedFds[0]:\nASSERT_EQ(removedCount, 1);\nASSERT_EQ(removedFds[0], fd);\n// Or remove the removedFds[0] check if removedCount should be 0"
+    }
+  ]
+}
