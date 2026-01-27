@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Code Review: openHiTLS/openhitls#874 - GEMINI</title>
+    <style>
+        :root { --critical: #dc2626; --high: #ea580c; --medium: #ca8a04; --low: #65a30d; }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: system-ui, sans-serif; background: #f8fafc; color: #1e293b; padding: 2rem; line-height: 1.6; }
+        .container { max-width: 900px; margin: 0 auto; }
+        h1 { font-size: 1.5rem; margin-bottom: 0.5rem; }
+        .subtitle { color: #64748b; margin-bottom: 2rem; }
+        .section { margin-bottom: 2rem; }
+        .section-title { font-size: 1.1rem; font-weight: 600; padding: 0.5rem 1rem; border-radius: 0.5rem 0.5rem 0 0; color: white; }
+        .section-title.critical { background: var(--critical); }
+        .section-title.high { background: var(--high); }
+        .section-title.medium { background: var(--medium); }
+        .section-title.low { background: var(--low); }
+        .issue { background: white; border: 1px solid #e2e8f0; border-top: none; padding: 1rem; }
+        .issue:last-child { border-radius: 0 0 0.5rem 0.5rem; }
+        .issue-title { font-weight: 600; margin-bottom: 0.25rem; }
+        .issue-location { font-family: monospace; font-size: 0.875rem; color: #64748b; margin-bottom: 0.75rem; }
+        .issue-source { font-size: 0.75rem; color: #94a3b8; margin-top: 0.5rem; }
+        pre { background: #1e293b; color: #e2e8f0; padding: 0.75rem; border-radius: 0.375rem; overflow-x: auto; font-size: 0.875rem; margin: 0.5rem 0; }
+        .problem { margin: 0.75rem 0; }
+        .fix-label { font-weight: 600; margin-top: 0.75rem; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Code Review: openHiTLS/openhitls#874 - GEMINI</h1>
+        <div class="subtitle"></div>
+<div class="section"><div class="section-title high">High</div>
+<div class="issue">
+                <div class="issue-title">Memory leak when setting algorithm parameters multiple times</div>
+                <div class="issue-location">crypto/composite/src/composite.c:247-248</div>
+                <pre>ctx-&gt;pqcMethod = pqcMethod;
+    ctx-&gt;tradMethod = tradMethod;
+    ctx-&gt;pqcCtx = pqcMethod-&gt;newCtx();
+    RETURN_RET_IF((ctx-&gt;pqcCtx == NULL), CRYPT_MEM_ALLOC_FAIL);
+    ctx-&gt;tradCtx = tradMethod-&gt;newCtx();</pre>
+                <div class="problem"><strong>Issue:</strong> The function `CRYPT_CompositeSetAlgInfo` allocates new `pqcCtx` and `tradCtx` without checking if they are already allocated. If `CRYPT_COMPOSITE_Ctrl` with `CRYPT_CTRL_SET_PARA_BY_ID` is called multiple times on the same context, the previously allocated contexts are leaked.</div>
+                <div class="fix-label">Fix:</div><pre>ctx-&gt;pqcMethod = pqcMethod;
+    ctx-&gt;tradMethod = tradMethod;
+    if (ctx-&gt;pqcCtx != NULL) {
+        ctx-&gt;pqcMethod-&gt;freeCtx(ctx-&gt;pqcCtx);
+        ctx-&gt;pqcCtx = NULL;
+    }
+    ctx-&gt;pqcCtx = pqcMethod-&gt;newCtx();
+    RETURN_RET_IF((ctx-&gt;pqcCtx == NULL), CRYPT_MEM_ALLOC_FAIL);
+    if (ctx-&gt;tradCtx != NULL) {
+        ctx-&gt;tradMethod-&gt;freeCtx(ctx-&gt;tradCtx);
+        ctx-&gt;tradCtx = NULL;
+    }
+    ctx-&gt;tradCtx = tradMethod-&gt;newCtx();</pre>
+                <div class="issue-source">Reviewer: gemini</div>
+            </div>
+</div>
+<div class="section"><div class="section-title medium">Medium</div>
+<div class="issue">
+                <div class="issue-title">Inconsistent state on memory allocation failure</div>
+                <div class="issue-location">crypto/composite/src/composite.c:261</div>
+                <pre>if (ctx-&gt;tradCtx == NULL) {
+        pqcMethod-&gt;freeCtx(ctx-&gt;pqcCtx);
+        ctx-&gt;pqcCtx = NULL;
+        return CRYPT_MEM_ALLOC_FAIL;
+    }</pre>
+                <div class="problem"><strong>Issue:</strong> In `CRYPT_CompositeSetAlgInfo`, if `tradMethod->newCtx()` fails, the function returns `CRYPT_MEM_ALLOC_FAIL` but leaves `ctx->info` set. This puts the context in a partially initialized state (info set, but contexts null), which might lead to confusing behavior or crashes if other functions assume `info != NULL` implies valid contexts. The `ERR` label handles this by setting `info = NULL`, but this return path does not jump to `ERR`.</div>
+                <div class="fix-label">Fix:</div><pre>if (ctx-&gt;tradCtx == NULL) {
+        pqcMethod-&gt;freeCtx(ctx-&gt;pqcCtx);
+        ctx-&gt;pqcCtx = NULL;
+        ctx-&gt;info = NULL;
+        return CRYPT_MEM_ALLOC_FAIL;
+    }</pre>
+                <div class="issue-source">Reviewer: gemini</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">Potential memory leak in ASN.1 decoding for RSA Private Key</div>
+                <div class="issue-location">crypto/composite/src/composite_encdec.c:462-475</div>
+                <pre>RETURN_RET_IF_ERR(
+        BSL_ASN1_DecodeTemplate(&amp;templ, NULL, &amp;encode-&gt;data, &amp;encode-&gt;dataLen, asn1, CRYPT_RSA_PRV_OTHER_PRIME_IDX + 1),
+        ret);
+    // ... use asn1 ...
+    RETURN_RET_IF_ERR(ctx-&gt;tradMethod-&gt;setPrv(ctx-&gt;tradCtx, &amp;rsaParam), ret);
+    RETURN_RET_IF_ERR(ctx-&gt;tradMethod-&gt;setPub(ctx-&gt;tradCtx, &amp;rsaParam), ret);
+    RETURN_RET_IF_ERR(CRYPT_CompositeSetRsaPadding(ctx), ret);
+    return CRYPT_SUCCESS;</pre>
+                <div class="problem"><strong>Issue:</strong> The function `CRYPT_CompositeSetRsaPrvKey` uses `BSL_ASN1_DecodeTemplate` to populate `asn1` buffers (specifically for INTEGER types like D, N, P, Q...). If `BSL_ASN1_DecodeTemplate` allocates memory for these fields (which is common for normalizing Integers in ASN.1 decoders), that memory is never freed. The `asn1` array is on the stack, but the `buff` pointers within it might point to allocated memory. This pattern is repeated in `CRYPT_CompositeSetRsaPubKey` and `CRYPT_CompositeSetEcdsaPrvKey`.</div>
+                <div class="fix-label">Fix:</div><pre>// Verify BSL_ASN1_DecodeTemplate behavior. If it allocates, add cleanup:
+    // After usage:
+    for (int i = 0; i &lt;= CRYPT_RSA_PRV_OTHER_PRIME_IDX; i++) {
+        if (asn1[i].buff != NULL &amp;&amp; asn1[i].buff &lt; encode-&gt;data || asn1[i].buff &gt;= encode-&gt;data + encode-&gt;dataLen) {
+             // Logic assumes if not pointing into source, it was allocated. 
+             // Ideally use a BSL_ASN1_FreeTemplate or similar if available, or BSL_SAL_Free.
+             BSL_SAL_Free(asn1[i].buff);
+        }
+    }</pre>
+                <div class="issue-source">Reviewer: gemini</div>
+            </div>
+</div>
+<div class="section"><div class="section-title low">Low</div>
+<div class="issue">
+                <div class="issue-title">Hardcoded salt length logic in RSA PSS padding</div>
+                <div class="issue-location">crypto/composite/src/composite_encdec.c:153-157</div>
+                <pre>int32_t mdId = ctx-&gt;info-&gt;tradHashId;
+        int32_t mgfId = ctx-&gt;info-&gt;tradHashId;
+        int32_t saltLen = ctx-&gt;info-&gt;bits == 4096 ? 48 : 32;</pre>
+                <div class="problem"><strong>Issue:</strong> The salt length selection logic is hardcoded based on the bit length of the RSA key (`bits == 4096 ? 48 : 32`). This implicitly assumes that 4096-bit keys always use SHA-384 (48 bytes) and other keys use SHA-256 (32 bytes). While this matches the current `g_composite_info` table, it is brittle and may break if new RSA-PSS combinations are added (e.g., RSA-3072 with SHA-384).</div>
+                <div class="fix-label">Fix:</div><pre>int32_t mdId = ctx-&gt;info-&gt;tradHashId;
+        int32_t mgfId = ctx-&gt;info-&gt;tradHashId;
+        // Derive salt length from the digest size of tradHashId instead of bit length
+        int32_t saltLen = 32; // Default to SHA256 size
+        if (mdId == CRYPT_MD_SHA384) {
+            saltLen = 48;
+        } else if (mdId == CRYPT_MD_SHA512) {
+             saltLen = 64;
+        }</pre>
+                <div class="issue-source">Reviewer: gemini</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">Passing pointer to array instead of pointer to element</div>
+                <div class="issue-location">crypto/composite/src/composite_encdec.c:474</div>
+                <pre>RETURN_RET_IF_ERR(ctx-&gt;tradMethod-&gt;setPrv(ctx-&gt;tradCtx, &amp;rsaParam), ret);</pre>
+                <div class="problem"><strong>Issue:</strong> `rsaParam` is declared as an array `BSL_Param rsaParam[]`. The function call `ctx->tradMethod->setPrv(ctx->tradCtx, &rsaParam)` passes the address of the array (`BSL_Param (*)[N]`), whereas the function likely expects a pointer to the first element (`BSL_Param *`). While they represent the same address, it is a type mismatch.</div>
+                <div class="fix-label">Fix:</div><pre>RETURN_RET_IF_ERR(ctx-&gt;tradMethod-&gt;setPrv(ctx-&gt;tradCtx, rsaParam), ret);</pre>
+                <div class="issue-source">Reviewer: gemini</div>
+            </div>
+</div>
+</div></body></html>

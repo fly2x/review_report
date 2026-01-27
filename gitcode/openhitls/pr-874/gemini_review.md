@@ -1,0 +1,126 @@
+# Code Review: openHiTLS/openhitls#874
+**Reviewer**: GEMINI
+
+
+## High
+
+### Memory leak when setting algorithm parameters multiple times
+`crypto/composite/src/composite.c:247-248`
+```
+ctx->pqcMethod = pqcMethod;
+    ctx->tradMethod = tradMethod;
+    ctx->pqcCtx = pqcMethod->newCtx();
+    RETURN_RET_IF((ctx->pqcCtx == NULL), CRYPT_MEM_ALLOC_FAIL);
+    ctx->tradCtx = tradMethod->newCtx();
+```
+**Issue**: The function `CRYPT_CompositeSetAlgInfo` allocates new `pqcCtx` and `tradCtx` without checking if they are already allocated. If `CRYPT_COMPOSITE_Ctrl` with `CRYPT_CTRL_SET_PARA_BY_ID` is called multiple times on the same context, the previously allocated contexts are leaked.
+**Fix**:
+```
+ctx->pqcMethod = pqcMethod;
+    ctx->tradMethod = tradMethod;
+    if (ctx->pqcCtx != NULL) {
+        ctx->pqcMethod->freeCtx(ctx->pqcCtx);
+        ctx->pqcCtx = NULL;
+    }
+    ctx->pqcCtx = pqcMethod->newCtx();
+    RETURN_RET_IF((ctx->pqcCtx == NULL), CRYPT_MEM_ALLOC_FAIL);
+    if (ctx->tradCtx != NULL) {
+        ctx->tradMethod->freeCtx(ctx->tradCtx);
+        ctx->tradCtx = NULL;
+    }
+    ctx->tradCtx = tradMethod->newCtx();
+```
+
+---
+
+
+## Medium
+
+### Inconsistent state on memory allocation failure
+`crypto/composite/src/composite.c:261`
+```
+if (ctx->tradCtx == NULL) {
+        pqcMethod->freeCtx(ctx->pqcCtx);
+        ctx->pqcCtx = NULL;
+        return CRYPT_MEM_ALLOC_FAIL;
+    }
+```
+**Issue**: In `CRYPT_CompositeSetAlgInfo`, if `tradMethod->newCtx()` fails, the function returns `CRYPT_MEM_ALLOC_FAIL` but leaves `ctx->info` set. This puts the context in a partially initialized state (info set, but contexts null), which might lead to confusing behavior or crashes if other functions assume `info != NULL` implies valid contexts. The `ERR` label handles this by setting `info = NULL`, but this return path does not jump to `ERR`.
+**Fix**:
+```
+if (ctx->tradCtx == NULL) {
+        pqcMethod->freeCtx(ctx->pqcCtx);
+        ctx->pqcCtx = NULL;
+        ctx->info = NULL;
+        return CRYPT_MEM_ALLOC_FAIL;
+    }
+```
+
+---
+
+### Potential memory leak in ASN.1 decoding for RSA Private Key
+`crypto/composite/src/composite_encdec.c:462-475`
+```
+RETURN_RET_IF_ERR(
+        BSL_ASN1_DecodeTemplate(&templ, NULL, &encode->data, &encode->dataLen, asn1, CRYPT_RSA_PRV_OTHER_PRIME_IDX + 1),
+        ret);
+    // ... use asn1 ...
+    RETURN_RET_IF_ERR(ctx->tradMethod->setPrv(ctx->tradCtx, &rsaParam), ret);
+    RETURN_RET_IF_ERR(ctx->tradMethod->setPub(ctx->tradCtx, &rsaParam), ret);
+    RETURN_RET_IF_ERR(CRYPT_CompositeSetRsaPadding(ctx), ret);
+    return CRYPT_SUCCESS;
+```
+**Issue**: The function `CRYPT_CompositeSetRsaPrvKey` uses `BSL_ASN1_DecodeTemplate` to populate `asn1` buffers (specifically for INTEGER types like D, N, P, Q...). If `BSL_ASN1_DecodeTemplate` allocates memory for these fields (which is common for normalizing Integers in ASN.1 decoders), that memory is never freed. The `asn1` array is on the stack, but the `buff` pointers within it might point to allocated memory. This pattern is repeated in `CRYPT_CompositeSetRsaPubKey` and `CRYPT_CompositeSetEcdsaPrvKey`.
+**Fix**:
+```
+// Verify BSL_ASN1_DecodeTemplate behavior. If it allocates, add cleanup:
+    // After usage:
+    for (int i = 0; i <= CRYPT_RSA_PRV_OTHER_PRIME_IDX; i++) {
+        if (asn1[i].buff != NULL && asn1[i].buff < encode->data || asn1[i].buff >= encode->data + encode->dataLen) {
+             // Logic assumes if not pointing into source, it was allocated. 
+             // Ideally use a BSL_ASN1_FreeTemplate or similar if available, or BSL_SAL_Free.
+             BSL_SAL_Free(asn1[i].buff);
+        }
+    }
+```
+
+---
+
+
+## Low
+
+### Hardcoded salt length logic in RSA PSS padding
+`crypto/composite/src/composite_encdec.c:153-157`
+```
+int32_t mdId = ctx->info->tradHashId;
+        int32_t mgfId = ctx->info->tradHashId;
+        int32_t saltLen = ctx->info->bits == 4096 ? 48 : 32;
+```
+**Issue**: The salt length selection logic is hardcoded based on the bit length of the RSA key (`bits == 4096 ? 48 : 32`). This implicitly assumes that 4096-bit keys always use SHA-384 (48 bytes) and other keys use SHA-256 (32 bytes). While this matches the current `g_composite_info` table, it is brittle and may break if new RSA-PSS combinations are added (e.g., RSA-3072 with SHA-384).
+**Fix**:
+```
+int32_t mdId = ctx->info->tradHashId;
+        int32_t mgfId = ctx->info->tradHashId;
+        // Derive salt length from the digest size of tradHashId instead of bit length
+        int32_t saltLen = 32; // Default to SHA256 size
+        if (mdId == CRYPT_MD_SHA384) {
+            saltLen = 48;
+        } else if (mdId == CRYPT_MD_SHA512) {
+             saltLen = 64;
+        }
+```
+
+---
+
+### Passing pointer to array instead of pointer to element
+`crypto/composite/src/composite_encdec.c:474`
+```
+RETURN_RET_IF_ERR(ctx->tradMethod->setPrv(ctx->tradCtx, &rsaParam), ret);
+```
+**Issue**: `rsaParam` is declared as an array `BSL_Param rsaParam[]`. The function call `ctx->tradMethod->setPrv(ctx->tradCtx, &rsaParam)` passes the address of the array (`BSL_Param (*)[N]`), whereas the function likely expects a pointer to the first element (`BSL_Param *`). While they represent the same address, it is a type mismatch.
+**Fix**:
+```
+RETURN_RET_IF_ERR(ctx->tradMethod->setPrv(ctx->tradCtx, rsaParam), ret);
+```
+
+---

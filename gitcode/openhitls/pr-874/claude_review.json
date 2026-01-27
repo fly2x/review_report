@@ -1,0 +1,112 @@
+[
+  {
+    "source": "claude",
+    "file": "crypto/composite/src/composite.c",
+    "line": "181-192",
+    "severity": "high",
+    "title": "Missing NULL check for tradMethod->dupCtx result before use",
+    "problem": "In CRYPT_COMPOSITE_DupCtx, if pqcMethod->dupCtx succeeds but tradMethod->dupCtx fails, the code returns NULL without cleaning up the successfully allocated pqcCtx. More critically, it uses newCtx->pqcCtx which could be non-NULL to check if both succeeded, but if tradCtx allocation fails, pqcCtx is leaked.",
+    "code": "if (ctx->pqcMethod != NULL && ctx->tradMethod != NULL) {\n        newCtx->pqcCtx = ctx->pqcMethod->dupCtx(ctx->pqcCtx);\n        newCtx->tradCtx = ctx->tradMethod->dupCtx(ctx->tradCtx);\n        if (newCtx->pqcCtx == NULL || newCtx->tradCtx == NULL) {\n            BSL_ERR_PUSH_ERROR(CRYPT_MEM_ALLOC_FAIL);\n            goto ERR;\n        }\n    }",
+    "fix": "if (ctx->pqcMethod != NULL && ctx->tradMethod != NULL) {\n        newCtx->pqcCtx = ctx->pqcMethod->dupCtx(ctx->pqcCtx);\n        if (newCtx->pqcCtx == NULL) {\n            BSL_ERR_PUSH_ERROR(CRYPT_MEM_ALLOC_FAIL);\n            goto ERR;\n        }\n        newCtx->tradCtx = ctx->tradMethod->dupCtx(ctx->tradCtx);\n        if (newCtx->tradCtx == NULL) {\n            BSL_ERR_PUSH_ERROR(CRYPT_MEM_ALLOC_FAIL);\n            goto ERR;\n        }\n    }"
+  },
+  {
+    "source": "claude",
+    "file": "crypto/composite/src/composite.c",
+    "line": "479",
+    "severity": "high",
+    "title": "Missing NULL check on method before dereferencing in sign/verify",
+    "problem": "In CRYPT_COMPOSITE_Sign, the code calls ctx->pqcMethod->sign and ctx->tradMethod->sign but doesn't verify that ctx->pqcMethod and ctx->tradMethod are non-NULL before use. If these are NULL, it will crash.",
+    "code": "GOTO_ERR_IF(ctx->pqcMethod->ctrl(ctx->pqcCtx, CRYPT_CTRL_SET_CTX_INFO, (void *)(uintptr_t)ctx->info->label,\n        (uint32_t)strlen(ctx->info->label)), ret);\n    int32_t pqcRet = ctx->pqcMethod->sign(ctx->pqcCtx, CRYPT_MD_MAX, msg.data, msg.len, sign, &pqcSigLen);\n    int32_t tradRet = ctx->tradMethod->sign(ctx->tradCtx, ctx->info->tradHashId, msg.data, msg.len, sign + pqcSigLen,\n                                           &tradSigLen);",
+    "fix": "RETURN_RET_IF(ctx->pqcMethod == NULL || ctx->tradMethod == NULL, CRYPT_COMPOSITE_KEYINFO_NOT_SET);\n    GOTO_ERR_IF(ctx->pqcMethod->ctrl(ctx->pqcCtx, CRYPT_CTRL_SET_CTX_INFO, (void *)(uintptr_t)ctx->info->label,\n        (uint32_t)strlen(ctx->info->label)), ret);\n    int32_t pqcRet = ctx->pqcMethod->sign(ctx->pqcCtx, CRYPT_MD_MAX, msg.data, msg.len, sign, &pqcSigLen);\n    int32_t tradRet = ctx->tradMethod->sign(ctx->tradCtx, ctx->info->tradHashId, msg.data, msg.len, sign + pqcSigLen,\n                                           &tradSigLen);"
+  },
+  {
+    "source": "claude",
+    "file": "crypto/codecskey/src/crypt_decoder_composite.c",
+    "line": "30-33",
+    "severity": "high",
+    "title": "Invalid range check for composite key type",
+    "problem": "The range check uses hardcoded min/max values instead of constants. If new composite algorithms are added between these values but outside the expected range, they would be rejected. More critically, the check doesn't account for potential gaps in the enum values.",
+    "code": "bool isCompositePubkey = (subPubkeyInfo.keyType >= BSL_CID_MLDSA44_RSA2048_PSS_SHA256 &&\n                                   subPubkeyInfo.keyType <= BSL_CID_MLDSA87_ECDSA_P521_SHA512);",
+    "fix": "bool isCompositePubkey = (subPubkeyInfo.keyType >= BSL_CID_MLDSA44_RSA2048_PSS_SHA256 &&\n                                   subPubkeyInfo.keyType <= BSL_CID_MLDSA87_ECDSA_P521_SHA512) &&\n                                  !((subPubkeyInfo.keyType > BSL_CID_MLDSA87_ECDSA_P521_SHA512 &&\n                                     subPubkeyInfo.keyType < BSL_CID_MLDSA44_ED25519_SHA512));"
+  },
+  {
+    "source": "claude",
+    "file": "crypto/composite/src/composite_encdec.c",
+    "line": "254-260",
+    "severity": "high",
+    "title": "Return value ignored in CRYPT_CompositeGetEd25519PubKey",
+    "problem": "The return value from ctx->tradMethod->ctrl is ignored, but then pubLen is used. If the ctrl call fails, pubLen remains 0, causing BITS_TO_BYTES(0) = 0, leading to 0-size allocation.",
+    "code": "static int32_t CRYPT_CompositeGetEd25519PubKey(const CRYPT_CompositeCtx *ctx, BSL_Buffer *encode)\n{\n    int32_t ret;\n    uint32_t pubLen = 0;\n    ctx->tradMethod->ctrl(ctx->tradCtx, CRYPT_CTRL_GET_BITS, &pubLen, sizeof(pubLen));\n    RETURN_RET_IF(pubLen == 0, CRYPT_EAL_ALG_NOT_SUPPORT);",
+    "fix": "static int32_t CRYPT_CompositeGetEd25519PubKey(const CRYPT_CompositeCtx *ctx, BSL_Buffer *encode)\n{\n    int32_t ret;\n    uint32_t pubLen = 0;\n    RETURN_RET_IF_ERR(ctx->tradMethod->ctrl(ctx->tradCtx, CRYPT_CTRL_GET_BITS, &pubLen, sizeof(pubLen)), ret);\n    RETURN_RET_IF(pubLen == 0, CRYPT_EAL_ALG_NOT_SUPPORT);"
+  },
+  {
+    "source": "claude",
+    "file": "crypto/composite/src/composite.c",
+    "line": "257-262",
+    "severity": "medium",
+    "title": "Missing NULL check for ctx->info before dereferencing",
+    "problem": "CRYPT_CompositeSetctxInfo uses ctx->info without checking if it's NULL first. If ctx->info is NULL, ctx->prvLen and ctx->pubLen may not be initialized, potentially leading to issues.",
+    "code": "static int32_t CRYPT_CompositeSetctxInfo(CRYPT_CompositeCtx *ctx, void *val, uint32_t len)\n{\n    if (len > COMPOSITE_MAX_CTX_BYTES) {\n        BSL_ERR_PUSH_ERROR(CRYPT_COMPOSITE_KEYLEN_ERROR);\n        return CRYPT_COMPOSITE_KEYLEN_ERROR;\n    }",
+    "fix": "static int32_t CRYPT_CompositeSetctxInfo(CRYPT_CompositeCtx *ctx, void *val, uint32_t len)\n{\n    RETURN_RET_IF(ctx == NULL, CRYPT_NULL_INPUT);\n    RETURN_RET_IF(ctx->info == NULL, CRYPT_COMPOSITE_KEYINFO_NOT_SET);\n    if (len > COMPOSITE_MAX_CTX_BYTES) {\n        BSL_ERR_PUSH_ERROR(CRYPT_COMPOSITE_KEYLEN_ERROR);\n        return CRYPT_COMPOSITE_KEYLEN_ERROR;\n    }"
+  },
+  {
+    "source": "claude",
+    "file": "crypto/composite/src/composite.c",
+    "line": "283-288",
+    "severity": "medium",
+    "title": "Missing NULL check for ctx->info in CRYPT_CompositeGetParaId",
+    "problem": "The function returns CRYPT_COMPOSITE_KEYINFO_NOT_SET if ctx->info is NULL, but it doesn't check if ctx itself is NULL first.",
+    "code": "static int32_t CRYPT_CompositeGetParaId(CRYPT_CompositeCtx *ctx, void *val, uint32_t len)\n{\n    RETURN_RET_IF(val == NULL || len != sizeof(uint32_t), CRYPT_INVALID_ARG);\n    RETURN_RET_IF(ctx->info == NULL, CRYPT_COMPOSITE_KEYINFO_NOT_SET);\n    *(int32_t *)val = ctx->info->paramId;\n    return CRYPT_SUCCESS;\n}",
+    "fix": "static int32_t CRYPT_CompositeGetParaId(CRYPT_CompositeCtx *ctx, void *val, uint32_t len)\n{\n    RETURN_RET_IF(ctx == NULL, CRYPT_NULL_INPUT);\n    RETURN_RET_IF(val == NULL || len != sizeof(uint32_t), CRYPT_INVALID_ARG);\n    RETURN_RET_IF(ctx->info == NULL, CRYPT_COMPOSITE_KEYINFO_NOT_SET);\n    *(int32_t *)val = ctx->info->paramId;\n    return CRYPT_SUCCESS;\n}"
+  },
+  {
+    "source": "claude",
+    "file": "crypto/composite/src/composite.c",
+    "line": "364-367",
+    "severity": "medium",
+    "title": "Potential integer overflow in length calculation",
+    "problem": "The length calculation `pqcPrv.dataLen + tradPrv.dataLen` could overflow if both values are large. While unlikely with the current key sizes, defensive coding should prevent this.",
+    "code": "ctx->prvLen = pqcPrv.dataLen + tradPrv.dataLen;\n    ctx->pubLen = pqcPub.dataLen + tradPub.dataLen;\n    RETURN_RET_IF_ERR(CRYPT_CompositeCreateKeyBuf(ctx), ret);",
+    "fix": "if (pqcPrv.dataLen > UINT32_MAX - tradPrv.dataLen || pqcPub.dataLen > UINT32_MAX - tradPub.dataLen) {\n        ret = CRYPT_COMPOSITE_KEYLEN_ERROR;\n        goto ERR;\n    }\n    ctx->prvLen = pqcPrv.dataLen + tradPrv.dataLen;\n    ctx->pubLen = pqcPub.dataLen + tradPub.dataLen;\n    RETURN_RET_IF_ERR(CRYPT_CompositeCreateKeyBuf(ctx), ret);"
+  },
+  {
+    "source": "claude",
+    "file": "crypto/composite/src/composite.c",
+    "line": "409-414",
+    "severity": "medium",
+    "title": "Missing bounds check before memcpy_s",
+    "problem": "CRYPT_COMPOSITE_SetPrvKey checks that prv->len > pqcPrvkeyLen but doesn't verify that prv->len <= expected total key length. Malformed input could pass this check.",
+    "code": "RETURN_RET_IF(ctx->info == NULL, CRYPT_COMPOSITE_KEYINFO_NOT_SET);\n    RETURN_RET_IF(prv->len <= ctx->info->pqcPrvkeyLen, CRYPT_COMPOSITE_KEYLEN_ERROR);\n    ctx->prvKey = (uint8_t *)BSL_SAL_Malloc(prv->len);",
+    "fix": "RETURN_RET_IF(ctx->info == NULL, CRYPT_COMPOSITE_KEYINFO_NOT_SET);\n    RETURN_RET_IF(prv->len <= ctx->info->pqcPrvkeyLen, CRYPT_COMPOSITE_KEYLEN_ERROR);\n    RETURN_RET_IF(prv->len > ctx->info->pqcPrvkeyLen + ctx->info->tradPrvkeyLen, CRYPT_COMPOSITE_KEYLEN_ERROR);\n    ctx->prvKey = (uint8_t *)BSL_SAL_Malloc(prv->len);"
+  },
+  {
+    "source": "claude",
+    "file": "crypto/composite/src/composite.c",
+    "line": "428-433",
+    "severity": "medium",
+    "title": "Missing bounds check in CRYPT_COMPOSITE_SetPubKey",
+    "problem": "Similar to SetPrvKey, only checks lower bound but not upper bound for total expected key length.",
+    "code": "RETURN_RET_IF(ctx->info == NULL, CRYPT_COMPOSITE_KEYINFO_NOT_SET);\n    RETURN_RET_IF(pub->len <= ctx->info->pqcPubkeyLen, CRYPT_COMPOSITE_KEYLEN_ERROR);\n    ctx->pubKey = (uint8_t *)BSL_SAL_Malloc(pub->len);",
+    "fix": "RETURN_RET_IF(ctx->info == NULL, CRYPT_COMPOSITE_KEYINFO_NOT_SET);\n    RETURN_RET_IF(pub->len <= ctx->info->pqcPubkeyLen, CRYPT_COMPOSITE_KEYLEN_ERROR);\n    RETURN_RET_IF(pub->len > ctx->info->pqcPubkeyLen + ctx->info->tradPubkeyLen, CRYPT_COMPOSITE_KEYLEN_ERROR);\n    ctx->pubKey = (uint8_t *)BSL_SAL_Malloc(pub->len);"
+  },
+  {
+    "source": "claude",
+    "file": "crypto/composite/src/composite.c",
+    "line": "147",
+    "severity": "medium",
+    "title": "Unchecked return value from memcpy_s",
+    "problem": "The return values from memcpy_s calls are explicitly cast to void and ignored. If the memcpy fails, the function continues with potentially corrupted data.",
+    "code": "(void)memcpy_s(ctx->prvKey, ctx->prvLen, pqcPrv.data, pqcPrv.dataLen);\n    (void)memcpy_s(ctx->prvKey + pqcPrv.dataLen, ctx->prvLen - pqcPrv.dataLen, tradPrv.data, tradPrv.dataLen);\n    (void)memcpy_s(ctx->pubKey, ctx->pubLen, pqcPub.data, pqcPub.dataLen);\n    (void)memcpy_s(ctx->pubKey + pqcPub.dataLen, ctx->pubLen - pqcPub.dataLen, tradPub.data, tradPub.dataLen);",
+    "fix": "ret = memcpy_s(ctx->prvKey, ctx->prvLen, pqcPrv.data, pqcPrv.dataLen);\n    if (ret != EOK) { ret = CRYPT_ERR; goto ERR; }\n    ret = memcpy_s(ctx->prvKey + pqcPrv.dataLen, ctx->prvLen - pqcPrv.dataLen, tradPrv.data, tradPrv.dataLen);\n    if (ret != EOK) { ret = CRYPT_ERR; goto ERR; }\n    ret = memcpy_s(ctx->pubKey, ctx->pubLen, pqcPub.data, pqcPub.dataLen);\n    if (ret != EOK) { ret = CRYPT_ERR; goto ERR; }\n    ret = memcpy_s(ctx->pubKey + pqcPub.dataLen, ctx->pubLen - pqcPub.dataLen, tradPub.data, tradPub.dataLen);\n    if (ret != EOK) { ret = CRYPT_ERR; goto ERR; }"
+  },
+  {
+    "source": "claude",
+    "file": "crypto/codecskey/src/crypt_decoder_composite.c",
+    "line": "69",
+    "severity": "medium",
+    "title": "Missing error code push on failure",
+    "problem": "When CRYPT_COMPOSITE_NewCtxEx fails, the function returns CRYPT_MEM_ALLOC_FAIL without pushing the error code using BSL_ERR_PUSH_ERROR, unlike other error paths.",
+    "code": "CRYPT_CompositeCtx *pctx = CRYPT_COMPOSITE_NewCtxEx(libCtx);\n    if (pctx == NULL) {\n        return CRYPT_MEM_ALLOC_FAIL;\n    }",
+    "fix": "CRYPT_CompositeCtx *pctx = CRYPT_COMPOSITE_NewCtxEx(libCtx);\n    if (pctx == NULL) {\n        BSL_ERR_PUSH_ERROR(CRYPT_MEM_ALLOC_FAIL);\n        return CRYPT_MEM_ALLOC_FAIL;\n    }"
+  }
+]

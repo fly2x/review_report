@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Code Review: openHiTLS/openhitls#874 - CODEX</title>
+    <style>
+        :root { --critical: #dc2626; --high: #ea580c; --medium: #ca8a04; --low: #65a30d; }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: system-ui, sans-serif; background: #f8fafc; color: #1e293b; padding: 2rem; line-height: 1.6; }
+        .container { max-width: 900px; margin: 0 auto; }
+        h1 { font-size: 1.5rem; margin-bottom: 0.5rem; }
+        .subtitle { color: #64748b; margin-bottom: 2rem; }
+        .section { margin-bottom: 2rem; }
+        .section-title { font-size: 1.1rem; font-weight: 600; padding: 0.5rem 1rem; border-radius: 0.5rem 0.5rem 0 0; color: white; }
+        .section-title.critical { background: var(--critical); }
+        .section-title.high { background: var(--high); }
+        .section-title.medium { background: var(--medium); }
+        .section-title.low { background: var(--low); }
+        .issue { background: white; border: 1px solid #e2e8f0; border-top: none; padding: 1rem; }
+        .issue:last-child { border-radius: 0 0 0.5rem 0.5rem; }
+        .issue-title { font-weight: 600; margin-bottom: 0.25rem; }
+        .issue-location { font-family: monospace; font-size: 0.875rem; color: #64748b; margin-bottom: 0.75rem; }
+        .issue-source { font-size: 0.75rem; color: #94a3b8; margin-top: 0.5rem; }
+        pre { background: #1e293b; color: #e2e8f0; padding: 0.75rem; border-radius: 0.375rem; overflow-x: auto; font-size: 0.875rem; margin: 0.5rem 0; }
+        .problem { margin: 0.75rem 0; }
+        .fix-label { font-weight: 600; margin-top: 0.75rem; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Code Review: openHiTLS/openhitls#874 - CODEX</h1>
+        <div class="subtitle"></div>
+<div class="section"><div class="section-title medium">Medium</div>
+<div class="issue">
+                <div class="issue-title">ECDSA public key length derived from bits causes under-allocation</div>
+                <div class="issue-location">crypto/composite/src/composite_encdec.c:292-299</div>
+                <pre>uint32_t pubLen = 0;
+RETURN_RET_IF_ERR(ctx-&gt;tradMethod-&gt;ctrl(ctx-&gt;tradCtx, CRYPT_CTRL_GET_BITS, &amp;pubLen, sizeof(pubLen)), ret);
+RETURN_RET_IF(pubLen == 0, CRYPT_EAL_ALG_NOT_SUPPORT);
+pubLen = BITS_TO_BYTES(pubLen);
+uint8_t *pub = (uint8_t *)BSL_SAL_Malloc(pubLen);
+...
+BSL_Param param[2] = {{CRYPT_PARAM_EC_PUBKEY, BSL_PARAM_TYPE_OCTETS, pub, pubLen, 0}, BSL_PARAM_END};</pre>
+                <div class="problem"><strong>Issue:</strong> `CRYPT_CTRL_GET_BITS` returns curve size (e.g., 256/384), not the encoded public key size (e.g., 65/97 bytes for uncompressed). Converting bits to bytes under-allocates the buffer and makes `getPub` fail or truncate, breaking composite public key encoding.</div>
+                <div class="fix-label">Fix:</div><pre>uint32_t pubLen = 0;
+RETURN_RET_IF_ERR(ctx-&gt;tradMethod-&gt;ctrl(ctx-&gt;tradCtx, CRYPT_CTRL_GET_PUBKEY_LEN, &amp;pubLen, sizeof(pubLen)), ret);
+RETURN_RET_IF(pubLen == 0, CRYPT_EAL_ALG_NOT_SUPPORT);
+uint8_t *pub = (uint8_t *)BSL_SAL_Malloc(pubLen);
+RETURN_RET_IF(pub == NULL, CRYPT_MEM_ALLOC_FAIL);
+BSL_Param param[2] = {{CRYPT_PARAM_EC_PUBKEY, BSL_PARAM_TYPE_OCTETS, pub, pubLen, 0}, BSL_PARAM_END};
+ret = ctx-&gt;tradMethod-&gt;getPub(ctx-&gt;tradCtx, &amp;param);
+if (ret != CRYPT_SUCCESS) {
+    BSL_SAL_FREE(pub);
+    return ret;
+}
+encode-&gt;data = pub;
+encode-&gt;dataLen = param[0].useLen;</pre>
+                <div class="issue-source">Reviewer: codex</div>
+            </div>
+</div>
+<div class="section"><div class="section-title low">Low</div>
+<div class="issue">
+                <div class="issue-title">Ed25519 public key length lookup ignores error return</div>
+                <div class="issue-location">crypto/composite/src/composite_encdec.c:330-335</div>
+                <pre>uint32_t pubLen = 0;
+ctx-&gt;tradMethod-&gt;ctrl(ctx-&gt;tradCtx, CRYPT_CTRL_GET_BITS, &amp;pubLen, sizeof(pubLen));
+RETURN_RET_IF(pubLen == 0, CRYPT_EAL_ALG_NOT_SUPPORT);</pre>
+                <div class="problem"><strong>Issue:</strong> The return value of `ctrl` is ignored. If the control call fails, the function returns `CRYPT_EAL_ALG_NOT_SUPPORT`, masking real errors and making debugging and error handling incorrect.</div>
+                <div class="fix-label">Fix:</div><pre>uint32_t pubLen = 0;
+RETURN_RET_IF_ERR(ctx-&gt;tradMethod-&gt;ctrl(ctx-&gt;tradCtx, CRYPT_CTRL_GET_BITS, &amp;pubLen, sizeof(pubLen)), ret);
+RETURN_RET_IF(pubLen == 0, CRYPT_EAL_ALG_NOT_SUPPORT);</pre>
+                <div class="issue-source">Reviewer: codex</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">Preprocessor condition loses HITLS_CRYPTO_PROVIDER gating</div>
+                <div class="issue-location">crypto/provider/src/default/crypt_default_keymgmt.c:16-22</div>
+                <pre>#if (defined(HITLS_CRYPTO_DSA) || defined(HITLS_CRYPTO_ED25519) || defined(HITLS_CRYPTO_X25519) || \
+    defined(HITLS_CRYPTO_RSA) || defined(HITLS_CRYPTO_DH) || defined(HITLS_CRYPTO_ECDSA) || \
+    defined(HITLS_CRYPTO_ECDH) || defined(HITLS_CRYPTO_SM2) || defined(HITLS_CRYPTO_PAILLIER) || \
+    defined(HITLS_CRYPTO_ELGAMAL) || defined(HITLS_CRYPTO_SLH_DSA) || defined(HITLS_CRYPTO_MLKEM) || \
+    defined(HITLS_CRYPTO_MLDSA) || defined(HITLS_CRYPTO_COMPOSITE) || defined(HITLS_CRYPTO_HYBRIDKEM)) &amp;&amp; \
+    defined(HITLS_CRYPTO_PROVIDER) || defined(HITLS_CRYPTO_CLASSIC_MCELIECE) || defined(HITLS_CRYPTO_FRODOKEM)</pre>
+                <div class="problem"><strong>Issue:</strong> Missing parentheses change precedence so the file is compiled when `HITLS_CRYPTO_CLASSIC_MCELIECE` or `HITLS_CRYPTO_FRODOKEM` are set even if `HITLS_CRYPTO_PROVIDER` is not defined, causing unintended compilation and potential build failures.</div>
+                <div class="fix-label">Fix:</div><pre>#if (defined(HITLS_CRYPTO_DSA) || defined(HITLS_CRYPTO_ED25519) || defined(HITLS_CRYPTO_X25519) || \
+    defined(HITLS_CRYPTO_RSA) || defined(HITLS_CRYPTO_DH) || defined(HITLS_CRYPTO_ECDSA) || \
+    defined(HITLS_CRYPTO_ECDH) || defined(HITLS_CRYPTO_SM2) || defined(HITLS_CRYPTO_PAILLIER) || \
+    defined(HITLS_CRYPTO_ELGAMAL) || defined(HITLS_CRYPTO_SLH_DSA) || defined(HITLS_CRYPTO_MLKEM) || \
+    defined(HITLS_CRYPTO_MLDSA) || defined(HITLS_CRYPTO_COMPOSITE) || defined(HITLS_CRYPTO_HYBRIDKEM) || \
+    defined(HITLS_CRYPTO_CLASSIC_MCELIECE) || defined(HITLS_CRYPTO_FRODOKEM)) &amp;&amp; \
+    defined(HITLS_CRYPTO_PROVIDER)</pre>
+                <div class="issue-source">Reviewer: codex</div>
+            </div>
+</div>
+</div></body></html>

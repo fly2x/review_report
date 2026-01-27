@@ -1,0 +1,32 @@
+[
+  {
+    "source": "codex",
+    "file": "crypto/composite/src/composite_encdec.c",
+    "line": "292-299",
+    "severity": "medium",
+    "title": "ECDSA public key length derived from bits causes under-allocation",
+    "problem": "`CRYPT_CTRL_GET_BITS` returns curve size (e.g., 256/384), not the encoded public key size (e.g., 65/97 bytes for uncompressed). Converting bits to bytes under-allocates the buffer and makes `getPub` fail or truncate, breaking composite public key encoding.",
+    "code": "uint32_t pubLen = 0;\nRETURN_RET_IF_ERR(ctx->tradMethod->ctrl(ctx->tradCtx, CRYPT_CTRL_GET_BITS, &pubLen, sizeof(pubLen)), ret);\nRETURN_RET_IF(pubLen == 0, CRYPT_EAL_ALG_NOT_SUPPORT);\npubLen = BITS_TO_BYTES(pubLen);\nuint8_t *pub = (uint8_t *)BSL_SAL_Malloc(pubLen);\n...\nBSL_Param param[2] = {{CRYPT_PARAM_EC_PUBKEY, BSL_PARAM_TYPE_OCTETS, pub, pubLen, 0}, BSL_PARAM_END};",
+    "fix": "uint32_t pubLen = 0;\nRETURN_RET_IF_ERR(ctx->tradMethod->ctrl(ctx->tradCtx, CRYPT_CTRL_GET_PUBKEY_LEN, &pubLen, sizeof(pubLen)), ret);\nRETURN_RET_IF(pubLen == 0, CRYPT_EAL_ALG_NOT_SUPPORT);\nuint8_t *pub = (uint8_t *)BSL_SAL_Malloc(pubLen);\nRETURN_RET_IF(pub == NULL, CRYPT_MEM_ALLOC_FAIL);\nBSL_Param param[2] = {{CRYPT_PARAM_EC_PUBKEY, BSL_PARAM_TYPE_OCTETS, pub, pubLen, 0}, BSL_PARAM_END};\nret = ctx->tradMethod->getPub(ctx->tradCtx, &param);\nif (ret != CRYPT_SUCCESS) {\n    BSL_SAL_FREE(pub);\n    return ret;\n}\nencode->data = pub;\nencode->dataLen = param[0].useLen;"
+  },
+  {
+    "source": "codex",
+    "file": "crypto/composite/src/composite_encdec.c",
+    "line": "330-335",
+    "severity": "low",
+    "title": "Ed25519 public key length lookup ignores error return",
+    "problem": "The return value of `ctrl` is ignored. If the control call fails, the function returns `CRYPT_EAL_ALG_NOT_SUPPORT`, masking real errors and making debugging and error handling incorrect.",
+    "code": "uint32_t pubLen = 0;\nctx->tradMethod->ctrl(ctx->tradCtx, CRYPT_CTRL_GET_BITS, &pubLen, sizeof(pubLen));\nRETURN_RET_IF(pubLen == 0, CRYPT_EAL_ALG_NOT_SUPPORT);",
+    "fix": "uint32_t pubLen = 0;\nRETURN_RET_IF_ERR(ctx->tradMethod->ctrl(ctx->tradCtx, CRYPT_CTRL_GET_BITS, &pubLen, sizeof(pubLen)), ret);\nRETURN_RET_IF(pubLen == 0, CRYPT_EAL_ALG_NOT_SUPPORT);"
+  },
+  {
+    "source": "codex",
+    "file": "crypto/provider/src/default/crypt_default_keymgmt.c",
+    "line": "16-22",
+    "severity": "low",
+    "title": "Preprocessor condition loses HITLS_CRYPTO_PROVIDER gating",
+    "problem": "Missing parentheses change precedence so the file is compiled when `HITLS_CRYPTO_CLASSIC_MCELIECE` or `HITLS_CRYPTO_FRODOKEM` are set even if `HITLS_CRYPTO_PROVIDER` is not defined, causing unintended compilation and potential build failures.",
+    "code": "#if (defined(HITLS_CRYPTO_DSA) || defined(HITLS_CRYPTO_ED25519) || defined(HITLS_CRYPTO_X25519) || \\\n    defined(HITLS_CRYPTO_RSA) || defined(HITLS_CRYPTO_DH) || defined(HITLS_CRYPTO_ECDSA) || \\\n    defined(HITLS_CRYPTO_ECDH) || defined(HITLS_CRYPTO_SM2) || defined(HITLS_CRYPTO_PAILLIER) || \\\n    defined(HITLS_CRYPTO_ELGAMAL) || defined(HITLS_CRYPTO_SLH_DSA) || defined(HITLS_CRYPTO_MLKEM) || \\\n    defined(HITLS_CRYPTO_MLDSA) || defined(HITLS_CRYPTO_COMPOSITE) || defined(HITLS_CRYPTO_HYBRIDKEM)) && \\\n    defined(HITLS_CRYPTO_PROVIDER) || defined(HITLS_CRYPTO_CLASSIC_MCELIECE) || defined(HITLS_CRYPTO_FRODOKEM)",
+    "fix": "#if (defined(HITLS_CRYPTO_DSA) || defined(HITLS_CRYPTO_ED25519) || defined(HITLS_CRYPTO_X25519) || \\\n    defined(HITLS_CRYPTO_RSA) || defined(HITLS_CRYPTO_DH) || defined(HITLS_CRYPTO_ECDSA) || \\\n    defined(HITLS_CRYPTO_ECDH) || defined(HITLS_CRYPTO_SM2) || defined(HITLS_CRYPTO_PAILLIER) || \\\n    defined(HITLS_CRYPTO_ELGAMAL) || defined(HITLS_CRYPTO_SLH_DSA) || defined(HITLS_CRYPTO_MLKEM) || \\\n    defined(HITLS_CRYPTO_MLDSA) || defined(HITLS_CRYPTO_COMPOSITE) || defined(HITLS_CRYPTO_HYBRIDKEM) || \\\n    defined(HITLS_CRYPTO_CLASSIC_MCELIECE) || defined(HITLS_CRYPTO_FRODOKEM)) && \\\n    defined(HITLS_CRYPTO_PROVIDER)"
+  }
+]

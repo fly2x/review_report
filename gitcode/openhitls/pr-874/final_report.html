@@ -1,0 +1,310 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Final Report: openHiTLS/openhitls#874</title>
+    <style>
+        :root { --critical: #dc2626; --high: #ea580c; --medium: #ca8a04; --low: #65a30d;
+                 --trusted: #059669; --likely: #0284c7; --evaluate: #7c3aed; }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: system-ui, sans-serif; background: #f8fafc; color: #1e293b; padding: 2rem; line-height: 1.6; }
+        .container { max-width: 900px; margin: 0 auto; }
+        h1 { font-size: 1.75rem; margin-bottom: 0.5rem; }
+        .subtitle { color: #64748b; margin-bottom: 1rem; }
+        .stats { display: flex; gap: 1rem; margin-bottom: 2rem; flex-wrap: wrap; }
+        .stat { background: white; border: 1px solid #e2e8f0; border-radius: 0.5rem; padding: 1rem; min-width: 100px; text-align: center; }
+        .stat-value { font-size: 1.5rem; font-weight: 700; }
+        .stat-label { font-size: 0.875rem; color: #64748b; }
+        .stat.critical .stat-value { color: var(--critical); }
+        .stat.high .stat-value { color: var(--high); }
+        .stat.medium .stat-value { color: var(--medium); }
+        .stat.low .stat-value { color: var(--low); }
+        .reviewers { background: #e0e7ff; color: #3730a3; padding: 0.5rem 1rem; border-radius: 0.5rem; margin-bottom: 2rem; }
+        .section { margin-bottom: 2rem; }
+        .section-title { font-size: 1.1rem; font-weight: 600; padding: 0.5rem 1rem; border-radius: 0.5rem 0.5rem 0 0; color: white; }
+        .section-title.critical { background: var(--critical); }
+        .section-title.high { background: var(--high); }
+        .section-title.medium { background: var(--medium); }
+        .section-title.low { background: var(--low); }
+        .issue { background: white; border: 1px solid #e2e8f0; border-top: none; padding: 1rem; }
+        .issue:last-child { border-radius: 0 0 0.5rem 0.5rem; }
+        .issue-title { font-weight: 600; margin-bottom: 0.25rem; }
+        .issue-location { font-family: monospace; font-size: 0.875rem; color: #64748b; margin-bottom: 0.5rem; }
+        .issue-meta { font-size: 0.75rem; margin-bottom: 0.75rem; display: flex; gap: 0.75rem; align-items: center; }
+        .issue-meta .reviewers { background: #f1f5f9; color: #475569; padding: 0.25rem 0.5rem; border-radius: 0.25rem; margin: 0; }
+        .confidence-badge { padding: 0.25rem 0.5rem; border-radius: 0.25rem; font-weight: 500; }
+        .confidence-badge.trusted { background: #d1fae5; color: #065f46; }
+        .confidence-badge.likely { background: #dbeafe; color: #1e40af; }
+        .confidence-badge.evaluate { background: #ede9fe; color: #5b21b6; }
+        pre { background: #1e293b; color: #e2e8f0; padding: 0.75rem; border-radius: 0.375rem; overflow-x: auto; font-size: 0.875rem; margin: 0.5rem 0; }
+        .problem { margin: 0.75rem 0; }
+        .fix-label { font-weight: 600; margin-top: 0.75rem; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Final Code Review Report</h1>
+        <div class="subtitle">openHiTLS/openhitls - PR #874</div>
+        <p style="margin-bottom: 1rem;"></p>
+
+        <div class="stats">
+            <div class="stat"><div class="stat-value">11</div><div class="stat-label">Total</div></div>
+            <div class="stat critical"><div class="stat-value">0</div><div class="stat-label">Critical</div></div>
+            <div class="stat high"><div class="stat-value">1</div><div class="stat-label">High</div></div>
+            <div class="stat medium"><div class="stat-value">5</div><div class="stat-label">Medium</div></div>
+            <div class="stat low"><div class="stat-value">5</div><div class="stat-label">Low</div></div>
+        </div>
+
+        <div class="reviewers">Reviewers: claude, gemini, codex</div>
+<div class="section"><div class="section-title high">High</div>
+<div class="issue">
+                <div class="issue-title">ECDSA public key buffer sized from curve bits, not encoded key length</div>
+                <div class="issue-location">crypto/composite/src/composite_encdec.c:292-308</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CODEX</span>
+                    <span class="confidence-badge likely">置信度: 较可信</span>
+                </div>
+                <pre>uint32_t pubLen = 0;
+RETURN_RET_IF_ERR(ctx-&gt;tradMethod-&gt;ctrl(ctx-&gt;tradCtx, CRYPT_CTRL_GET_BITS, &amp;pubLen, sizeof(pubLen)), ret);
+RETURN_RET_IF(pubLen == 0, CRYPT_EAL_ALG_NOT_SUPPORT);
+pubLen = BITS_TO_BYTES(pubLen);
+uint8_t *pub = (uint8_t *)BSL_SAL_Malloc(pubLen);
+...
+ret = ctx-&gt;tradMethod-&gt;getPub(ctx-&gt;tradCtx, &amp;param);</pre>
+                <div class="problem"><strong>Issue:</strong> `CRYPT_CompositeGetEcdsaPubKey` queries `CRYPT_CTRL_GET_BITS` and converts bits to bytes, which yields the curve size (e.g., 32 for P-256) instead of the encoded public key length (e.g., 65 bytes for uncompressed). This under-allocates the buffer, causing `getPub` to fail or truncate, breaking composite ECDSA public key encoding.</div>
+                <div class="fix-label">Fix:</div><pre>uint32_t pubLen = 0;
+RETURN_RET_IF_ERR(ctx-&gt;tradMethod-&gt;ctrl(ctx-&gt;tradCtx, CRYPT_CTRL_GET_PUBKEY_LEN, &amp;pubLen, sizeof(pubLen)), ret);
+RETURN_RET_IF(pubLen == 0, CRYPT_EAL_ALG_NOT_SUPPORT);
+uint8_t *pub = (uint8_t *)BSL_SAL_Malloc(pubLen);
+RETURN_RET_IF(pub == NULL, CRYPT_MEM_ALLOC_FAIL);
+BSL_Param param[2] = {{CRYPT_PARAM_EC_PUBKEY, BSL_PARAM_TYPE_OCTETS, pub, pubLen, 0}, BSL_PARAM_END};
+ret = ctx-&gt;tradMethod-&gt;getPub(ctx-&gt;tradCtx, &amp;param);
+if (ret != CRYPT_SUCCESS) {
+    BSL_SAL_FREE(pub);
+    return ret;
+}
+encode-&gt;data = pub;
+encode-&gt;dataLen = param[0].useLen;</pre>
+            </div>
+</div>
+<div class="section"><div class="section-title medium">Medium</div>
+<div class="issue">
+                <div class="issue-title">Provider gating lost due to operator precedence in #if</div>
+                <div class="issue-location">crypto/provider/src/default/crypt_default_keymgmt.c:17-22</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CODEX</span>
+                    <span class="confidence-badge likely">置信度: 较可信</span>
+                </div>
+                <pre>#if (defined(HITLS_CRYPTO_DSA) || defined(HITLS_CRYPTO_ED25519) || defined(HITLS_CRYPTO_X25519) || \
+    defined(HITLS_CRYPTO_RSA) || defined(HITLS_CRYPTO_DH) || defined(HITLS_CRYPTO_ECDSA) || \
+    defined(HITLS_CRYPTO_ECDH) || defined(HITLS_CRYPTO_SM2) || defined(HITLS_CRYPTO_PAILLIER) || \
+    defined(HITLS_CRYPTO_ELGAMAL) || defined(HITLS_CRYPTO_SLH_DSA) || defined(HITLS_CRYPTO_MLKEM) || \
+    defined(HITLS_CRYPTO_MLDSA) || defined(HITLS_CRYPTO_COMPOSITE) || defined(HITLS_CRYPTO_HYBRIDKEM)) &amp;&amp; \
+    defined(HITLS_CRYPTO_PROVIDER) || defined(HITLS_CRYPTO_CLASSIC_MCELIECE) || defined(HITLS_CRYPTO_FRODOKEM)</pre>
+                <div class="problem"><strong>Issue:</strong> `&& defined(HITLS_CRYPTO_PROVIDER)` only applies to the first group; `HITLS_CRYPTO_CLASSIC_MCELIECE` or `HITLS_CRYPTO_FRODOKEM` will include this file even when `HITLS_CRYPTO_PROVIDER` is not set, leading to unintended compilation and potential build failures.</div>
+                <div class="fix-label">Fix:</div><pre>#if (defined(HITLS_CRYPTO_DSA) || defined(HITLS_CRYPTO_ED25519) || defined(HITLS_CRYPTO_X25519) || \
+    defined(HITLS_CRYPTO_RSA) || defined(HITLS_CRYPTO_DH) || defined(HITLS_CRYPTO_ECDSA) || \
+    defined(HITLS_CRYPTO_ECDH) || defined(HITLS_CRYPTO_SM2) || defined(HITLS_CRYPTO_PAILLIER) || \
+    defined(HITLS_CRYPTO_ELGAMAL) || defined(HITLS_CRYPTO_SLH_DSA) || defined(HITLS_CRYPTO_MLKEM) || \
+    defined(HITLS_CRYPTO_MLDSA) || defined(HITLS_CRYPTO_COMPOSITE) || defined(HITLS_CRYPTO_HYBRIDKEM) || \
+    defined(HITLS_CRYPTO_CLASSIC_MCELIECE) || defined(HITLS_CRYPTO_FRODOKEM)) &amp;&amp; \
+    defined(HITLS_CRYPTO_PROVIDER)</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">CRYPT_CompositeSetAlgInfo overwrites contexts without freeing existing ones</div>
+                <div class="issue-location">crypto/composite/src/composite.c:249-252</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: GEMINI</span>
+                    <span class="confidence-badge likely">置信度: 较可信</span>
+                </div>
+                <pre>ctx-&gt;pqcMethod = pqcMethod;
+ctx-&gt;tradMethod = tradMethod;
+ctx-&gt;pqcCtx = pqcMethod-&gt;newCtx();
+RETURN_RET_IF((ctx-&gt;pqcCtx == NULL), CRYPT_MEM_ALLOC_FAIL);
+ctx-&gt;tradCtx = tradMethod-&gt;newCtx();</pre>
+                <div class="problem"><strong>Issue:</strong> When `CRYPT_CompositeSetAlgInfo` is called multiple times, it allocates new `pqcCtx`/`tradCtx` without freeing any existing contexts, leaking the previous allocations.</div>
+                <div class="fix-label">Fix:</div><pre>if (ctx-&gt;pqcCtx != NULL &amp;&amp; ctx-&gt;pqcMethod != NULL &amp;&amp; ctx-&gt;pqcMethod-&gt;freeCtx != NULL) {
+    ctx-&gt;pqcMethod-&gt;freeCtx(ctx-&gt;pqcCtx);
+}
+if (ctx-&gt;tradCtx != NULL &amp;&amp; ctx-&gt;tradMethod != NULL &amp;&amp; ctx-&gt;tradMethod-&gt;freeCtx != NULL) {
+    ctx-&gt;tradMethod-&gt;freeCtx(ctx-&gt;tradCtx);
+}
+ctx-&gt;pqcCtx = NULL;
+ctx-&gt;tradCtx = NULL;
+
+ctx-&gt;pqcMethod = pqcMethod;
+ctx-&gt;tradMethod = tradMethod;
+ctx-&gt;pqcCtx = pqcMethod-&gt;newCtx();
+RETURN_RET_IF(ctx-&gt;pqcCtx == NULL, CRYPT_MEM_ALLOC_FAIL);
+ctx-&gt;tradCtx = tradMethod-&gt;newCtx();</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">CRYPT_CompositeSetAlgInfo leaves ctx->info set on allocation failure</div>
+                <div class="issue-location">crypto/composite/src/composite.c:251-258</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: GEMINI</span>
+                    <span class="confidence-badge likely">置信度: 较可信</span>
+                </div>
+                <pre>ctx-&gt;tradCtx = tradMethod-&gt;newCtx();
+if (ctx-&gt;tradCtx == NULL) {
+    pqcMethod-&gt;freeCtx(ctx-&gt;pqcCtx);
+    ctx-&gt;pqcCtx = NULL;
+    return CRYPT_MEM_ALLOC_FAIL;
+}</pre>
+                <div class="problem"><strong>Issue:</strong> If `tradMethod->newCtx()` fails, the function returns `CRYPT_MEM_ALLOC_FAIL` after freeing only `pqcCtx`, but leaves `ctx->info`, `ctx->pqcMethod`, and `ctx->tradMethod` set. This leaves a partially initialized context that can later be misused (e.g., `CRYPT_COMPOSITE_SetPrvKey` will proceed with `info` set but `pqcCtx`/`tradCtx` NULL).</div>
+                <div class="fix-label">Fix:</div><pre>ctx-&gt;tradCtx = tradMethod-&gt;newCtx();
+if (ctx-&gt;tradCtx == NULL) {
+    ret = CRYPT_MEM_ALLOC_FAIL;
+    goto ERR;
+}
+/* ... */
+ERR:
+if (ctx-&gt;pqcCtx != NULL) { pqcMethod-&gt;freeCtx(ctx-&gt;pqcCtx); }
+if (ctx-&gt;tradCtx != NULL) { tradMethod-&gt;freeCtx(ctx-&gt;tradCtx); }
+ctx-&gt;pqcCtx = NULL;
+ctx-&gt;tradCtx = NULL;
+ctx-&gt;info = NULL;
+ctx-&gt;pqcMethod = NULL;
+ctx-&gt;tradMethod = NULL;
+return ret;</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">DupCtx leaks duplicated sub-context when one dupCtx fails</div>
+                <div class="issue-location">crypto/composite/src/composite.c:162-176</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CLAUDE</span>
+                    <span class="confidence-badge likely">置信度: 较可信</span>
+                </div>
+                <pre>if (ctx-&gt;pqcMethod != NULL &amp;&amp; ctx-&gt;tradMethod != NULL) {
+    newCtx-&gt;pqcCtx = ctx-&gt;pqcMethod-&gt;dupCtx(ctx-&gt;pqcCtx);
+    newCtx-&gt;tradCtx = ctx-&gt;tradMethod-&gt;dupCtx(ctx-&gt;tradCtx);
+    if (newCtx-&gt;pqcCtx == NULL || newCtx-&gt;tradCtx == NULL) {
+        BSL_ERR_PUSH_ERROR(CRYPT_MEM_ALLOC_FAIL);
+        goto ERR;
+    }
+}</pre>
+                <div class="problem"><strong>Issue:</strong> `CRYPT_COMPOSITE_DupCtx` calls both `dupCtx` functions before checking results. If one succeeds and the other fails, `goto ERR` calls `CRYPT_COMPOSITE_FreeCtx(newCtx)` while `newCtx->pqcMethod`/`tradMethod` are still NULL, so the successfully duplicated sub-context is not freed.</div>
+                <div class="fix-label">Fix:</div><pre>newCtx-&gt;pqcMethod = ctx-&gt;pqcMethod;
+newCtx-&gt;tradMethod = ctx-&gt;tradMethod;
+if (newCtx-&gt;pqcMethod != NULL &amp;&amp; newCtx-&gt;tradMethod != NULL) {
+    newCtx-&gt;pqcCtx = newCtx-&gt;pqcMethod-&gt;dupCtx(ctx-&gt;pqcCtx);
+    if (newCtx-&gt;pqcCtx == NULL) { BSL_ERR_PUSH_ERROR(CRYPT_MEM_ALLOC_FAIL); goto ERR; }
+    newCtx-&gt;tradCtx = newCtx-&gt;tradMethod-&gt;dupCtx(ctx-&gt;tradCtx);
+    if (newCtx-&gt;tradCtx == NULL) { BSL_ERR_PUSH_ERROR(CRYPT_MEM_ALLOC_FAIL); goto ERR; }
+}</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">SetPrvKey/SetPubKey accept oversized composite keys without validation</div>
+                <div class="issue-location">crypto/composite/src/composite.c:432-456</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CLAUDE</span>
+                    <span class="confidence-badge likely">置信度: 较可信</span>
+                </div>
+                <pre>RETURN_RET_IF(ctx-&gt;info == NULL, CRYPT_COMPOSITE_KEYINFO_NOT_SET);
+RETURN_RET_IF(prv-&gt;len &lt;= ctx-&gt;info-&gt;pqcPrvkeyLen, CRYPT_COMPOSITE_KEYLEN_ERROR);
+ctx-&gt;prvKey = (uint8_t *)BSL_SAL_Malloc(prv-&gt;len);
+...
+RETURN_RET_IF(pub-&gt;len &lt;= ctx-&gt;info-&gt;pqcPubkeyLen, CRYPT_COMPOSITE_KEYLEN_ERROR);
+ctx-&gt;pubKey = (uint8_t *)BSL_SAL_Malloc(pub-&gt;len);</pre>
+                <div class="problem"><strong>Issue:</strong> `CRYPT_COMPOSITE_SetPrvKey` and `CRYPT_COMPOSITE_SetPubKey` only check that input length is larger than the PQC portion, but do not cap the total length. Oversized buffers are accepted and passed to the traditional key setters with a length larger than expected, allowing malformed input and potential downstream failures.</div>
+                <div class="fix-label">Fix:</div><pre>RETURN_RET_IF(prv-&gt;len &lt;= ctx-&gt;info-&gt;pqcPrvkeyLen, CRYPT_COMPOSITE_KEYLEN_ERROR);
+RETURN_RET_IF(prv-&gt;len &gt; ctx-&gt;info-&gt;pqcPrvkeyLen + ctx-&gt;info-&gt;tradPrvkeyLen,
+              CRYPT_COMPOSITE_KEYLEN_ERROR);
+
+RETURN_RET_IF(pub-&gt;len &lt;= ctx-&gt;info-&gt;pqcPubkeyLen, CRYPT_COMPOSITE_KEYLEN_ERROR);
+RETURN_RET_IF(pub-&gt;len &gt; ctx-&gt;info-&gt;pqcPubkeyLen + ctx-&gt;info-&gt;tradPubkeyLen,
+              CRYPT_COMPOSITE_KEYLEN_ERROR);</pre>
+            </div>
+</div>
+<div class="section"><div class="section-title low">Low</div>
+<div class="issue">
+                <div class="issue-title">Potential overflow when summing component key lengths</div>
+                <div class="issue-location">crypto/composite/src/composite.c:386-388</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CLAUDE</span>
+                    <span class="confidence-badge evaluate">置信度: 需评估</span>
+                </div>
+                <pre>ctx-&gt;prvLen = pqcPrv.dataLen + tradPrv.dataLen;
+ctx-&gt;pubLen = pqcPub.dataLen + tradPub.dataLen;
+RETURN_RET_IF_ERR(CRYPT_CompositeCreateKeyBuf(ctx), ret);</pre>
+                <div class="problem"><strong>Issue:</strong> `ctx->prvLen` and `ctx->pubLen` are computed by adding two lengths without overflow checks. If the inputs are malformed or unexpectedly large, the addition can wrap and lead to undersized allocations and memory corruption.</div>
+                <div class="fix-label">Fix:</div><pre>if (pqcPrv.dataLen &gt; UINT32_MAX - tradPrv.dataLen ||
+    pqcPub.dataLen &gt; UINT32_MAX - tradPub.dataLen) {
+    ret = CRYPT_COMPOSITE_KEYLEN_ERROR;
+    goto ERR;
+}
+ctx-&gt;prvLen = pqcPrv.dataLen + tradPrv.dataLen;
+ctx-&gt;pubLen = pqcPub.dataLen + tradPub.dataLen;</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">memcpy_s return values ignored when assembling composite key material</div>
+                <div class="issue-location">crypto/composite/src/composite.c:390-393</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CLAUDE</span>
+                    <span class="confidence-badge likely">置信度: 较可信</span>
+                </div>
+                <pre>(void)memcpy_s(ctx-&gt;prvKey, ctx-&gt;prvLen, pqcPrv.data, pqcPrv.dataLen);
+(void)memcpy_s(ctx-&gt;prvKey + pqcPrv.dataLen, ctx-&gt;prvLen - pqcPrv.dataLen, tradPrv.data, tradPrv.dataLen);
+(void)memcpy_s(ctx-&gt;pubKey, ctx-&gt;pubLen, pqcPub.data, pqcPub.dataLen);
+(void)memcpy_s(ctx-&gt;pubKey + pqcPub.dataLen, ctx-&gt;pubLen - pqcPub.dataLen, tradPub.data, tradPub.dataLen);</pre>
+                <div class="problem"><strong>Issue:</strong> The `memcpy_s` return values are discarded in `CRYPT_COMPOSITE_GenKey`. If any copy fails, the function continues with partially copied key material.</div>
+                <div class="fix-label">Fix:</div><pre>ret = memcpy_s(ctx-&gt;prvKey, ctx-&gt;prvLen, pqcPrv.data, pqcPrv.dataLen);
+GOTO_ERR_IF(ret != EOK, ret);
+ret = memcpy_s(ctx-&gt;prvKey + pqcPrv.dataLen, ctx-&gt;prvLen - pqcPrv.dataLen, tradPrv.data, tradPrv.dataLen);
+GOTO_ERR_IF(ret != EOK, ret);
+ret = memcpy_s(ctx-&gt;pubKey, ctx-&gt;pubLen, pqcPub.data, pqcPub.dataLen);
+GOTO_ERR_IF(ret != EOK, ret);
+ret = memcpy_s(ctx-&gt;pubKey + pqcPub.dataLen, ctx-&gt;pubLen - pqcPub.dataLen, tradPub.data, tradPub.dataLen);
+GOTO_ERR_IF(ret != EOK, ret);</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">Ed25519 public key length control call return ignored</div>
+                <div class="issue-location">crypto/composite/src/composite_encdec.c:330-335</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CLAUDE, CODEX</span>
+                    <span class="confidence-badge trusted">置信度: 可信</span>
+                </div>
+                <pre>uint32_t pubLen = 0;
+ctx-&gt;tradMethod-&gt;ctrl(ctx-&gt;tradCtx, CRYPT_CTRL_GET_BITS, &amp;pubLen, sizeof(pubLen));
+RETURN_RET_IF(pubLen == 0, CRYPT_EAL_ALG_NOT_SUPPORT);</pre>
+                <div class="problem"><strong>Issue:</strong> `CRYPT_CompositeGetEd25519PubKey` ignores the return value from `ctrl`, so an error is silently masked and treated as “not supported,” complicating debugging and error handling.</div>
+                <div class="fix-label">Fix:</div><pre>uint32_t pubLen = 0;
+RETURN_RET_IF_ERR(ctx-&gt;tradMethod-&gt;ctrl(ctx-&gt;tradCtx, CRYPT_CTRL_GET_BITS, &amp;pubLen, sizeof(pubLen)), ret);
+RETURN_RET_IF(pubLen == 0, CRYPT_EAL_ALG_NOT_SUPPORT);</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">Passing pointer-to-array instead of element pointer to setPrv/setPub</div>
+                <div class="issue-location">crypto/composite/src/composite_encdec.c:439-441</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: GEMINI</span>
+                    <span class="confidence-badge likely">置信度: 较可信</span>
+                </div>
+                <pre>RETURN_RET_IF_ERR(ctx-&gt;tradMethod-&gt;setPrv(ctx-&gt;tradCtx, &amp;rsaParam), ret);
+RETURN_RET_IF_ERR(ctx-&gt;tradMethod-&gt;setPub(ctx-&gt;tradCtx, &amp;rsaParam), ret);
+...
+RETURN_RET_IF_ERR(ctx-&gt;tradMethod-&gt;setPub(ctx-&gt;tradCtx, &amp;rsaParam), ret);</pre>
+                <div class="problem"><strong>Issue:</strong> `&rsaParam` is a pointer to an array (`BSL_Param (*)[N]`), not a `BSL_Param *`. This is a type mismatch and may compile with warnings or lead to incorrect pointer arithmetic in the callee.</div>
+                <div class="fix-label">Fix:</div><pre>RETURN_RET_IF_ERR(ctx-&gt;tradMethod-&gt;setPrv(ctx-&gt;tradCtx, rsaParam), ret);
+RETURN_RET_IF_ERR(ctx-&gt;tradMethod-&gt;setPub(ctx-&gt;tradCtx, rsaParam), ret);</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">Missing error push on allocation failure in ParsePkcs8key</div>
+                <div class="issue-location">crypto/codecskey/src/crypt_decoder_composite.c:82-85</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CLAUDE</span>
+                    <span class="confidence-badge likely">置信度: 较可信</span>
+                </div>
+                <pre>CRYPT_CompositeCtx *pctx = CRYPT_COMPOSITE_NewCtxEx(libCtx);
+if (pctx == NULL) {
+    return CRYPT_MEM_ALLOC_FAIL;
+}</pre>
+                <div class="problem"><strong>Issue:</strong> When `CRYPT_COMPOSITE_NewCtxEx` fails, the function returns `CRYPT_MEM_ALLOC_FAIL` without pushing the error code, unlike other error paths.</div>
+                <div class="fix-label">Fix:</div><pre>CRYPT_CompositeCtx *pctx = CRYPT_COMPOSITE_NewCtxEx(libCtx);
+if (pctx == NULL) {
+    BSL_ERR_PUSH_ERROR(CRYPT_MEM_ALLOC_FAIL);
+    return CRYPT_MEM_ALLOC_FAIL;
+}</pre>
+            </div>
+</div>
+</div></body></html>

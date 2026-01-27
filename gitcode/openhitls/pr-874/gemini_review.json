@@ -1,0 +1,52 @@
+[
+  {
+    "source": "gemini",
+    "file": "crypto/composite/src/composite.c",
+    "line": "247-248",
+    "severity": "high",
+    "title": "Memory leak when setting algorithm parameters multiple times",
+    "problem": "The function `CRYPT_CompositeSetAlgInfo` allocates new `pqcCtx` and `tradCtx` without checking if they are already allocated. If `CRYPT_COMPOSITE_Ctrl` with `CRYPT_CTRL_SET_PARA_BY_ID` is called multiple times on the same context, the previously allocated contexts are leaked.",
+    "code": "ctx->pqcMethod = pqcMethod;\n    ctx->tradMethod = tradMethod;\n    ctx->pqcCtx = pqcMethod->newCtx();\n    RETURN_RET_IF((ctx->pqcCtx == NULL), CRYPT_MEM_ALLOC_FAIL);\n    ctx->tradCtx = tradMethod->newCtx();",
+    "fix": "ctx->pqcMethod = pqcMethod;\n    ctx->tradMethod = tradMethod;\n    if (ctx->pqcCtx != NULL) {\n        ctx->pqcMethod->freeCtx(ctx->pqcCtx);\n        ctx->pqcCtx = NULL;\n    }\n    ctx->pqcCtx = pqcMethod->newCtx();\n    RETURN_RET_IF((ctx->pqcCtx == NULL), CRYPT_MEM_ALLOC_FAIL);\n    if (ctx->tradCtx != NULL) {\n        ctx->tradMethod->freeCtx(ctx->tradCtx);\n        ctx->tradCtx = NULL;\n    }\n    ctx->tradCtx = tradMethod->newCtx();"
+  },
+  {
+    "source": "gemini",
+    "file": "crypto/composite/src/composite.c",
+    "line": "261",
+    "severity": "medium",
+    "title": "Inconsistent state on memory allocation failure",
+    "problem": "In `CRYPT_CompositeSetAlgInfo`, if `tradMethod->newCtx()` fails, the function returns `CRYPT_MEM_ALLOC_FAIL` but leaves `ctx->info` set. This puts the context in a partially initialized state (info set, but contexts null), which might lead to confusing behavior or crashes if other functions assume `info != NULL` implies valid contexts. The `ERR` label handles this by setting `info = NULL`, but this return path does not jump to `ERR`.",
+    "code": "if (ctx->tradCtx == NULL) {\n        pqcMethod->freeCtx(ctx->pqcCtx);\n        ctx->pqcCtx = NULL;\n        return CRYPT_MEM_ALLOC_FAIL;\n    }",
+    "fix": "if (ctx->tradCtx == NULL) {\n        pqcMethod->freeCtx(ctx->pqcCtx);\n        ctx->pqcCtx = NULL;\n        ctx->info = NULL;\n        return CRYPT_MEM_ALLOC_FAIL;\n    }"
+  },
+  {
+    "source": "gemini",
+    "file": "crypto/composite/src/composite_encdec.c",
+    "line": "462-475",
+    "severity": "medium",
+    "title": "Potential memory leak in ASN.1 decoding for RSA Private Key",
+    "problem": "The function `CRYPT_CompositeSetRsaPrvKey` uses `BSL_ASN1_DecodeTemplate` to populate `asn1` buffers (specifically for INTEGER types like D, N, P, Q...). If `BSL_ASN1_DecodeTemplate` allocates memory for these fields (which is common for normalizing Integers in ASN.1 decoders), that memory is never freed. The `asn1` array is on the stack, but the `buff` pointers within it might point to allocated memory. This pattern is repeated in `CRYPT_CompositeSetRsaPubKey` and `CRYPT_CompositeSetEcdsaPrvKey`.",
+    "code": "RETURN_RET_IF_ERR(\n        BSL_ASN1_DecodeTemplate(&templ, NULL, &encode->data, &encode->dataLen, asn1, CRYPT_RSA_PRV_OTHER_PRIME_IDX + 1),\n        ret);\n    // ... use asn1 ...\n    RETURN_RET_IF_ERR(ctx->tradMethod->setPrv(ctx->tradCtx, &rsaParam), ret);\n    RETURN_RET_IF_ERR(ctx->tradMethod->setPub(ctx->tradCtx, &rsaParam), ret);\n    RETURN_RET_IF_ERR(CRYPT_CompositeSetRsaPadding(ctx), ret);\n    return CRYPT_SUCCESS;",
+    "fix": "// Verify BSL_ASN1_DecodeTemplate behavior. If it allocates, add cleanup:\n    // After usage:\n    for (int i = 0; i <= CRYPT_RSA_PRV_OTHER_PRIME_IDX; i++) {\n        if (asn1[i].buff != NULL && asn1[i].buff < encode->data || asn1[i].buff >= encode->data + encode->dataLen) {\n             // Logic assumes if not pointing into source, it was allocated. \n             // Ideally use a BSL_ASN1_FreeTemplate or similar if available, or BSL_SAL_Free.\n             BSL_SAL_Free(asn1[i].buff);\n        }\n    }"
+  },
+  {
+    "source": "gemini",
+    "file": "crypto/composite/src/composite_encdec.c",
+    "line": "153-157",
+    "severity": "low",
+    "title": "Hardcoded salt length logic in RSA PSS padding",
+    "problem": "The salt length selection logic is hardcoded based on the bit length of the RSA key (`bits == 4096 ? 48 : 32`). This implicitly assumes that 4096-bit keys always use SHA-384 (48 bytes) and other keys use SHA-256 (32 bytes). While this matches the current `g_composite_info` table, it is brittle and may break if new RSA-PSS combinations are added (e.g., RSA-3072 with SHA-384).",
+    "code": "int32_t mdId = ctx->info->tradHashId;\n        int32_t mgfId = ctx->info->tradHashId;\n        int32_t saltLen = ctx->info->bits == 4096 ? 48 : 32;",
+    "fix": "int32_t mdId = ctx->info->tradHashId;\n        int32_t mgfId = ctx->info->tradHashId;\n        // Derive salt length from the digest size of tradHashId instead of bit length\n        int32_t saltLen = 32; // Default to SHA256 size\n        if (mdId == CRYPT_MD_SHA384) {\n            saltLen = 48;\n        } else if (mdId == CRYPT_MD_SHA512) {\n             saltLen = 64;\n        }"
+  },
+  {
+    "source": "gemini",
+    "file": "crypto/composite/src/composite_encdec.c",
+    "line": "474",
+    "severity": "low",
+    "title": "Passing pointer to array instead of pointer to element",
+    "problem": "`rsaParam` is declared as an array `BSL_Param rsaParam[]`. The function call `ctx->tradMethod->setPrv(ctx->tradCtx, &rsaParam)` passes the address of the array (`BSL_Param (*)[N]`), whereas the function likely expects a pointer to the first element (`BSL_Param *`). While they represent the same address, it is a type mismatch.",
+    "code": "RETURN_RET_IF_ERR(ctx->tradMethod->setPrv(ctx->tradCtx, &rsaParam), ret);",
+    "fix": "RETURN_RET_IF_ERR(ctx->tradMethod->setPrv(ctx->tradCtx, rsaParam), ret);"
+  }
+]

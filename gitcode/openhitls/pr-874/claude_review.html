@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Code Review: openHiTLS/openhitls#874 - CLAUDE</title>
+    <style>
+        :root { --critical: #dc2626; --high: #ea580c; --medium: #ca8a04; --low: #65a30d; }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: system-ui, sans-serif; background: #f8fafc; color: #1e293b; padding: 2rem; line-height: 1.6; }
+        .container { max-width: 900px; margin: 0 auto; }
+        h1 { font-size: 1.5rem; margin-bottom: 0.5rem; }
+        .subtitle { color: #64748b; margin-bottom: 2rem; }
+        .section { margin-bottom: 2rem; }
+        .section-title { font-size: 1.1rem; font-weight: 600; padding: 0.5rem 1rem; border-radius: 0.5rem 0.5rem 0 0; color: white; }
+        .section-title.critical { background: var(--critical); }
+        .section-title.high { background: var(--high); }
+        .section-title.medium { background: var(--medium); }
+        .section-title.low { background: var(--low); }
+        .issue { background: white; border: 1px solid #e2e8f0; border-top: none; padding: 1rem; }
+        .issue:last-child { border-radius: 0 0 0.5rem 0.5rem; }
+        .issue-title { font-weight: 600; margin-bottom: 0.25rem; }
+        .issue-location { font-family: monospace; font-size: 0.875rem; color: #64748b; margin-bottom: 0.75rem; }
+        .issue-source { font-size: 0.75rem; color: #94a3b8; margin-top: 0.5rem; }
+        pre { background: #1e293b; color: #e2e8f0; padding: 0.75rem; border-radius: 0.375rem; overflow-x: auto; font-size: 0.875rem; margin: 0.5rem 0; }
+        .problem { margin: 0.75rem 0; }
+        .fix-label { font-weight: 600; margin-top: 0.75rem; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Code Review: openHiTLS/openhitls#874 - CLAUDE</h1>
+        <div class="subtitle"></div>
+<div class="section"><div class="section-title high">High</div>
+<div class="issue">
+                <div class="issue-title">Missing NULL check for tradMethod->dupCtx result before use</div>
+                <div class="issue-location">crypto/composite/src/composite.c:181-192</div>
+                <pre>if (ctx-&gt;pqcMethod != NULL &amp;&amp; ctx-&gt;tradMethod != NULL) {
+        newCtx-&gt;pqcCtx = ctx-&gt;pqcMethod-&gt;dupCtx(ctx-&gt;pqcCtx);
+        newCtx-&gt;tradCtx = ctx-&gt;tradMethod-&gt;dupCtx(ctx-&gt;tradCtx);
+        if (newCtx-&gt;pqcCtx == NULL || newCtx-&gt;tradCtx == NULL) {
+            BSL_ERR_PUSH_ERROR(CRYPT_MEM_ALLOC_FAIL);
+            goto ERR;
+        }
+    }</pre>
+                <div class="problem"><strong>Issue:</strong> In CRYPT_COMPOSITE_DupCtx, if pqcMethod->dupCtx succeeds but tradMethod->dupCtx fails, the code returns NULL without cleaning up the successfully allocated pqcCtx. More critically, it uses newCtx->pqcCtx which could be non-NULL to check if both succeeded, but if tradCtx allocation fails, pqcCtx is leaked.</div>
+                <div class="fix-label">Fix:</div><pre>if (ctx-&gt;pqcMethod != NULL &amp;&amp; ctx-&gt;tradMethod != NULL) {
+        newCtx-&gt;pqcCtx = ctx-&gt;pqcMethod-&gt;dupCtx(ctx-&gt;pqcCtx);
+        if (newCtx-&gt;pqcCtx == NULL) {
+            BSL_ERR_PUSH_ERROR(CRYPT_MEM_ALLOC_FAIL);
+            goto ERR;
+        }
+        newCtx-&gt;tradCtx = ctx-&gt;tradMethod-&gt;dupCtx(ctx-&gt;tradCtx);
+        if (newCtx-&gt;tradCtx == NULL) {
+            BSL_ERR_PUSH_ERROR(CRYPT_MEM_ALLOC_FAIL);
+            goto ERR;
+        }
+    }</pre>
+                <div class="issue-source">Reviewer: claude</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">Missing NULL check on method before dereferencing in sign/verify</div>
+                <div class="issue-location">crypto/composite/src/composite.c:479</div>
+                <pre>GOTO_ERR_IF(ctx-&gt;pqcMethod-&gt;ctrl(ctx-&gt;pqcCtx, CRYPT_CTRL_SET_CTX_INFO, (void *)(uintptr_t)ctx-&gt;info-&gt;label,
+        (uint32_t)strlen(ctx-&gt;info-&gt;label)), ret);
+    int32_t pqcRet = ctx-&gt;pqcMethod-&gt;sign(ctx-&gt;pqcCtx, CRYPT_MD_MAX, msg.data, msg.len, sign, &amp;pqcSigLen);
+    int32_t tradRet = ctx-&gt;tradMethod-&gt;sign(ctx-&gt;tradCtx, ctx-&gt;info-&gt;tradHashId, msg.data, msg.len, sign + pqcSigLen,
+                                           &amp;tradSigLen);</pre>
+                <div class="problem"><strong>Issue:</strong> In CRYPT_COMPOSITE_Sign, the code calls ctx->pqcMethod->sign and ctx->tradMethod->sign but doesn't verify that ctx->pqcMethod and ctx->tradMethod are non-NULL before use. If these are NULL, it will crash.</div>
+                <div class="fix-label">Fix:</div><pre>RETURN_RET_IF(ctx-&gt;pqcMethod == NULL || ctx-&gt;tradMethod == NULL, CRYPT_COMPOSITE_KEYINFO_NOT_SET);
+    GOTO_ERR_IF(ctx-&gt;pqcMethod-&gt;ctrl(ctx-&gt;pqcCtx, CRYPT_CTRL_SET_CTX_INFO, (void *)(uintptr_t)ctx-&gt;info-&gt;label,
+        (uint32_t)strlen(ctx-&gt;info-&gt;label)), ret);
+    int32_t pqcRet = ctx-&gt;pqcMethod-&gt;sign(ctx-&gt;pqcCtx, CRYPT_MD_MAX, msg.data, msg.len, sign, &amp;pqcSigLen);
+    int32_t tradRet = ctx-&gt;tradMethod-&gt;sign(ctx-&gt;tradCtx, ctx-&gt;info-&gt;tradHashId, msg.data, msg.len, sign + pqcSigLen,
+                                           &amp;tradSigLen);</pre>
+                <div class="issue-source">Reviewer: claude</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">Invalid range check for composite key type</div>
+                <div class="issue-location">crypto/codecskey/src/crypt_decoder_composite.c:30-33</div>
+                <pre>bool isCompositePubkey = (subPubkeyInfo.keyType &gt;= BSL_CID_MLDSA44_RSA2048_PSS_SHA256 &amp;&amp;
+                                   subPubkeyInfo.keyType &lt;= BSL_CID_MLDSA87_ECDSA_P521_SHA512);</pre>
+                <div class="problem"><strong>Issue:</strong> The range check uses hardcoded min/max values instead of constants. If new composite algorithms are added between these values but outside the expected range, they would be rejected. More critically, the check doesn't account for potential gaps in the enum values.</div>
+                <div class="fix-label">Fix:</div><pre>bool isCompositePubkey = (subPubkeyInfo.keyType &gt;= BSL_CID_MLDSA44_RSA2048_PSS_SHA256 &amp;&amp;
+                                   subPubkeyInfo.keyType &lt;= BSL_CID_MLDSA87_ECDSA_P521_SHA512) &amp;&amp;
+                                  !((subPubkeyInfo.keyType &gt; BSL_CID_MLDSA87_ECDSA_P521_SHA512 &amp;&amp;
+                                     subPubkeyInfo.keyType &lt; BSL_CID_MLDSA44_ED25519_SHA512));</pre>
+                <div class="issue-source">Reviewer: claude</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">Return value ignored in CRYPT_CompositeGetEd25519PubKey</div>
+                <div class="issue-location">crypto/composite/src/composite_encdec.c:254-260</div>
+                <pre>static int32_t CRYPT_CompositeGetEd25519PubKey(const CRYPT_CompositeCtx *ctx, BSL_Buffer *encode)
+{
+    int32_t ret;
+    uint32_t pubLen = 0;
+    ctx-&gt;tradMethod-&gt;ctrl(ctx-&gt;tradCtx, CRYPT_CTRL_GET_BITS, &amp;pubLen, sizeof(pubLen));
+    RETURN_RET_IF(pubLen == 0, CRYPT_EAL_ALG_NOT_SUPPORT);</pre>
+                <div class="problem"><strong>Issue:</strong> The return value from ctx->tradMethod->ctrl is ignored, but then pubLen is used. If the ctrl call fails, pubLen remains 0, causing BITS_TO_BYTES(0) = 0, leading to 0-size allocation.</div>
+                <div class="fix-label">Fix:</div><pre>static int32_t CRYPT_CompositeGetEd25519PubKey(const CRYPT_CompositeCtx *ctx, BSL_Buffer *encode)
+{
+    int32_t ret;
+    uint32_t pubLen = 0;
+    RETURN_RET_IF_ERR(ctx-&gt;tradMethod-&gt;ctrl(ctx-&gt;tradCtx, CRYPT_CTRL_GET_BITS, &amp;pubLen, sizeof(pubLen)), ret);
+    RETURN_RET_IF(pubLen == 0, CRYPT_EAL_ALG_NOT_SUPPORT);</pre>
+                <div class="issue-source">Reviewer: claude</div>
+            </div>
+</div>
+<div class="section"><div class="section-title medium">Medium</div>
+<div class="issue">
+                <div class="issue-title">Missing NULL check for ctx->info before dereferencing</div>
+                <div class="issue-location">crypto/composite/src/composite.c:257-262</div>
+                <pre>static int32_t CRYPT_CompositeSetctxInfo(CRYPT_CompositeCtx *ctx, void *val, uint32_t len)
+{
+    if (len &gt; COMPOSITE_MAX_CTX_BYTES) {
+        BSL_ERR_PUSH_ERROR(CRYPT_COMPOSITE_KEYLEN_ERROR);
+        return CRYPT_COMPOSITE_KEYLEN_ERROR;
+    }</pre>
+                <div class="problem"><strong>Issue:</strong> CRYPT_CompositeSetctxInfo uses ctx->info without checking if it's NULL first. If ctx->info is NULL, ctx->prvLen and ctx->pubLen may not be initialized, potentially leading to issues.</div>
+                <div class="fix-label">Fix:</div><pre>static int32_t CRYPT_CompositeSetctxInfo(CRYPT_CompositeCtx *ctx, void *val, uint32_t len)
+{
+    RETURN_RET_IF(ctx == NULL, CRYPT_NULL_INPUT);
+    RETURN_RET_IF(ctx-&gt;info == NULL, CRYPT_COMPOSITE_KEYINFO_NOT_SET);
+    if (len &gt; COMPOSITE_MAX_CTX_BYTES) {
+        BSL_ERR_PUSH_ERROR(CRYPT_COMPOSITE_KEYLEN_ERROR);
+        return CRYPT_COMPOSITE_KEYLEN_ERROR;
+    }</pre>
+                <div class="issue-source">Reviewer: claude</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">Missing NULL check for ctx->info in CRYPT_CompositeGetParaId</div>
+                <div class="issue-location">crypto/composite/src/composite.c:283-288</div>
+                <pre>static int32_t CRYPT_CompositeGetParaId(CRYPT_CompositeCtx *ctx, void *val, uint32_t len)
+{
+    RETURN_RET_IF(val == NULL || len != sizeof(uint32_t), CRYPT_INVALID_ARG);
+    RETURN_RET_IF(ctx-&gt;info == NULL, CRYPT_COMPOSITE_KEYINFO_NOT_SET);
+    *(int32_t *)val = ctx-&gt;info-&gt;paramId;
+    return CRYPT_SUCCESS;
+}</pre>
+                <div class="problem"><strong>Issue:</strong> The function returns CRYPT_COMPOSITE_KEYINFO_NOT_SET if ctx->info is NULL, but it doesn't check if ctx itself is NULL first.</div>
+                <div class="fix-label">Fix:</div><pre>static int32_t CRYPT_CompositeGetParaId(CRYPT_CompositeCtx *ctx, void *val, uint32_t len)
+{
+    RETURN_RET_IF(ctx == NULL, CRYPT_NULL_INPUT);
+    RETURN_RET_IF(val == NULL || len != sizeof(uint32_t), CRYPT_INVALID_ARG);
+    RETURN_RET_IF(ctx-&gt;info == NULL, CRYPT_COMPOSITE_KEYINFO_NOT_SET);
+    *(int32_t *)val = ctx-&gt;info-&gt;paramId;
+    return CRYPT_SUCCESS;
+}</pre>
+                <div class="issue-source">Reviewer: claude</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">Potential integer overflow in length calculation</div>
+                <div class="issue-location">crypto/composite/src/composite.c:364-367</div>
+                <pre>ctx-&gt;prvLen = pqcPrv.dataLen + tradPrv.dataLen;
+    ctx-&gt;pubLen = pqcPub.dataLen + tradPub.dataLen;
+    RETURN_RET_IF_ERR(CRYPT_CompositeCreateKeyBuf(ctx), ret);</pre>
+                <div class="problem"><strong>Issue:</strong> The length calculation `pqcPrv.dataLen + tradPrv.dataLen` could overflow if both values are large. While unlikely with the current key sizes, defensive coding should prevent this.</div>
+                <div class="fix-label">Fix:</div><pre>if (pqcPrv.dataLen &gt; UINT32_MAX - tradPrv.dataLen || pqcPub.dataLen &gt; UINT32_MAX - tradPub.dataLen) {
+        ret = CRYPT_COMPOSITE_KEYLEN_ERROR;
+        goto ERR;
+    }
+    ctx-&gt;prvLen = pqcPrv.dataLen + tradPrv.dataLen;
+    ctx-&gt;pubLen = pqcPub.dataLen + tradPub.dataLen;
+    RETURN_RET_IF_ERR(CRYPT_CompositeCreateKeyBuf(ctx), ret);</pre>
+                <div class="issue-source">Reviewer: claude</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">Missing bounds check before memcpy_s</div>
+                <div class="issue-location">crypto/composite/src/composite.c:409-414</div>
+                <pre>RETURN_RET_IF(ctx-&gt;info == NULL, CRYPT_COMPOSITE_KEYINFO_NOT_SET);
+    RETURN_RET_IF(prv-&gt;len &lt;= ctx-&gt;info-&gt;pqcPrvkeyLen, CRYPT_COMPOSITE_KEYLEN_ERROR);
+    ctx-&gt;prvKey = (uint8_t *)BSL_SAL_Malloc(prv-&gt;len);</pre>
+                <div class="problem"><strong>Issue:</strong> CRYPT_COMPOSITE_SetPrvKey checks that prv->len > pqcPrvkeyLen but doesn't verify that prv->len <= expected total key length. Malformed input could pass this check.</div>
+                <div class="fix-label">Fix:</div><pre>RETURN_RET_IF(ctx-&gt;info == NULL, CRYPT_COMPOSITE_KEYINFO_NOT_SET);
+    RETURN_RET_IF(prv-&gt;len &lt;= ctx-&gt;info-&gt;pqcPrvkeyLen, CRYPT_COMPOSITE_KEYLEN_ERROR);
+    RETURN_RET_IF(prv-&gt;len &gt; ctx-&gt;info-&gt;pqcPrvkeyLen + ctx-&gt;info-&gt;tradPrvkeyLen, CRYPT_COMPOSITE_KEYLEN_ERROR);
+    ctx-&gt;prvKey = (uint8_t *)BSL_SAL_Malloc(prv-&gt;len);</pre>
+                <div class="issue-source">Reviewer: claude</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">Missing bounds check in CRYPT_COMPOSITE_SetPubKey</div>
+                <div class="issue-location">crypto/composite/src/composite.c:428-433</div>
+                <pre>RETURN_RET_IF(ctx-&gt;info == NULL, CRYPT_COMPOSITE_KEYINFO_NOT_SET);
+    RETURN_RET_IF(pub-&gt;len &lt;= ctx-&gt;info-&gt;pqcPubkeyLen, CRYPT_COMPOSITE_KEYLEN_ERROR);
+    ctx-&gt;pubKey = (uint8_t *)BSL_SAL_Malloc(pub-&gt;len);</pre>
+                <div class="problem"><strong>Issue:</strong> Similar to SetPrvKey, only checks lower bound but not upper bound for total expected key length.</div>
+                <div class="fix-label">Fix:</div><pre>RETURN_RET_IF(ctx-&gt;info == NULL, CRYPT_COMPOSITE_KEYINFO_NOT_SET);
+    RETURN_RET_IF(pub-&gt;len &lt;= ctx-&gt;info-&gt;pqcPubkeyLen, CRYPT_COMPOSITE_KEYLEN_ERROR);
+    RETURN_RET_IF(pub-&gt;len &gt; ctx-&gt;info-&gt;pqcPubkeyLen + ctx-&gt;info-&gt;tradPubkeyLen, CRYPT_COMPOSITE_KEYLEN_ERROR);
+    ctx-&gt;pubKey = (uint8_t *)BSL_SAL_Malloc(pub-&gt;len);</pre>
+                <div class="issue-source">Reviewer: claude</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">Unchecked return value from memcpy_s</div>
+                <div class="issue-location">crypto/composite/src/composite.c:147</div>
+                <pre>(void)memcpy_s(ctx-&gt;prvKey, ctx-&gt;prvLen, pqcPrv.data, pqcPrv.dataLen);
+    (void)memcpy_s(ctx-&gt;prvKey + pqcPrv.dataLen, ctx-&gt;prvLen - pqcPrv.dataLen, tradPrv.data, tradPrv.dataLen);
+    (void)memcpy_s(ctx-&gt;pubKey, ctx-&gt;pubLen, pqcPub.data, pqcPub.dataLen);
+    (void)memcpy_s(ctx-&gt;pubKey + pqcPub.dataLen, ctx-&gt;pubLen - pqcPub.dataLen, tradPub.data, tradPub.dataLen);</pre>
+                <div class="problem"><strong>Issue:</strong> The return values from memcpy_s calls are explicitly cast to void and ignored. If the memcpy fails, the function continues with potentially corrupted data.</div>
+                <div class="fix-label">Fix:</div><pre>ret = memcpy_s(ctx-&gt;prvKey, ctx-&gt;prvLen, pqcPrv.data, pqcPrv.dataLen);
+    if (ret != EOK) { ret = CRYPT_ERR; goto ERR; }
+    ret = memcpy_s(ctx-&gt;prvKey + pqcPrv.dataLen, ctx-&gt;prvLen - pqcPrv.dataLen, tradPrv.data, tradPrv.dataLen);
+    if (ret != EOK) { ret = CRYPT_ERR; goto ERR; }
+    ret = memcpy_s(ctx-&gt;pubKey, ctx-&gt;pubLen, pqcPub.data, pqcPub.dataLen);
+    if (ret != EOK) { ret = CRYPT_ERR; goto ERR; }
+    ret = memcpy_s(ctx-&gt;pubKey + pqcPub.dataLen, ctx-&gt;pubLen - pqcPub.dataLen, tradPub.data, tradPub.dataLen);
+    if (ret != EOK) { ret = CRYPT_ERR; goto ERR; }</pre>
+                <div class="issue-source">Reviewer: claude</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">Missing error code push on failure</div>
+                <div class="issue-location">crypto/codecskey/src/crypt_decoder_composite.c:69</div>
+                <pre>CRYPT_CompositeCtx *pctx = CRYPT_COMPOSITE_NewCtxEx(libCtx);
+    if (pctx == NULL) {
+        return CRYPT_MEM_ALLOC_FAIL;
+    }</pre>
+                <div class="problem"><strong>Issue:</strong> When CRYPT_COMPOSITE_NewCtxEx fails, the function returns CRYPT_MEM_ALLOC_FAIL without pushing the error code using BSL_ERR_PUSH_ERROR, unlike other error paths.</div>
+                <div class="fix-label">Fix:</div><pre>CRYPT_CompositeCtx *pctx = CRYPT_COMPOSITE_NewCtxEx(libCtx);
+    if (pctx == NULL) {
+        BSL_ERR_PUSH_ERROR(CRYPT_MEM_ALLOC_FAIL);
+        return CRYPT_MEM_ALLOC_FAIL;
+    }</pre>
+                <div class="issue-source">Reviewer: claude</div>
+            </div>
+</div>
+</div></body></html>
