@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Code Review: openHiTLS/sdf4j#11 - CODEX</title>
+    <style>
+        :root { --critical: #dc2626; --high: #ea580c; --medium: #ca8a04; --low: #65a30d; }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: system-ui, sans-serif; background: #f8fafc; color: #1e293b; padding: 2rem; line-height: 1.6; }
+        .container { max-width: 900px; margin: 0 auto; }
+        h1 { font-size: 1.5rem; margin-bottom: 0.5rem; }
+        .subtitle { color: #64748b; margin-bottom: 2rem; }
+        .section { margin-bottom: 2rem; }
+        .section-title { font-size: 1.1rem; font-weight: 600; padding: 0.5rem 1rem; border-radius: 0.5rem 0.5rem 0 0; color: white; }
+        .section-title.critical { background: var(--critical); }
+        .section-title.high { background: var(--high); }
+        .section-title.medium { background: var(--medium); }
+        .section-title.low { background: var(--low); }
+        .issue { background: white; border: 1px solid #e2e8f0; border-top: none; padding: 1rem; }
+        .issue:last-child { border-radius: 0 0 0.5rem 0.5rem; }
+        .issue-title { font-weight: 600; margin-bottom: 0.25rem; }
+        .issue-location { font-family: monospace; font-size: 0.875rem; color: #64748b; margin-bottom: 0.75rem; }
+        .issue-source { font-size: 0.75rem; color: #94a3b8; margin-top: 0.5rem; }
+        pre { background: #1e293b; color: #e2e8f0; padding: 0.75rem; border-radius: 0.375rem; overflow-x: auto; font-size: 0.875rem; margin: 0.5rem 0; }
+        .problem { margin: 0.75rem 0; }
+        .fix-label { font-weight: 600; margin-top: 0.75rem; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Code Review: openHiTLS/sdf4j#11 - CODEX</h1>
+        <div class="subtitle"></div>
+<div class="section"><div class="section-title critical">Critical</div>
+<div class="issue">
+                <div class="issue-title">Buffer overflow in ECC conversions (missing length clamps)</div>
+                <div class="issue-location">sdf4j/src/main/native/src/type_conversion.c:300-449</div>
+                <pre>jsize len = (*env)-&gt;GetArrayLength(env, x_array);
+(*env)-&gt;GetByteArrayRegion(env, x_array, 0, len, (jbyte*)native_key-&gt;x);
+...
+jsize len = (*env)-&gt;GetArrayLength(env, y_array);
+(*env)-&gt;GetByteArrayRegion(env, y_array, 0, len, (jbyte*)native_key-&gt;y);</pre>
+                <div class="problem"><strong>Issue:</strong> The new code copies Java byte arrays directly into fixed-size ECC buffers without clamping to `ECCref_MAX_LEN`. If Java supplies longer arrays, this writes past the end of `ECCrefPublicKey`, `ECCSignature`, and `ECCCipher` fields, causing memory corruption.</div>
+                <div class="fix-label">Fix:</div><pre>jsize len = (*env)-&gt;GetArrayLength(env, x_array);
+if (len &gt; ECCref_MAX_LEN) len = ECCref_MAX_LEN;
+(*env)-&gt;GetByteArrayRegion(env, x_array, 0, len, (jbyte*)native_key-&gt;x);
+
+len = (*env)-&gt;GetArrayLength(env, y_array);
+if (len &gt; ECCref_MAX_LEN) len = ECCref_MAX_LEN;
+(*env)-&gt;GetByteArrayRegion(env, y_array, 0, len, (jbyte*)native_key-&gt;y);</pre>
+                <div class="issue-source">Reviewer: codex</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">Buffer overflow in ECC private key conversion</div>
+                <div class="issue-location">sdf4j/src/main/native/src/type_conversion.c:667-678</div>
+                <pre>jsize len = (*env)-&gt;GetArrayLength(env, k_array);
+(*env)-&gt;GetByteArrayRegion(env, k_array, 0, len, (jbyte*)native_key-&gt;K);</pre>
+                <div class="problem"><strong>Issue:</strong> `java_to_native_ECCPrivateKey` copies the Java `k` array into a fixed-size `ECCrefPrivateKey.K` buffer without clamping. Oversized input overflows the native struct.</div>
+                <div class="fix-label">Fix:</div><pre>memset(native_key, 0, sizeof(ECCrefPrivateKey));
+jsize len = (*env)-&gt;GetArrayLength(env, k_array);
+if (len &gt; ECCref_MAX_LEN) len = ECCref_MAX_LEN;
+(*env)-&gt;GetByteArrayRegion(env, k_array, 0, len, (jbyte*)native_key-&gt;K);</pre>
+                <div class="issue-source">Reviewer: codex</div>
+            </div>
+</div>
+<div class="section"><div class="section-title high">High</div>
+<div class="issue">
+                <div class="issue-title">Build break: undefined variable keyHandle</div>
+                <div class="issue-location">sdf4j/src/main/native/src/sdf_jni_keygen.c:662-668</div>
+                <pre>SDF_LOG_EXIT("SDF_ImportKey", ret);
+SDF_JNI_LOG("SDF_ImportKey: keyHandle=0x%lX", (unsigned long)keyHandle);
+return (jlong)key_handle;</pre>
+                <div class="problem"><strong>Issue:</strong> The new `SDF_ImportKey` JNI method logs `keyHandle`, but the variable is named `key_handle`. This is a compile error.</div>
+                <div class="fix-label">Fix:</div><pre>SDF_LOG_EXIT("SDF_ImportKey", ret);
+SDF_JNI_LOG("SDF_ImportKey: keyHandle=0x%lX", (unsigned long)key_handle);
+return (jlong)key_handle;</pre>
+                <div class="issue-source">Reviewer: codex</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">Double ReleasePrimitiveArrayCritical on aad_buf</div>
+                <div class="issue-location">sdf4j/src/main/native/src/sdf_jni_symmetric.c:960-967</div>
+                <pre>if (aad_buf != NULL) {
+    (*env)-&gt;ReleasePrimitiveArrayCritical(env, aad, aad_buf, JNI_ABORT);
+}
+if (aad_buf != NULL) {
+    (*env)-&gt;ReleasePrimitiveArrayCritical(env, aad, aad_buf, JNI_ABORT);
+}</pre>
+                <div class="problem"><strong>Issue:</strong> `aad_buf` is released twice in `JNI_SDF_AuthDec`, which can corrupt JNI state or crash the JVM.</div>
+                <div class="fix-label">Fix:</div><pre>if (aad_buf != NULL) {
+    (*env)-&gt;ReleasePrimitiveArrayCritical(env, aad, aad_buf, JNI_ABORT);
+}</pre>
+                <div class="issue-source">Reviewer: codex</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">Invalid free() of pinned JNI array</div>
+                <div class="issue-location">sdf4j/src/main/native/src/sdf_jni_symmetric.c:1229-1236</div>
+                <pre>if (aad_buf != NULL) {
+    (*env)-&gt;ReleasePrimitiveArrayCritical(env, aad, aad_buf, JNI_ABORT);
+}
+if (aad_buf != NULL) free(aad_buf);</pre>
+                <div class="problem"><strong>Issue:</strong> `aad_buf` is obtained via `GetPrimitiveArrayCritical` and must be released via `ReleasePrimitiveArrayCritical`. Calling `free(aad_buf)` is undefined behavior and can crash.</div>
+                <div class="fix-label">Fix:</div><pre>if (aad_buf != NULL) {
+    (*env)-&gt;ReleasePrimitiveArrayCritical(env, aad, aad_buf, JNI_ABORT);
+}</pre>
+                <div class="issue-source">Reviewer: codex</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">Invalid free() on GetPrimitiveArrayCritical buffers</div>
+                <div class="issue-location">sdf4j/src/main/native/src/sdf_jni_util.c:405-448</div>
+                <pre>if (iv_buf == NULL) {
+    free(key_buf);
+    throw_sdf_exception(env, 0x0100001C);
+    return NULL;
+}
+...
+if (enc_buf == NULL) {
+    free(key_buf);
+    if (iv_buf) free(iv_buf);
+    throw_sdf_exception(env, 0x0100001C);
+    return NULL;
+}
+...
+free(key_buf);
+if (iv_buf) free(iv_buf);
+free(enc_buf);</pre>
+                <div class="problem"><strong>Issue:</strong> `key_buf`, `iv_buf`, and `enc_buf` are obtained via `GetPrimitiveArrayCritical` but are freed with `free(...)`. This is invalid and can cause memory corruption or JVM crashes, including in error paths.</div>
+                <div class="fix-label">Fix:</div><pre>if (iv_buf == NULL) {
+    (*env)-&gt;ReleasePrimitiveArrayCritical(env, key, key_buf, JNI_ABORT);
+    throw_sdf_exception(env, 0x0100001C);
+    return NULL;
+}
+...
+if (enc_buf == NULL) {
+    (*env)-&gt;ReleasePrimitiveArrayCritical(env, key, key_buf, JNI_ABORT);
+    if (iv_buf != NULL) {
+        (*env)-&gt;ReleasePrimitiveArrayCritical(env, iv, iv_buf, JNI_ABORT);
+    }
+    throw_sdf_exception(env, 0x0100001C);
+    return NULL;
+}
+...
+(*env)-&gt;ReleasePrimitiveArrayCritical(env, key, key_buf, JNI_ABORT);
+if (iv_buf != NULL) {
+    (*env)-&gt;ReleasePrimitiveArrayCritical(env, iv, iv_buf, JNI_ABORT);
+}
+(*env)-&gt;ReleasePrimitiveArrayCritical(env, encData, enc_buf, JNI_ABORT);</pre>
+                <div class="issue-source">Reviewer: codex</div>
+            </div>
+</div>
+<div class="section"><div class="section-title medium">Medium</div>
+<div class="issue">
+                <div class="issue-title">NullPointerException on CloseDevice when gDevHandle is null</div>
+                <div class="issue-location">sdf4j/src/main/java/org/openhitls/sdf4j/SDF.java:181-184</div>
+                <pre>if (deviceHandle != gDevHandle) {
+    return;
+}</pre>
+                <div class="problem"><strong>Issue:</strong> `deviceHandle != gDevHandle` auto-unboxes `gDevHandle`. If `SDF_CloseDevice` is called before `SDF_OpenDevice` or after a close, `gDevHandle` is null and this throws a NullPointerException instead of behaving as a no-op or clean error.</div>
+                <div class="fix-label">Fix:</div><pre>if (gDevHandle == null || deviceHandle != gDevHandle.longValue()) {
+    return;
+}</pre>
+                <div class="issue-source">Reviewer: codex</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">OpenSession can throw NPE when device resource is missing</div>
+                <div class="issue-location">sdf4j/src/main/java/org/openhitls/sdf4j/SDF.java:216-221</div>
+                <pre>long handle = SDF_OpenSessionNative(deviceHandle);
+// 创建 SessionResource 并注册到 gDevResource 和 gSessResource
+SessionResource sessionResource = new SessionResource(handle);
+gSessResource.put(handle, sessionResource);</pre>
+                <div class="problem"><strong>Issue:</strong> `SessionResource` uses `gDevResource.addSession(...)` but `gDevResource` is only set in `SDF_OpenDevice`. Calling `SDF_OpenSession` without an open device (or after closing) now throws a NullPointerException instead of a controlled `SDFException`.</div>
+                <div class="fix-label">Fix:</div><pre>if (gDevResource == null) {
+    throw new SDFException(SDR_INARGERR);
+}
+long handle = SDF_OpenSessionNative(deviceHandle);
+SessionResource sessionResource = new SessionResource(handle);
+gSessResource.put(handle, sessionResource);</pre>
+                <div class="issue-source">Reviewer: codex</div>
+            </div>
+</div>
+</div></body></html>

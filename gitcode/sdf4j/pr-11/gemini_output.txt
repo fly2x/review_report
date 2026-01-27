@@ -1,0 +1,138 @@
+I will start by checking the repository status and getting the statistics of the changes between the specified commits to understand the scope of the PR.
+I will read the changes in `sdf4j/src/main/java/org/openhitls/sdf4j/SDF.java` to understand the API modifications.
+I will read `sdf4j/src/main/native/src/sdf_jni_register.c` to understand the new registration mechanism.
+I will search for `ExternalKeyEncrypt` in `sdf4j/src/main/java/org/openhitls/sdf4j/SDF.java` to verify if the native methods correspond to existing Java methods.
+I will read `sdf4j/src/main/native/src/sdf_jni_symmetric.c` to understand the significant changes and deletions.
+I will read `sdf4j/src/main/native/src/sdf_jni_symmetric.c` around line 1360 to investigate the `native_key_ptr` variable and the potential duplicate release in `JNI_SDF_AuthDec`.
+I will read `sdf4j/src/main/native/src/sdf_jni_symmetric.c` around line 1060 to verify the duplicate release in `JNI_SDF_AuthDec`.
+I will read `sdf4j/src/main/native/src/sdf_jni_symmetric.c` around line 980 to examine the `JNI_SDF_AuthDec` function and confirm the double release and proper resource management.
+I will read `sdf4j/src/main/native/src/sdf_jni_symmetric.c` around line 900 to locate and examine the `JNI_SDF_AuthDec` function.
+I will search for `InternalDecrypt_ECC` in `sdf4j/src/main/java/org/openhitls/sdf4j/SDF.java` to verify its signature.
+I will search for `GenerateAgreementDataWithECC` in `sdf4j/src/main/java/org/openhitls/sdf4j/SDF.java` to verify its signature.
+I will search for `GenerateAgreementDataAndKeyWithECC` in `sdf4j/src/main/java/org/openhitls/sdf4j/SDF.java` to verify its signature.
+I will read the changes in `sdf4j/src/main/native/include/sdf.h` to see the header modifications.
+I will read `sdf4j/src/main/native/src/sdf_jni_asymmetric.c` to examine the implementation of `SDF_ExchangeDigitEnvelopeBaseOnECC` and other asymmetric operations.
+I will read `sdf4j/src/main/native/src/sdf_jni_device.c` to check for any issues related to the deletions and changes.
+===ISSUE===
+FILE: sdf4j/src/main/native/src/sdf_jni_symmetric.c
+LINE: 1296
+SEVERITY: critical
+TITLE: Invalid free of JNI primitive array
+PROBLEM: In `JNI_SDF_AuthEncFinal`, if the native `SDF_AuthEncFinal` fails (returns non-SDR_OK), the code attempts to `free(output_buf)`. However, `output_buf` was obtained using `GetPrimitiveArrayCritical`, which may point to a pinned Java object or a copy managed by the JVM. Calling `free()` on it will corrupt the heap allocator and crash the JVM.
+CODE:
+```c
+    if (ret != SDR_OK) {
+        if (output_buf != NULL) free(output_buf);
+        free(tag_buf);
+        throw_sdf_exception(env, ret);
+        return NULL;
+    }
+```
+FIX:
+```c
+    if (ret != SDR_OK) {
+        if (output_buf != NULL) {
+            (*env)->ReleasePrimitiveArrayCritical(env, pucEncData, output_buf, JNI_ABORT);
+        }
+        free(tag_buf);
+        throw_sdf_exception(env, ret);
+        return NULL;
+    }
+```
+===END===
+
+===ISSUE===
+FILE: sdf4j/src/main/native/src/sdf_jni_symmetric.c
+LINE: 1045
+SEVERITY: critical
+TITLE: Double release of JNI primitive array
+PROBLEM: In `JNI_SDF_AuthDec`, the `aad_buf` (Additional Authenticated Data) is released twice using `ReleasePrimitiveArrayCritical` in the success cleanup path. This leads to undefined behavior, potentially corrupting JVM memory or crashing.
+CODE:
+```c
+    if (aad_buf != NULL) {
+        (*env)->ReleasePrimitiveArrayCritical(env, aad, aad_buf, JNI_ABORT);
+    }
+    if (aad_buf != NULL) {
+        (*env)->ReleasePrimitiveArrayCritical(env, aad, aad_buf, JNI_ABORT);
+    }
+```
+FIX:
+```c
+    if (aad_buf != NULL) {
+        (*env)->ReleasePrimitiveArrayCritical(env, aad, aad_buf, JNI_ABORT);
+    }
+```
+===END===
+
+===ISSUE===
+FILE: sdf4j/src/main/java/org/openhitls/sdf4j/SDF.java
+LINE: 57
+SEVERITY: high
+TITLE: Thread-unsafe resource management
+PROBLEM: The `SDF` class introduces instance-level state (`gSessResource` HashMap, `gDevResource` object) to track sessions and keys. These collections are accessed and modified by multiple methods (`SDF_OpenSession`, `SDF_CloseSession`, `SDF_GenerateKey...`) without any synchronization. If a single `SDF` instance is shared across threads (common for hardware device wrappers), this will lead to `ConcurrentModificationException` or state corruption (e.g., tracking leaks, double-frees).
+CODE:
+```java
+    private Long gDevHandle = null;
+    private DeviceResource gDevResource = null;
+    private java.util.Map<Long, SessionResource> gSessResource = new java.util.HashMap<>();
+```
+FIX:
+```java
+    private Long gDevHandle = null;
+    private DeviceResource gDevResource = null;
+    private java.util.Map<Long, SessionResource> gSessResource = new java.util.concurrent.ConcurrentHashMap<>();
+    
+    // Also ensure DeviceResource.sessions access is thread-safe, e.g., use Collections.synchronizedSet or ConcurrentHashMap.newKeySet()
+```
+===END===
+
+===ISSUE===
+FILE: sdf4j/src/main/native/src/sdf_jni_symmetric.c
+LINE: 94
+SEVERITY: high
+TITLE: JVM Garbage Collector blocking
+PROBLEM: The code uses `GetPrimitiveArrayCritical` to access byte arrays. This function temporarily disables the JVM Garbage Collector. Inside the critical region, the code calls `malloc` (which can lock) and, more importantly, calls the underlying SDF hardware library functions (`g_sdf_functions.SDF_EncryptUpdate`, etc.). If the hardware device or driver blocks or takes a significant amount of time (e.g., high load, hardware fault), the entire JVM GC will be paused, potentially causing the whole Java application to stall or become unresponsive.
+CODE:
+```c
+    jbyte *data_buf = (*env)->GetPrimitiveArrayCritical(env, data, NULL);
+    // ...
+    LONG ret = g_sdf_functions.SDF_EncryptUpdate(
+        (HANDLE)sessionHandle,
+        (BYTE*)data_buf,
+        // ...
+    );
+    (*env)->ReleasePrimitiveArrayCritical(env, data, data_buf, JNI_ABORT);
+```
+FIX:
+```c
+    /* Prefer GetByteArrayRegion / SetByteArrayRegion for potentially blocking operations */
+    jbyte *data_buf = (jbyte*)malloc(data_len);
+    if (data_buf == NULL) { ... }
+    (*env)->GetByteArrayRegion(env, data, 0, data_len, data_buf);
+    
+    LONG ret = g_sdf_functions.SDF_EncryptUpdate(..., (BYTE*)data_buf, ...);
+    
+    free(data_buf);
+```
+===END===
+
+===ISSUE===
+FILE: sdf4j/src/main/native/src/sdf_jni_asymmetric.c
+LINE: 345
+SEVERITY: medium
+TITLE: Potential buffer overflow in Envelope Exchange
+PROBLEM: `JNI_SDF_ExchangeDigitEnvelopeBaseOnECC` allocates the output buffer based solely on the input cipher length (`in_cipher->L`). If the operation results in a larger ciphertext (e.g., due to key wrapping overhead, padding, or format differences), `SDF_ExchangeDigitEnvelopeBaseOnECC` will write past the allocated buffer.
+CODE:
+```c
+    ULONG out_len = in_cipher->L;
+    ECCCipher *out_cipher = (ECCCipher*)calloc(1, sizeof(ECCCipher) + out_len);
+```
+FIX:
+```c
+    /* Ensure buffer is large enough for potential expansion. 
+       Consult SDF spec for maximum expansion. typically ECCref_MAX_CIPHER_LEN or similar constant */
+    ULONG out_len = in_cipher->L + 128; // Add safety margin
+    ECCCipher *out_cipher = (ECCCipher*)calloc(1, sizeof(ECCCipher) + out_len);
+    out_cipher->L = out_len; // Tell native lib the max buffer size if possible, otherwise rely on sufficient alloc
+```
+===END===

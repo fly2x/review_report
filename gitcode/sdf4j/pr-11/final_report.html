@@ -1,0 +1,444 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Final Report: openHiTLS/sdf4j#11</title>
+    <style>
+        :root { --critical: #dc2626; --high: #ea580c; --medium: #ca8a04; --low: #65a30d;
+                 --trusted: #059669; --likely: #0284c7; --evaluate: #7c3aed; }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: system-ui, sans-serif; background: #f8fafc; color: #1e293b; padding: 2rem; line-height: 1.6; }
+        .container { max-width: 900px; margin: 0 auto; }
+        h1 { font-size: 1.75rem; margin-bottom: 0.5rem; }
+        .subtitle { color: #64748b; margin-bottom: 1rem; }
+        .stats { display: flex; gap: 1rem; margin-bottom: 2rem; flex-wrap: wrap; }
+        .stat { background: white; border: 1px solid #e2e8f0; border-radius: 0.5rem; padding: 1rem; min-width: 100px; text-align: center; }
+        .stat-value { font-size: 1.5rem; font-weight: 700; }
+        .stat-label { font-size: 0.875rem; color: #64748b; }
+        .stat.critical .stat-value { color: var(--critical); }
+        .stat.high .stat-value { color: var(--high); }
+        .stat.medium .stat-value { color: var(--medium); }
+        .stat.low .stat-value { color: var(--low); }
+        .reviewers { background: #e0e7ff; color: #3730a3; padding: 0.5rem 1rem; border-radius: 0.5rem; margin-bottom: 2rem; }
+        .section { margin-bottom: 2rem; }
+        .section-title { font-size: 1.1rem; font-weight: 600; padding: 0.5rem 1rem; border-radius: 0.5rem 0.5rem 0 0; color: white; }
+        .section-title.critical { background: var(--critical); }
+        .section-title.high { background: var(--high); }
+        .section-title.medium { background: var(--medium); }
+        .section-title.low { background: var(--low); }
+        .issue { background: white; border: 1px solid #e2e8f0; border-top: none; padding: 1rem; }
+        .issue:last-child { border-radius: 0 0 0.5rem 0.5rem; }
+        .issue-title { font-weight: 600; margin-bottom: 0.25rem; }
+        .issue-location { font-family: monospace; font-size: 0.875rem; color: #64748b; margin-bottom: 0.5rem; }
+        .issue-meta { font-size: 0.75rem; margin-bottom: 0.75rem; display: flex; gap: 0.75rem; align-items: center; }
+        .issue-meta .reviewers { background: #f1f5f9; color: #475569; padding: 0.25rem 0.5rem; border-radius: 0.25rem; margin: 0; }
+        .confidence-badge { padding: 0.25rem 0.5rem; border-radius: 0.25rem; font-weight: 500; }
+        .confidence-badge.trusted { background: #d1fae5; color: #065f46; }
+        .confidence-badge.likely { background: #dbeafe; color: #1e40af; }
+        .confidence-badge.evaluate { background: #ede9fe; color: #5b21b6; }
+        pre { background: #1e293b; color: #e2e8f0; padding: 0.75rem; border-radius: 0.375rem; overflow-x: auto; font-size: 0.875rem; margin: 0.5rem 0; }
+        .problem { margin: 0.75rem 0; }
+        .fix-label { font-weight: 600; margin-top: 0.75rem; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Final Code Review Report</h1>
+        <div class="subtitle">openHiTLS/sdf4j - PR #11</div>
+        <p style="margin-bottom: 1rem;"></p>
+
+        <div class="stats">
+            <div class="stat"><div class="stat-value">15</div><div class="stat-label">Total</div></div>
+            <div class="stat critical"><div class="stat-value">4</div><div class="stat-label">Critical</div></div>
+            <div class="stat high"><div class="stat-value">3</div><div class="stat-label">High</div></div>
+            <div class="stat medium"><div class="stat-value">6</div><div class="stat-label">Medium</div></div>
+            <div class="stat low"><div class="stat-value">2</div><div class="stat-label">Low</div></div>
+        </div>
+
+        <div class="reviewers">Reviewers: claude, gemini, codex</div>
+<div class="section"><div class="section-title critical">Critical</div>
+<div class="issue">
+                <div class="issue-title">Unbounded ECC field copies can overflow native buffers</div>
+                <div class="issue-location">sdf4j/src/main/native/src/type_conversion.c:300-450</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CODEX</span>
+                    <span class="confidence-badge likely">置信度: 较可信</span>
+                </div>
+                <pre>jsize len = (*env)-&gt;GetArrayLength(env, x_array);
+(*env)-&gt;GetByteArrayRegion(env, x_array, 0, len, (jbyte*)native_cipher-&gt;x);
+
+...
+
+jsize len = (*env)-&gt;GetArrayLength(env, y_array);
+(*env)-&gt;GetByteArrayRegion(env, y_array, 0, len, (jbyte*)native_key-&gt;y);
+
+...
+
+jsize len = (*env)-&gt;GetArrayLength(env, r_array);
+(*env)-&gt;GetByteArrayRegion(env, r_array, 0, len, (jbyte*)native_sig-&gt;r);
+
+...
+
+jsize len = (*env)-&gt;GetArrayLength(env, k_array);
+(*env)-&gt;GetByteArrayRegion(env, k_array, 0, len, (jbyte*)native_key-&gt;K);</pre>
+                <div class="problem"><strong>Issue:</strong> Java byte arrays are copied into fixed-size ECC buffers without clamping to `ECCref_MAX_LEN`, so oversized inputs can overwrite native structs (ECCCipher x/y, ECCPublicKey x/y, ECCSignature r/s, ECCPrivateKey K).</div>
+                <div class="fix-label">Fix:</div><pre>memset(native_key, 0, sizeof(ECCrefPublicKey));
+jsize len = (*env)-&gt;GetArrayLength(env, x_array);
+if (len &gt; ECCref_MAX_LEN) len = ECCref_MAX_LEN;
+(*env)-&gt;GetByteArrayRegion(env, x_array, 0, len, (jbyte*)native_key-&gt;x);
+
+/* Apply the same clamp for y, r, s, and K fields. */</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">Freeing GetPrimitiveArrayCritical buffers corrupts JVM</div>
+                <div class="issue-location">sdf4j/src/main/native/src/sdf_jni_util.c:392-448</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CODEX</span>
+                    <span class="confidence-badge likely">置信度: 较可信</span>
+                </div>
+                <pre>if (iv_buf == NULL) {
+    free(key_buf);
+    throw_sdf_exception(env, 0x0100001C);
+    return NULL;
+}
+...
+if (enc_buf == NULL) {
+    free(key_buf);
+    if (iv_buf) free(iv_buf);
+    throw_sdf_exception(env, 0x0100001C);
+    return NULL;
+}
+...
+free(key_buf);
+if (iv_buf) free(iv_buf);
+free(enc_buf);</pre>
+                <div class="problem"><strong>Issue:</strong> `key_buf`, `iv_buf`, and `enc_buf` are obtained via `GetPrimitiveArrayCritical` but are freed with `free()`, which is undefined behavior and can crash the JVM.</div>
+                <div class="fix-label">Fix:</div><pre>if (iv_buf == NULL) {
+    (*env)-&gt;ReleasePrimitiveArrayCritical(env, key, key_buf, JNI_ABORT);
+    throw_sdf_exception(env, 0x0100001C);
+    return NULL;
+}
+...
+if (enc_buf == NULL) {
+    (*env)-&gt;ReleasePrimitiveArrayCritical(env, key, key_buf, JNI_ABORT);
+    if (iv_buf) {
+        (*env)-&gt;ReleasePrimitiveArrayCritical(env, iv, iv_buf, JNI_ABORT);
+    }
+    throw_sdf_exception(env, 0x0100001C);
+    return NULL;
+}
+...
+(*env)-&gt;ReleasePrimitiveArrayCritical(env, key, key_buf, JNI_ABORT);
+if (iv_buf) {
+    (*env)-&gt;ReleasePrimitiveArrayCritical(env, iv, iv_buf, JNI_ABORT);
+}
+(*env)-&gt;ReleasePrimitiveArrayCritical(env, encData, enc_buf, JNI_ABORT);</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">Double ReleasePrimitiveArrayCritical on aad_buf in AuthDec</div>
+                <div class="issue-location">sdf4j/src/main/native/src/sdf_jni_symmetric.c:960-967</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: GEMINI, CODEX</span>
+                    <span class="confidence-badge trusted">置信度: 可信</span>
+                </div>
+                <pre>if (aad_buf != NULL) {
+    (*env)-&gt;ReleasePrimitiveArrayCritical(env, aad, aad_buf, JNI_ABORT);
+}
+if (aad_buf != NULL) {
+    (*env)-&gt;ReleasePrimitiveArrayCritical(env, aad, aad_buf, JNI_ABORT);
+}</pre>
+                <div class="problem"><strong>Issue:</strong> `aad_buf` is released twice in the success cleanup path, which can corrupt JNI state or crash the JVM.</div>
+                <div class="fix-label">Fix:</div><pre>if (aad_buf != NULL) {
+    (*env)-&gt;ReleasePrimitiveArrayCritical(env, aad, aad_buf, JNI_ABORT);
+}</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">Invalid free() of pinned Java array in AuthEncFinal error path</div>
+                <div class="issue-location">sdf4j/src/main/native/src/sdf_jni_symmetric.c:1147-1149</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: GEMINI</span>
+                    <span class="confidence-badge likely">置信度: 较可信</span>
+                </div>
+                <pre>if (ret != SDR_OK) {
+    if (output_buf != NULL) free(output_buf);
+    free(tag_buf);
+    throw_sdf_exception(env, ret);
+    return NULL;
+}</pre>
+                <div class="problem"><strong>Issue:</strong> `output_buf` is obtained via `GetPrimitiveArrayCritical` but is freed with `free()` when `SDF_AuthEncFinal` fails.</div>
+                <div class="fix-label">Fix:</div><pre>if (ret != SDR_OK) {
+    if (output_buf != NULL) {
+        (*env)-&gt;ReleasePrimitiveArrayCritical(env, pucEncData, output_buf, JNI_ABORT);
+    }
+    free(tag_buf);
+    throw_sdf_exception(env, ret);
+    return NULL;
+}</pre>
+            </div>
+</div>
+<div class="section"><div class="section-title high">High</div>
+<div class="issue">
+                <div class="issue-title">Build break from undefined keyHandle identifier</div>
+                <div class="issue-location">sdf4j/src/main/native/src/sdf_jni_keygen.c:666-667</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CODEX</span>
+                    <span class="confidence-badge likely">置信度: 较可信</span>
+                </div>
+                <pre>SDF_LOG_EXIT("SDF_ImportKey", ret);
+SDF_JNI_LOG("SDF_ImportKey: keyHandle=0x%lX", (unsigned long)keyHandle);
+return (jlong)key_handle;</pre>
+                <div class="problem"><strong>Issue:</strong> The log statement uses `keyHandle`, but the variable is named `key_handle`, causing a compilation error.</div>
+                <div class="fix-label">Fix:</div><pre>SDF_LOG_EXIT("SDF_ImportKey", ret);
+SDF_JNI_LOG("SDF_ImportKey: keyHandle=0x%lX", (unsigned long)key_handle);
+return (jlong)key_handle;</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">Duplicate typedef of SDF_ImportKey_FN</div>
+                <div class="issue-location">sdf4j/src/main/native/include/dynamic_loader.h:93-99</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CLAUDE</span>
+                    <span class="confidence-badge likely">置信度: 较可信</span>
+                </div>
+                <pre>typedef LONG (*SDF_ImportKey_FN)(HANDLE hSessionHandle, BYTE *pucKey,
+                                 ULONG uiKeyLength, HANDLE *phKeyHandle);
+typedef LONG (*SDF_DestroyKey_FN)(HANDLE hSessionHandle, HANDLE hKeyHandle);
+
+typedef LONG (*SDF_ImportKey_FN)(HANDLE hSessionHandle, BYTE *pucKey,
+                                 ULONG uiKeyLength, HANDLE *phKeyHandle);</pre>
+                <div class="problem"><strong>Issue:</strong> `SDF_ImportKey_FN` is defined twice in the same scope, which can fail compilation on strict C compilers.</div>
+                <div class="fix-label">Fix:</div><pre>typedef LONG (*SDF_ImportKey_FN)(HANDLE hSessionHandle, BYTE *pucKey,
+                                 ULONG uiKeyLength, HANDLE *phKeyHandle);
+typedef LONG (*SDF_DestroyKey_FN)(HANDLE hSessionHandle, HANDLE hKeyHandle);
+
+typedef LONG (*SDF_ExchangeDigitEnvelopeBaseOnECC_FN)(HANDLE hSessionHandle, ULONG uiKEKIndex,
+                                                      ULONG uiAlgID, ECCrefPublicKey *pucPublicKey,
+                                                      ECCCipher *pucEncDataIn, ECCCipher *pucEncDataOut);</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">Invalid free() of aad_buf after ReleasePrimitiveArrayCritical</div>
+                <div class="issue-location">sdf4j/src/main/native/src/sdf_jni_symmetric.c:1233-1236</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CODEX</span>
+                    <span class="confidence-badge likely">置信度: 较可信</span>
+                </div>
+                <pre>if (aad_buf != NULL) {
+    (*env)-&gt;ReleasePrimitiveArrayCritical(env, aad, aad_buf, JNI_ABORT);
+}
+if (aad_buf != NULL) free(aad_buf);</pre>
+                <div class="problem"><strong>Issue:</strong> `aad_buf` is released and then freed when `tag_buf` allocation fails, which is invalid for pinned Java arrays.</div>
+                <div class="fix-label">Fix:</div><pre>if (aad_buf != NULL) {
+    (*env)-&gt;ReleasePrimitiveArrayCritical(env, aad, aad_buf, JNI_ABORT);
+}</pre>
+            </div>
+</div>
+<div class="section"><div class="section-title medium">Medium</div>
+<div class="issue">
+                <div class="issue-title">Key handles from several APIs are never registered for cleanup</div>
+                <div class="issue-location">sdf4j/src/main/java/org/openhitls/sdf4j/SDF.java:433-623</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CLAUDE</span>
+                    <span class="confidence-badge likely">置信度: 较可信</span>
+                </div>
+                <pre>public native long SDF_ImportKeyWithISK_RSA(
+        long sessionHandle, int keyIndex, byte[] encryptedKey) throws SDFException;
+
+public native long SDF_ImportKeyWithISK_ECC(
+        long sessionHandle, int keyIndex, ECCCipher cipher) throws SDFException;
+
+public native long SDF_GenerateAgreementDataWithECC(
+        long sessionHandle, int keyIndex, int keyBits,
+        byte[] sponsorID, ECCPublicKey sponsorPublicKey,
+        ECCPublicKey sponsorTmpPublicKey) throws SDFException;
+
+public native long SDF_GenerateKeyWithECC(
+        long sessionHandle, byte[] responseID,
+        ECCPublicKey responsePublicKey, ECCPublicKey responseTmpPublicKey,
+        long agreementHandle) throws SDFException;
+
+public native long SDF_ImportKeyWithKEK(
+        long sessionHandle, int algID, int kekIndex, byte[] encryptedKey) throws SDFException;</pre>
+                <div class="problem"><strong>Issue:</strong> Methods that return key handles are declared `native` and bypass `SessionResource.addKey`, so those handles are not tracked and will not be auto-destroyed when sessions close.</div>
+                <div class="fix-label">Fix:</div><pre>public long SDF_ImportKeyWithISK_RSA(long sessionHandle, int keyIndex, byte[] encryptedKey) throws SDFException {
+    long keyHandle = SDF_ImportKeyWithISK_RSA_Native(sessionHandle, keyIndex, encryptedKey);
+    if (keyHandle != 0) {
+        SessionResource sr = gSessResource.get(sessionHandle);
+        if (sr != null) sr.addKey(keyHandle);
+    }
+    return keyHandle;
+}
+
+private native long SDF_ImportKeyWithISK_RSA_Native(long sessionHandle, int keyIndex, byte[] encryptedKey)
+        throws SDFException;
+
+/* Apply the same wrapper pattern to all key-handle-returning methods. */</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">SDF_CloseDevice can throw NPE when gDevHandle is null</div>
+                <div class="issue-location">sdf4j/src/main/java/org/openhitls/sdf4j/SDF.java:181-184</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CODEX</span>
+                    <span class="confidence-badge likely">置信度: 较可信</span>
+                </div>
+                <pre>public void SDF_CloseDevice(long deviceHandle) throws SDFException {
+    // 验证 handle 是否匹配
+    if (deviceHandle != gDevHandle) {
+        return;
+    }</pre>
+                <div class="problem"><strong>Issue:</strong> `deviceHandle != gDevHandle` auto-unboxes `gDevHandle`. If `gDevHandle` is null, this throws `NullPointerException` instead of returning safely.</div>
+                <div class="fix-label">Fix:</div><pre>public void SDF_CloseDevice(long deviceHandle) throws SDFException {
+    if (gDevHandle == null || deviceHandle != gDevHandle.longValue()) {
+        return;
+    }</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">SDF_OpenSession can NPE when device not opened</div>
+                <div class="issue-location">sdf4j/src/main/java/org/openhitls/sdf4j/SDF.java:216-221</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CODEX</span>
+                    <span class="confidence-badge likely">置信度: 较可信</span>
+                </div>
+                <pre>public long SDF_OpenSession(long deviceHandle) throws SDFException {
+    // 创建新的 session
+    long handle = SDF_OpenSessionNative(deviceHandle);
+    // 创建 SessionResource 并注册到 gDevResource 和 gSessResource
+    SessionResource sessionResource = new SessionResource(handle);
+    gSessResource.put(handle, sessionResource);
+    return handle;
+}</pre>
+                <div class="problem"><strong>Issue:</strong> `SessionResource` constructor uses `gDevResource`, which is null if the device is not opened or has been closed, causing an NPE.</div>
+                <div class="fix-label">Fix:</div><pre>public long SDF_OpenSession(long deviceHandle) throws SDFException {
+    if (gDevResource == null || gDevHandle == null) {
+        throw new SDFException(0x0100001D); // SDR_INARGERR or appropriate code
+    }
+    long handle = SDF_OpenSessionNative(deviceHandle);
+    SessionResource sessionResource = new SessionResource(handle);
+    gSessResource.put(handle, sessionResource);
+    return handle;
+}</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">finalize() can throw NPE when device already closed</div>
+                <div class="issue-location">sdf4j/src/main/java/org/openhitls/sdf4j/SDF.java:68-71</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CLAUDE</span>
+                    <span class="confidence-badge likely">置信度: 较可信</span>
+                </div>
+                <pre>@Override
+protected void finalize() throws Throwable {
+    try {
+        SDF_CloseDevice(gDevHandle);
+    } catch (Exception e) {
+        // 忽略异常
+    } finally {
+        super.finalize();
+    }
+}</pre>
+                <div class="problem"><strong>Issue:</strong> `finalize()` calls `SDF_CloseDevice(gDevHandle)` without checking for null, which auto-unboxes `gDevHandle` and can throw `NullPointerException`.</div>
+                <div class="fix-label">Fix:</div><pre>@Override
+protected void finalize() throws Throwable {
+    try {
+        if (gDevHandle != null) {
+            SDF_CloseDevice(gDevHandle);
+        }
+    } finally {
+        super.finalize();
+    }
+}</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">Shared device/session state is not thread-safe</div>
+                <div class="issue-location">sdf4j/src/main/java/org/openhitls/sdf4j/SDF.java:57-66</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: GEMINI, CLAUDE</span>
+                    <span class="confidence-badge evaluate">置信度: 需评估</span>
+                </div>
+                <pre>private Long gDevHandle = null;
+private DeviceResource gDevResource = null;
+private java.util.Map&lt;Long, SessionResource&gt; gSessResource = new java.util.HashMap&lt;&gt;();
+
+...
+
+public long SDF_OpenDevice() throws SDFException {
+    if (gDevHandle != null) {
+        return gDevHandle;
+    }
+    gDevHandle = SDF_OpenDeviceNative();
+    gDevResource = new DeviceResource();
+    return gDevHandle;
+}</pre>
+                <div class="problem"><strong>Issue:</strong> `gSessResource` and session/key sets are plain `HashMap`/`HashSet` accessed across multiple methods without synchronization. `SDF_OpenDevice` also checks and sets cached handles without locking, so a single `SDF` instance used by multiple threads can race or corrupt tracking state.</div>
+                <div class="fix-label">Fix:</div><pre>private final java.util.Map&lt;Long, SessionResource&gt; gSessResource =
+        new java.util.concurrent.ConcurrentHashMap&lt;&gt;();
+private final java.util.Set&lt;Long&gt; sessions =
+        java.util.Collections.newSetFromMap(new java.util.concurrent.ConcurrentHashMap&lt;&gt;());
+
+public synchronized long SDF_OpenDevice() throws SDFException { ... }
+
+/* Also synchronize close/open session and key tracking operations. */</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">Output buffer size for SDF_ExchangeDigitEnvelopeBaseOnECC may be insufficient</div>
+                <div class="issue-location">sdf4j/src/main/native/src/sdf_jni_asymmetric.c:344-351</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: GEMINI</span>
+                    <span class="confidence-badge evaluate">置信度: 需评估</span>
+                </div>
+                <pre>ULONG out_len = in_cipher-&gt;L;
+ECCCipher *out_cipher = (ECCCipher*)calloc(1, sizeof(ECCCipher) + out_len);
+out_cipher-&gt;L = out_len;
+LONG ret = g_sdf_functions.SDF_ExchangeDigitEnvelopeBaseOnECC(
+    (HANDLE)sessionHandle, (ULONG)keyIndex, (ULONG)algID, &amp;native_pub, in_cipher, out_cipher
+);</pre>
+                <div class="problem"><strong>Issue:</strong> Output ECCCipher is allocated using the input cipher length only. If the SDF implementation outputs a larger envelope, the native call can overflow the buffer.</div>
+                <div class="fix-label">Fix:</div><pre>/* Allocate per spec maximum or a documented expansion size. */
+ULONG out_len = ECCref_MAX_CIPHER_LEN; /* or in_cipher-&gt;L + overhead */
+ECCCipher *out_cipher = (ECCCipher*)calloc(1, sizeof(ECCCipher) + out_len);
+out_cipher-&gt;L = out_len; /* treat L as capacity if the API supports it */</pre>
+            </div>
+</div>
+<div class="section"><div class="section-title low">Low</div>
+<div class="issue">
+                <div class="issue-title">SDF_ImportKey resolved twice in dynamic loader</div>
+                <div class="issue-location">sdf4j/src/main/native/src/dynamic_loader.c:134-139</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CLAUDE</span>
+                    <span class="confidence-badge likely">置信度: 较可信</span>
+                </div>
+                <pre>load_function(handle, (void**)&amp;g_sdf_functions.SDF_ImportKey,
+             "SDF_ImportKey", false);
+load_function(handle, (void**)&amp;g_sdf_functions.SDF_DestroyKey,
+             "SDF_DestroyKey", false);
+load_function(handle, (void**)&amp;g_sdf_functions.SDF_ImportKey,
+             "SDF_ImportKey", false);</pre>
+                <div class="problem"><strong>Issue:</strong> `load_function` is called twice for `SDF_ImportKey`, which is redundant and potentially confusing.</div>
+                <div class="fix-label">Fix:</div><pre>load_function(handle, (void**)&amp;g_sdf_functions.SDF_ImportKey,
+             "SDF_ImportKey", false);
+load_function(handle, (void**)&amp;g_sdf_functions.SDF_DestroyKey,
+             "SDF_DestroyKey", false);
+/* remove the duplicate SDF_ImportKey load */</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">"Auto cleanup" test manually closes device</div>
+                <div class="issue-location">examples/src/test/java/org/openhitls/sdf4j/examples/ResourceManagementTest.java:93-113</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CLAUDE</span>
+                    <span class="confidence-badge likely">置信度: 较可信</span>
+                </div>
+                <pre>/**
+ * 自动清理
+ */
+@Test
+public void testAutoCleanup() throws SDFException {
+    ...
+    // 直接关闭会话，保证session也能被关闭
+    sdf2.SDF_CloseDevice(deviceHandle);
+}</pre>
+                <div class="problem"><strong>Issue:</strong> `testAutoCleanup` is labeled "自动清理" but explicitly closes the device, so it does not test finalizer-based cleanup.</div>
+                <div class="fix-label">Fix:</div><pre>/**
+ * 自动清理 - 依赖 finalize() 方法自动清理资源
+ */
+/* Or keep the code and rename the comment to "手动关闭" */</pre>
+            </div>
+</div>
+</div></body></html>

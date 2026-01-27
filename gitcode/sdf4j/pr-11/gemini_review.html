@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Code Review: openHiTLS/sdf4j#11 - GEMINI</title>
+    <style>
+        :root { --critical: #dc2626; --high: #ea580c; --medium: #ca8a04; --low: #65a30d; }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: system-ui, sans-serif; background: #f8fafc; color: #1e293b; padding: 2rem; line-height: 1.6; }
+        .container { max-width: 900px; margin: 0 auto; }
+        h1 { font-size: 1.5rem; margin-bottom: 0.5rem; }
+        .subtitle { color: #64748b; margin-bottom: 2rem; }
+        .section { margin-bottom: 2rem; }
+        .section-title { font-size: 1.1rem; font-weight: 600; padding: 0.5rem 1rem; border-radius: 0.5rem 0.5rem 0 0; color: white; }
+        .section-title.critical { background: var(--critical); }
+        .section-title.high { background: var(--high); }
+        .section-title.medium { background: var(--medium); }
+        .section-title.low { background: var(--low); }
+        .issue { background: white; border: 1px solid #e2e8f0; border-top: none; padding: 1rem; }
+        .issue:last-child { border-radius: 0 0 0.5rem 0.5rem; }
+        .issue-title { font-weight: 600; margin-bottom: 0.25rem; }
+        .issue-location { font-family: monospace; font-size: 0.875rem; color: #64748b; margin-bottom: 0.75rem; }
+        .issue-source { font-size: 0.75rem; color: #94a3b8; margin-top: 0.5rem; }
+        pre { background: #1e293b; color: #e2e8f0; padding: 0.75rem; border-radius: 0.375rem; overflow-x: auto; font-size: 0.875rem; margin: 0.5rem 0; }
+        .problem { margin: 0.75rem 0; }
+        .fix-label { font-weight: 600; margin-top: 0.75rem; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Code Review: openHiTLS/sdf4j#11 - GEMINI</h1>
+        <div class="subtitle"></div>
+<div class="section"><div class="section-title critical">Critical</div>
+<div class="issue">
+                <div class="issue-title">Invalid free of JNI primitive array</div>
+                <div class="issue-location">sdf4j/src/main/native/src/sdf_jni_symmetric.c:1296</div>
+                <pre>if (ret != SDR_OK) {
+        if (output_buf != NULL) free(output_buf);
+        free(tag_buf);
+        throw_sdf_exception(env, ret);
+        return NULL;
+    }</pre>
+                <div class="problem"><strong>Issue:</strong> In `JNI_SDF_AuthEncFinal`, if the native `SDF_AuthEncFinal` fails (returns non-SDR_OK), the code attempts to `free(output_buf)`. However, `output_buf` was obtained using `GetPrimitiveArrayCritical`, which may point to a pinned Java object or a copy managed by the JVM. Calling `free()` on it will corrupt the heap allocator and crash the JVM.</div>
+                <div class="fix-label">Fix:</div><pre>if (ret != SDR_OK) {
+        if (output_buf != NULL) {
+            (*env)-&gt;ReleasePrimitiveArrayCritical(env, pucEncData, output_buf, JNI_ABORT);
+        }
+        free(tag_buf);
+        throw_sdf_exception(env, ret);
+        return NULL;
+    }</pre>
+                <div class="issue-source">Reviewer: gemini</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">Double release of JNI primitive array</div>
+                <div class="issue-location">sdf4j/src/main/native/src/sdf_jni_symmetric.c:1045</div>
+                <pre>if (aad_buf != NULL) {
+        (*env)-&gt;ReleasePrimitiveArrayCritical(env, aad, aad_buf, JNI_ABORT);
+    }
+    if (aad_buf != NULL) {
+        (*env)-&gt;ReleasePrimitiveArrayCritical(env, aad, aad_buf, JNI_ABORT);
+    }</pre>
+                <div class="problem"><strong>Issue:</strong> In `JNI_SDF_AuthDec`, the `aad_buf` (Additional Authenticated Data) is released twice using `ReleasePrimitiveArrayCritical` in the success cleanup path. This leads to undefined behavior, potentially corrupting JVM memory or crashing.</div>
+                <div class="fix-label">Fix:</div><pre>if (aad_buf != NULL) {
+        (*env)-&gt;ReleasePrimitiveArrayCritical(env, aad, aad_buf, JNI_ABORT);
+    }</pre>
+                <div class="issue-source">Reviewer: gemini</div>
+            </div>
+</div>
+<div class="section"><div class="section-title high">High</div>
+<div class="issue">
+                <div class="issue-title">Thread-unsafe resource management</div>
+                <div class="issue-location">sdf4j/src/main/java/org/openhitls/sdf4j/SDF.java:57</div>
+                <pre>private Long gDevHandle = null;
+    private DeviceResource gDevResource = null;
+    private java.util.Map&lt;Long, SessionResource&gt; gSessResource = new java.util.HashMap&lt;&gt;();</pre>
+                <div class="problem"><strong>Issue:</strong> The `SDF` class introduces instance-level state (`gSessResource` HashMap, `gDevResource` object) to track sessions and keys. These collections are accessed and modified by multiple methods (`SDF_OpenSession`, `SDF_CloseSession`, `SDF_GenerateKey...`) without any synchronization. If a single `SDF` instance is shared across threads (common for hardware device wrappers), this will lead to `ConcurrentModificationException` or state corruption (e.g., tracking leaks, double-frees).</div>
+                <div class="fix-label">Fix:</div><pre>private Long gDevHandle = null;
+    private DeviceResource gDevResource = null;
+    private java.util.Map&lt;Long, SessionResource&gt; gSessResource = new java.util.concurrent.ConcurrentHashMap&lt;&gt;();
+    
+    // Also ensure DeviceResource.sessions access is thread-safe, e.g., use Collections.synchronizedSet or ConcurrentHashMap.newKeySet()</pre>
+                <div class="issue-source">Reviewer: gemini</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">JVM Garbage Collector blocking</div>
+                <div class="issue-location">sdf4j/src/main/native/src/sdf_jni_symmetric.c:94</div>
+                <pre>jbyte *data_buf = (*env)-&gt;GetPrimitiveArrayCritical(env, data, NULL);
+    // ...
+    LONG ret = g_sdf_functions.SDF_EncryptUpdate(
+        (HANDLE)sessionHandle,
+        (BYTE*)data_buf,
+        // ...
+    );
+    (*env)-&gt;ReleasePrimitiveArrayCritical(env, data, data_buf, JNI_ABORT);</pre>
+                <div class="problem"><strong>Issue:</strong> The code uses `GetPrimitiveArrayCritical` to access byte arrays. This function temporarily disables the JVM Garbage Collector. Inside the critical region, the code calls `malloc` (which can lock) and, more importantly, calls the underlying SDF hardware library functions (`g_sdf_functions.SDF_EncryptUpdate`, etc.). If the hardware device or driver blocks or takes a significant amount of time (e.g., high load, hardware fault), the entire JVM GC will be paused, potentially causing the whole Java application to stall or become unresponsive.</div>
+                <div class="fix-label">Fix:</div><pre>/* Prefer GetByteArrayRegion / SetByteArrayRegion for potentially blocking operations */
+    jbyte *data_buf = (jbyte*)malloc(data_len);
+    if (data_buf == NULL) { ... }
+    (*env)-&gt;GetByteArrayRegion(env, data, 0, data_len, data_buf);
+    
+    LONG ret = g_sdf_functions.SDF_EncryptUpdate(..., (BYTE*)data_buf, ...);
+    
+    free(data_buf);</pre>
+                <div class="issue-source">Reviewer: gemini</div>
+            </div>
+</div>
+<div class="section"><div class="section-title medium">Medium</div>
+<div class="issue">
+                <div class="issue-title">Potential buffer overflow in Envelope Exchange</div>
+                <div class="issue-location">sdf4j/src/main/native/src/sdf_jni_asymmetric.c:345</div>
+                <pre>ULONG out_len = in_cipher-&gt;L;
+    ECCCipher *out_cipher = (ECCCipher*)calloc(1, sizeof(ECCCipher) + out_len);</pre>
+                <div class="problem"><strong>Issue:</strong> `JNI_SDF_ExchangeDigitEnvelopeBaseOnECC` allocates the output buffer based solely on the input cipher length (`in_cipher->L`). If the operation results in a larger ciphertext (e.g., due to key wrapping overhead, padding, or format differences), `SDF_ExchangeDigitEnvelopeBaseOnECC` will write past the allocated buffer.</div>
+                <div class="fix-label">Fix:</div><pre>/* Ensure buffer is large enough for potential expansion. 
+       Consult SDF spec for maximum expansion. typically ECCref_MAX_CIPHER_LEN or similar constant */
+    ULONG out_len = in_cipher-&gt;L + 128; // Add safety margin
+    ECCCipher *out_cipher = (ECCCipher*)calloc(1, sizeof(ECCCipher) + out_len);
+    out_cipher-&gt;L = out_len; // Tell native lib the max buffer size if possible, otherwise rely on sufficient alloc</pre>
+                <div class="issue-source">Reviewer: gemini</div>
+            </div>
+</div>
+</div></body></html>

@@ -1,0 +1,480 @@
+===ISSUE===
+FILE: sdf4j/src/main/native/src/type_conversion.c
+LINE: 300-450, 667-678
+SEVERITY: critical
+TITLE: Unbounded ECC field copies can overflow native buffers
+REVIEWERS: CODEX
+CONFIDENCE: likely
+PROBLEM: Java byte arrays are copied into fixed-size ECC buffers without clamping to `ECCref_MAX_LEN`, so oversized inputs can overwrite native structs (ECCCipher x/y, ECCPublicKey x/y, ECCSignature r/s, ECCPrivateKey K).
+CODE:
+```
+jsize len = (*env)->GetArrayLength(env, x_array);
+(*env)->GetByteArrayRegion(env, x_array, 0, len, (jbyte*)native_cipher->x);
+
+...
+
+jsize len = (*env)->GetArrayLength(env, y_array);
+(*env)->GetByteArrayRegion(env, y_array, 0, len, (jbyte*)native_key->y);
+
+...
+
+jsize len = (*env)->GetArrayLength(env, r_array);
+(*env)->GetByteArrayRegion(env, r_array, 0, len, (jbyte*)native_sig->r);
+
+...
+
+jsize len = (*env)->GetArrayLength(env, k_array);
+(*env)->GetByteArrayRegion(env, k_array, 0, len, (jbyte*)native_key->K);
+```
+FIX:
+```
+memset(native_key, 0, sizeof(ECCrefPublicKey));
+jsize len = (*env)->GetArrayLength(env, x_array);
+if (len > ECCref_MAX_LEN) len = ECCref_MAX_LEN;
+(*env)->GetByteArrayRegion(env, x_array, 0, len, (jbyte*)native_key->x);
+
+/* Apply the same clamp for y, r, s, and K fields. */
+```
+===END===
+
+===ISSUE===
+FILE: sdf4j/src/main/native/src/sdf_jni_util.c
+LINE: 392-448
+SEVERITY: critical
+TITLE: Freeing GetPrimitiveArrayCritical buffers corrupts JVM
+REVIEWERS: CODEX
+CONFIDENCE: likely
+PROBLEM: `key_buf`, `iv_buf`, and `enc_buf` are obtained via `GetPrimitiveArrayCritical` but are freed with `free()`, which is undefined behavior and can crash the JVM.
+CODE:
+```
+if (iv_buf == NULL) {
+    free(key_buf);
+    throw_sdf_exception(env, 0x0100001C);
+    return NULL;
+}
+...
+if (enc_buf == NULL) {
+    free(key_buf);
+    if (iv_buf) free(iv_buf);
+    throw_sdf_exception(env, 0x0100001C);
+    return NULL;
+}
+...
+free(key_buf);
+if (iv_buf) free(iv_buf);
+free(enc_buf);
+```
+FIX:
+```
+if (iv_buf == NULL) {
+    (*env)->ReleasePrimitiveArrayCritical(env, key, key_buf, JNI_ABORT);
+    throw_sdf_exception(env, 0x0100001C);
+    return NULL;
+}
+...
+if (enc_buf == NULL) {
+    (*env)->ReleasePrimitiveArrayCritical(env, key, key_buf, JNI_ABORT);
+    if (iv_buf) {
+        (*env)->ReleasePrimitiveArrayCritical(env, iv, iv_buf, JNI_ABORT);
+    }
+    throw_sdf_exception(env, 0x0100001C);
+    return NULL;
+}
+...
+(*env)->ReleasePrimitiveArrayCritical(env, key, key_buf, JNI_ABORT);
+if (iv_buf) {
+    (*env)->ReleasePrimitiveArrayCritical(env, iv, iv_buf, JNI_ABORT);
+}
+(*env)->ReleasePrimitiveArrayCritical(env, encData, enc_buf, JNI_ABORT);
+```
+===END===
+
+===ISSUE===
+FILE: sdf4j/src/main/native/src/sdf_jni_symmetric.c
+LINE: 960-967
+SEVERITY: critical
+TITLE: Double ReleasePrimitiveArrayCritical on aad_buf in AuthDec
+REVIEWERS: GEMINI, CODEX
+CONFIDENCE: trusted
+PROBLEM: `aad_buf` is released twice in the success cleanup path, which can corrupt JNI state or crash the JVM.
+CODE:
+```
+if (aad_buf != NULL) {
+    (*env)->ReleasePrimitiveArrayCritical(env, aad, aad_buf, JNI_ABORT);
+}
+if (aad_buf != NULL) {
+    (*env)->ReleasePrimitiveArrayCritical(env, aad, aad_buf, JNI_ABORT);
+}
+```
+FIX:
+```
+if (aad_buf != NULL) {
+    (*env)->ReleasePrimitiveArrayCritical(env, aad, aad_buf, JNI_ABORT);
+}
+```
+===END===
+
+===ISSUE===
+FILE: sdf4j/src/main/native/src/sdf_jni_symmetric.c
+LINE: 1147-1149
+SEVERITY: critical
+TITLE: Invalid free() of pinned Java array in AuthEncFinal error path
+REVIEWERS: GEMINI
+CONFIDENCE: likely
+PROBLEM: `output_buf` is obtained via `GetPrimitiveArrayCritical` but is freed with `free()` when `SDF_AuthEncFinal` fails.
+CODE:
+```
+if (ret != SDR_OK) {
+    if (output_buf != NULL) free(output_buf);
+    free(tag_buf);
+    throw_sdf_exception(env, ret);
+    return NULL;
+}
+```
+FIX:
+```
+if (ret != SDR_OK) {
+    if (output_buf != NULL) {
+        (*env)->ReleasePrimitiveArrayCritical(env, pucEncData, output_buf, JNI_ABORT);
+    }
+    free(tag_buf);
+    throw_sdf_exception(env, ret);
+    return NULL;
+}
+```
+===END===
+
+===ISSUE===
+FILE: sdf4j/src/main/native/src/sdf_jni_keygen.c
+LINE: 666-667
+SEVERITY: high
+TITLE: Build break from undefined keyHandle identifier
+REVIEWERS: CODEX
+CONFIDENCE: likely
+PROBLEM: The log statement uses `keyHandle`, but the variable is named `key_handle`, causing a compilation error.
+CODE:
+```
+SDF_LOG_EXIT("SDF_ImportKey", ret);
+SDF_JNI_LOG("SDF_ImportKey: keyHandle=0x%lX", (unsigned long)keyHandle);
+return (jlong)key_handle;
+```
+FIX:
+```
+SDF_LOG_EXIT("SDF_ImportKey", ret);
+SDF_JNI_LOG("SDF_ImportKey: keyHandle=0x%lX", (unsigned long)key_handle);
+return (jlong)key_handle;
+```
+===END===
+
+===ISSUE===
+FILE: sdf4j/src/main/native/include/dynamic_loader.h
+LINE: 93-99
+SEVERITY: high
+TITLE: Duplicate typedef of SDF_ImportKey_FN
+REVIEWERS: CLAUDE
+CONFIDENCE: likely
+PROBLEM: `SDF_ImportKey_FN` is defined twice in the same scope, which can fail compilation on strict C compilers.
+CODE:
+```
+typedef LONG (*SDF_ImportKey_FN)(HANDLE hSessionHandle, BYTE *pucKey,
+                                 ULONG uiKeyLength, HANDLE *phKeyHandle);
+typedef LONG (*SDF_DestroyKey_FN)(HANDLE hSessionHandle, HANDLE hKeyHandle);
+
+typedef LONG (*SDF_ImportKey_FN)(HANDLE hSessionHandle, BYTE *pucKey,
+                                 ULONG uiKeyLength, HANDLE *phKeyHandle);
+```
+FIX:
+```
+typedef LONG (*SDF_ImportKey_FN)(HANDLE hSessionHandle, BYTE *pucKey,
+                                 ULONG uiKeyLength, HANDLE *phKeyHandle);
+typedef LONG (*SDF_DestroyKey_FN)(HANDLE hSessionHandle, HANDLE hKeyHandle);
+
+typedef LONG (*SDF_ExchangeDigitEnvelopeBaseOnECC_FN)(HANDLE hSessionHandle, ULONG uiKEKIndex,
+                                                      ULONG uiAlgID, ECCrefPublicKey *pucPublicKey,
+                                                      ECCCipher *pucEncDataIn, ECCCipher *pucEncDataOut);
+```
+===END===
+
+===ISSUE===
+FILE: sdf4j/src/main/native/src/sdf_jni_symmetric.c
+LINE: 1233-1236
+SEVERITY: high
+TITLE: Invalid free() of aad_buf after ReleasePrimitiveArrayCritical
+REVIEWERS: CODEX
+CONFIDENCE: likely
+PROBLEM: `aad_buf` is released and then freed when `tag_buf` allocation fails, which is invalid for pinned Java arrays.
+CODE:
+```
+if (aad_buf != NULL) {
+    (*env)->ReleasePrimitiveArrayCritical(env, aad, aad_buf, JNI_ABORT);
+}
+if (aad_buf != NULL) free(aad_buf);
+```
+FIX:
+```
+if (aad_buf != NULL) {
+    (*env)->ReleasePrimitiveArrayCritical(env, aad, aad_buf, JNI_ABORT);
+}
+```
+===END===
+
+===ISSUE===
+FILE: sdf4j/src/main/java/org/openhitls/sdf4j/SDF.java
+LINE: 433-623
+SEVERITY: medium
+TITLE: Key handles from several APIs are never registered for cleanup
+REVIEWERS: CLAUDE
+CONFIDENCE: likely
+PROBLEM: Methods that return key handles are declared `native` and bypass `SessionResource.addKey`, so those handles are not tracked and will not be auto-destroyed when sessions close.
+CODE:
+```
+public native long SDF_ImportKeyWithISK_RSA(
+        long sessionHandle, int keyIndex, byte[] encryptedKey) throws SDFException;
+
+public native long SDF_ImportKeyWithISK_ECC(
+        long sessionHandle, int keyIndex, ECCCipher cipher) throws SDFException;
+
+public native long SDF_GenerateAgreementDataWithECC(
+        long sessionHandle, int keyIndex, int keyBits,
+        byte[] sponsorID, ECCPublicKey sponsorPublicKey,
+        ECCPublicKey sponsorTmpPublicKey) throws SDFException;
+
+public native long SDF_GenerateKeyWithECC(
+        long sessionHandle, byte[] responseID,
+        ECCPublicKey responsePublicKey, ECCPublicKey responseTmpPublicKey,
+        long agreementHandle) throws SDFException;
+
+public native long SDF_ImportKeyWithKEK(
+        long sessionHandle, int algID, int kekIndex, byte[] encryptedKey) throws SDFException;
+```
+FIX:
+```
+public long SDF_ImportKeyWithISK_RSA(long sessionHandle, int keyIndex, byte[] encryptedKey) throws SDFException {
+    long keyHandle = SDF_ImportKeyWithISK_RSA_Native(sessionHandle, keyIndex, encryptedKey);
+    if (keyHandle != 0) {
+        SessionResource sr = gSessResource.get(sessionHandle);
+        if (sr != null) sr.addKey(keyHandle);
+    }
+    return keyHandle;
+}
+
+private native long SDF_ImportKeyWithISK_RSA_Native(long sessionHandle, int keyIndex, byte[] encryptedKey)
+        throws SDFException;
+
+/* Apply the same wrapper pattern to all key-handle-returning methods. */
+```
+===END===
+
+===ISSUE===
+FILE: sdf4j/src/main/java/org/openhitls/sdf4j/SDF.java
+LINE: 181-184
+SEVERITY: medium
+TITLE: SDF_CloseDevice can throw NPE when gDevHandle is null
+REVIEWERS: CODEX
+CONFIDENCE: likely
+PROBLEM: `deviceHandle != gDevHandle` auto-unboxes `gDevHandle`. If `gDevHandle` is null, this throws `NullPointerException` instead of returning safely.
+CODE:
+```
+public void SDF_CloseDevice(long deviceHandle) throws SDFException {
+    // 验证 handle 是否匹配
+    if (deviceHandle != gDevHandle) {
+        return;
+    }
+```
+FIX:
+```
+public void SDF_CloseDevice(long deviceHandle) throws SDFException {
+    if (gDevHandle == null || deviceHandle != gDevHandle.longValue()) {
+        return;
+    }
+```
+===END===
+
+===ISSUE===
+FILE: sdf4j/src/main/java/org/openhitls/sdf4j/SDF.java
+LINE: 216-221
+SEVERITY: medium
+TITLE: SDF_OpenSession can NPE when device not opened
+REVIEWERS: CODEX
+CONFIDENCE: likely
+PROBLEM: `SessionResource` constructor uses `gDevResource`, which is null if the device is not opened or has been closed, causing an NPE.
+CODE:
+```
+public long SDF_OpenSession(long deviceHandle) throws SDFException {
+    // 创建新的 session
+    long handle = SDF_OpenSessionNative(deviceHandle);
+    // 创建 SessionResource 并注册到 gDevResource 和 gSessResource
+    SessionResource sessionResource = new SessionResource(handle);
+    gSessResource.put(handle, sessionResource);
+    return handle;
+}
+```
+FIX:
+```
+public long SDF_OpenSession(long deviceHandle) throws SDFException {
+    if (gDevResource == null || gDevHandle == null) {
+        throw new SDFException(0x0100001D); // SDR_INARGERR or appropriate code
+    }
+    long handle = SDF_OpenSessionNative(deviceHandle);
+    SessionResource sessionResource = new SessionResource(handle);
+    gSessResource.put(handle, sessionResource);
+    return handle;
+}
+```
+===END===
+
+===ISSUE===
+FILE: sdf4j/src/main/java/org/openhitls/sdf4j/SDF.java
+LINE: 68-71
+SEVERITY: medium
+TITLE: finalize() can throw NPE when device already closed
+REVIEWERS: CLAUDE
+CONFIDENCE: likely
+PROBLEM: `finalize()` calls `SDF_CloseDevice(gDevHandle)` without checking for null, which auto-unboxes `gDevHandle` and can throw `NullPointerException`.
+CODE:
+```
+@Override
+protected void finalize() throws Throwable {
+    try {
+        SDF_CloseDevice(gDevHandle);
+    } catch (Exception e) {
+        // 忽略异常
+    } finally {
+        super.finalize();
+    }
+}
+```
+FIX:
+```
+@Override
+protected void finalize() throws Throwable {
+    try {
+        if (gDevHandle != null) {
+            SDF_CloseDevice(gDevHandle);
+        }
+    } finally {
+        super.finalize();
+    }
+}
+```
+===END===
+
+===ISSUE===
+FILE: sdf4j/src/main/java/org/openhitls/sdf4j/SDF.java
+LINE: 57-66, 144-153
+SEVERITY: medium
+TITLE: Shared device/session state is not thread-safe
+REVIEWERS: GEMINI, CLAUDE
+CONFIDENCE: evaluate
+PROBLEM: `gSessResource` and session/key sets are plain `HashMap`/`HashSet` accessed across multiple methods without synchronization. `SDF_OpenDevice` also checks and sets cached handles without locking, so a single `SDF` instance used by multiple threads can race or corrupt tracking state.
+CODE:
+```
+private Long gDevHandle = null;
+private DeviceResource gDevResource = null;
+private java.util.Map<Long, SessionResource> gSessResource = new java.util.HashMap<>();
+
+...
+
+public long SDF_OpenDevice() throws SDFException {
+    if (gDevHandle != null) {
+        return gDevHandle;
+    }
+    gDevHandle = SDF_OpenDeviceNative();
+    gDevResource = new DeviceResource();
+    return gDevHandle;
+}
+```
+FIX:
+```
+private final java.util.Map<Long, SessionResource> gSessResource =
+        new java.util.concurrent.ConcurrentHashMap<>();
+private final java.util.Set<Long> sessions =
+        java.util.Collections.newSetFromMap(new java.util.concurrent.ConcurrentHashMap<>());
+
+public synchronized long SDF_OpenDevice() throws SDFException { ... }
+
+/* Also synchronize close/open session and key tracking operations. */
+```
+===END===
+
+===ISSUE===
+FILE: sdf4j/src/main/native/src/sdf_jni_asymmetric.c
+LINE: 344-351
+SEVERITY: medium
+TITLE: Output buffer size for SDF_ExchangeDigitEnvelopeBaseOnECC may be insufficient
+REVIEWERS: GEMINI
+CONFIDENCE: evaluate
+PROBLEM: Output ECCCipher is allocated using the input cipher length only. If the SDF implementation outputs a larger envelope, the native call can overflow the buffer.
+CODE:
+```
+ULONG out_len = in_cipher->L;
+ECCCipher *out_cipher = (ECCCipher*)calloc(1, sizeof(ECCCipher) + out_len);
+out_cipher->L = out_len;
+LONG ret = g_sdf_functions.SDF_ExchangeDigitEnvelopeBaseOnECC(
+    (HANDLE)sessionHandle, (ULONG)keyIndex, (ULONG)algID, &native_pub, in_cipher, out_cipher
+);
+```
+FIX:
+```
+/* Allocate per spec maximum or a documented expansion size. */
+ULONG out_len = ECCref_MAX_CIPHER_LEN; /* or in_cipher->L + overhead */
+ECCCipher *out_cipher = (ECCCipher*)calloc(1, sizeof(ECCCipher) + out_len);
+out_cipher->L = out_len; /* treat L as capacity if the API supports it */
+```
+===END===
+
+===ISSUE===
+FILE: sdf4j/src/main/native/src/dynamic_loader.c
+LINE: 134-139
+SEVERITY: low
+TITLE: SDF_ImportKey resolved twice in dynamic loader
+REVIEWERS: CLAUDE
+CONFIDENCE: likely
+PROBLEM: `load_function` is called twice for `SDF_ImportKey`, which is redundant and potentially confusing.
+CODE:
+```
+load_function(handle, (void**)&g_sdf_functions.SDF_ImportKey,
+             "SDF_ImportKey", false);
+load_function(handle, (void**)&g_sdf_functions.SDF_DestroyKey,
+             "SDF_DestroyKey", false);
+load_function(handle, (void**)&g_sdf_functions.SDF_ImportKey,
+             "SDF_ImportKey", false);
+```
+FIX:
+```
+load_function(handle, (void**)&g_sdf_functions.SDF_ImportKey,
+             "SDF_ImportKey", false);
+load_function(handle, (void**)&g_sdf_functions.SDF_DestroyKey,
+             "SDF_DestroyKey", false);
+/* remove the duplicate SDF_ImportKey load */
+```
+===END===
+
+===ISSUE===
+FILE: examples/src/test/java/org/openhitls/sdf4j/examples/ResourceManagementTest.java
+LINE: 93-113
+SEVERITY: low
+TITLE: "Auto cleanup" test manually closes device
+REVIEWERS: CLAUDE
+CONFIDENCE: likely
+PROBLEM: `testAutoCleanup` is labeled "自动清理" but explicitly closes the device, so it does not test finalizer-based cleanup.
+CODE:
+```
+/**
+ * 自动清理
+ */
+@Test
+public void testAutoCleanup() throws SDFException {
+    ...
+    // 直接关闭会话，保证session也能被关闭
+    sdf2.SDF_CloseDevice(deviceHandle);
+}
+```
+FIX:
+```
+/**
+ * 自动清理 - 依赖 finalize() 方法自动清理资源
+ */
+/* Or keep the code and rename the comment to "手动关闭" */
+```
+===END===
