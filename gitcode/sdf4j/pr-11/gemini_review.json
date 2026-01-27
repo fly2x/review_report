@@ -1,52 +1,52 @@
 [
   {
     "source": "gemini",
-    "file": "sdf4j/src/main/native/src/sdf_jni_symmetric.c",
-    "line": "1296",
+    "file": "sdf4j/src/main/native/src/sdf_jni_device.c",
+    "line": "220",
     "severity": "critical",
-    "title": "Invalid free of JNI primitive array",
-    "problem": "In `JNI_SDF_AuthEncFinal`, if the native `SDF_AuthEncFinal` fails (returns non-SDR_OK), the code attempts to `free(output_buf)`. However, `output_buf` was obtained using `GetPrimitiveArrayCritical`, which may point to a pinned Java object or a copy managed by the JVM. Calling `free()` on it will corrupt the heap allocator and crash the JVM.",
-    "code": "if (ret != SDR_OK) {\n        if (output_buf != NULL) free(output_buf);\n        free(tag_buf);\n        throw_sdf_exception(env, ret);\n        return NULL;\n    }",
-    "fix": "if (ret != SDR_OK) {\n        if (output_buf != NULL) {\n            (*env)->ReleasePrimitiveArrayCritical(env, pucEncData, output_buf, JNI_ABORT);\n        }\n        free(tag_buf);\n        throw_sdf_exception(env, ret);\n        return NULL;\n    }"
+    "title": "Plaintext Password Logging",
+    "problem": "The function `JNI_SDF_GetPrivateKeyAccessRight` logs the user's password in plaintext. This is a severe security vulnerability that leaks sensitive credentials to the application logs.",
+    "code": "SDF_JNI_LOG(\"SDF_GetPrivateKeyAccessRight: pwd='%s', pwd_len=%lu\",\n                pwd ? pwd : \"(null)\", (unsigned long)pwd_len);",
+    "fix": "SDF_JNI_LOG(\"SDF_GetPrivateKeyAccessRight: pwd='***', pwd_len=%lu\",\n                (unsigned long)pwd_len);"
   },
   {
     "source": "gemini",
-    "file": "sdf4j/src/main/native/src/sdf_jni_symmetric.c",
-    "line": "1045",
+    "file": "sdf4j/src/main/native/src/sdf_jni_device.c",
+    "line": "282",
     "severity": "critical",
-    "title": "Double release of JNI primitive array",
-    "problem": "In `JNI_SDF_AuthDec`, the `aad_buf` (Additional Authenticated Data) is released twice using `ReleasePrimitiveArrayCritical` in the success cleanup path. This leads to undefined behavior, potentially corrupting JVM memory or crashing.",
-    "code": "if (aad_buf != NULL) {\n        (*env)->ReleasePrimitiveArrayCritical(env, aad, aad_buf, JNI_ABORT);\n    }\n    if (aad_buf != NULL) {\n        (*env)->ReleasePrimitiveArrayCritical(env, aad, aad_buf, JNI_ABORT);\n    }",
-    "fix": "if (aad_buf != NULL) {\n        (*env)->ReleasePrimitiveArrayCritical(env, aad, aad_buf, JNI_ABORT);\n    }"
-  },
-  {
-    "source": "gemini",
-    "file": "sdf4j/src/main/java/org/openhitls/sdf4j/SDF.java",
-    "line": "57",
-    "severity": "high",
-    "title": "Thread-unsafe resource management",
-    "problem": "The `SDF` class introduces instance-level state (`gSessResource` HashMap, `gDevResource` object) to track sessions and keys. These collections are accessed and modified by multiple methods (`SDF_OpenSession`, `SDF_CloseSession`, `SDF_GenerateKey...`) without any synchronization. If a single `SDF` instance is shared across threads (common for hardware device wrappers), this will lead to `ConcurrentModificationException` or state corruption (e.g., tracking leaks, double-frees).",
-    "code": "private Long gDevHandle = null;\n    private DeviceResource gDevResource = null;\n    private java.util.Map<Long, SessionResource> gSessResource = new java.util.HashMap<>();",
-    "fix": "private Long gDevHandle = null;\n    private DeviceResource gDevResource = null;\n    private java.util.Map<Long, SessionResource> gSessResource = new java.util.concurrent.ConcurrentHashMap<>();\n    \n    // Also ensure DeviceResource.sessions access is thread-safe, e.g., use Collections.synchronizedSet or ConcurrentHashMap.newKeySet()"
+    "title": "Plaintext Password Logging",
+    "problem": "The function `JNI_SDF_GetKEKAccessRight` logs the user's password in plaintext.",
+    "code": "SDF_JNI_LOG(\"SDF_GetKEKAccessRight: pwd='%s', pwd_len=%lu\",\n                pwd ? pwd : \"(null)\", (unsigned long)pwd_len);",
+    "fix": "SDF_JNI_LOG(\"SDF_GetKEKAccessRight: pwd='***', pwd_len=%lu\",\n                (unsigned long)pwd_len);"
   },
   {
     "source": "gemini",
     "file": "sdf4j/src/main/native/src/sdf_jni_symmetric.c",
-    "line": "94",
-    "severity": "high",
-    "title": "JVM Garbage Collector blocking",
-    "problem": "The code uses `GetPrimitiveArrayCritical` to access byte arrays. This function temporarily disables the JVM Garbage Collector. Inside the critical region, the code calls `malloc` (which can lock) and, more importantly, calls the underlying SDF hardware library functions (`g_sdf_functions.SDF_EncryptUpdate`, etc.). If the hardware device or driver blocks or takes a significant amount of time (e.g., high load, hardware fault), the entire JVM GC will be paused, potentially causing the whole Java application to stall or become unresponsive.",
-    "code": "jbyte *data_buf = (*env)->GetPrimitiveArrayCritical(env, data, NULL);\n    // ...\n    LONG ret = g_sdf_functions.SDF_EncryptUpdate(\n        (HANDLE)sessionHandle,\n        (BYTE*)data_buf,\n        // ...\n    );\n    (*env)->ReleasePrimitiveArrayCritical(env, data, data_buf, JNI_ABORT);",
-    "fix": "/* Prefer GetByteArrayRegion / SetByteArrayRegion for potentially blocking operations */\n    jbyte *data_buf = (jbyte*)malloc(data_len);\n    if (data_buf == NULL) { ... }\n    (*env)->GetByteArrayRegion(env, data, 0, data_len, data_buf);\n    \n    LONG ret = g_sdf_functions.SDF_EncryptUpdate(..., (BYTE*)data_buf, ...);\n    \n    free(data_buf);"
+    "line": "531-558",
+    "severity": "critical",
+    "title": "Heap Buffer Overflow in JNI_SDF_AuthEncFinal",
+    "problem": "The function allocates `output_buf` based on the size of the input Java array `pucEncData`. The `SDF_AuthEncFinal` C function writes final ciphertext (padding) and authentication tag. If the user passes a small or empty array (e.g., `new byte[0]`), `malloc` allocates a small buffer, but `SDF_AuthEncFinal` writes padding bytes, causing a heap buffer overflow. Additionally, copying data from `pucEncData` (`GetByteArrayRegion`) is unnecessary as `SDF_AuthEncFinal` is an output-only function for the ciphertext buffer.",
+    "code": "/* Convert pucEncData to native buffer */\n    BYTE *output_buf = NULL;\n    ULONG output_len = 0;\n    if (pucEncData != NULL) {\n        output_len = (*env)->GetArrayLength(env, pucEncData);\n        output_buf = (BYTE*)malloc(output_len);\n        if (output_buf == NULL) {\n            throw_sdf_exception(env, 0x0100001C);\n            return NULL;\n        }\n        (*env)->GetByteArrayRegion(env, pucEncData, 0, output_len, (jbyte*)output_buf);\n    }",
+    "fix": "/* Allocate output buffer with sufficient size for padding (e.g. 256 bytes) */\n    /* pucEncData input is ignored as this is a finalization step producing new data */\n    ULONG output_len = 256; \n    BYTE *output_buf = (BYTE*)malloc(output_len);\n    if (output_buf == NULL) {\n        throw_sdf_exception(env, 0x0100001C);\n        return NULL;\n    }\n    /* Do not copy from pucEncData */"
   },
   {
     "source": "gemini",
-    "file": "sdf4j/src/main/native/src/sdf_jni_asymmetric.c",
-    "line": "345",
+    "file": "sdf4j/src/main/native/src/type_conversion.c",
+    "line": "350-353",
+    "severity": "high",
+    "title": "Heap Buffer Over-read in java_to_native_ECCCipher_alloc",
+    "problem": "The function allows the `L` field of `ECCCipher` to be set to a value larger than the actual allocated size of the `C` array. `native_cipher->L` is set to `l_value` (from Java object), while the memory allocated depends on the Java byte array length. If a malicious user sets a large `L` and a small `C` array, subsequent native calls (like `SDF_ExternalDecrypt_ECC`) will read past the allocated buffer boundary.",
+    "code": "/* L - cipher data length */\n    native_cipher->L = (ULONG)l_value;\n    if (native_cipher->L == 0 && c_len > 0) {\n        native_cipher->L = c_len;\n    }",
+    "fix": "/* L - cipher data length */\n    /* Ensure L does not exceed actual buffer size to prevent over-read */\n    if (l_value > c_len) {\n        SDF_LOG_ERROR(\"java_to_native_ECCCipher_alloc\", \"Invalid L value: exceeds array length\");\n        free(native_cipher);\n        return NULL;\n    }\n    native_cipher->L = (ULONG)l_value;\n    if (native_cipher->L == 0 && c_len > 0) {\n        native_cipher->L = c_len;\n    }"
+  },
+  {
+    "source": "gemini",
+    "file": "sdf4j/src/main/native/src/sdf_jni_symmetric.c",
+    "line": "433",
     "severity": "medium",
-    "title": "Potential buffer overflow in Envelope Exchange",
-    "problem": "`JNI_SDF_ExchangeDigitEnvelopeBaseOnECC` allocates the output buffer based solely on the input cipher length (`in_cipher->L`). If the operation results in a larger ciphertext (e.g., due to key wrapping overhead, padding, or format differences), `SDF_ExchangeDigitEnvelopeBaseOnECC` will write past the allocated buffer.",
-    "code": "ULONG out_len = in_cipher->L;\n    ECCCipher *out_cipher = (ECCCipher*)calloc(1, sizeof(ECCCipher) + out_len);",
-    "fix": "/* Ensure buffer is large enough for potential expansion. \n       Consult SDF spec for maximum expansion. typically ECCref_MAX_CIPHER_LEN or similar constant */\n    ULONG out_len = in_cipher->L + 128; // Add safety margin\n    ECCCipher *out_cipher = (ECCCipher*)calloc(1, sizeof(ECCCipher) + out_len);\n    out_cipher->L = out_len; // Tell native lib the max buffer size if possible, otherwise rely on sufficient alloc"
+    "title": "Potential Pointer Corruption in JNI_SDF_AuthDec",
+    "problem": "The function casts `jsize*` (int*) to `ULONG*` (unsigned int*). While `ULONG` is typedef'd to `unsigned int` in this project (making it 32-bit and likely safe), this cast is dangerous. If `ULONG` were ever changed to `unsigned long` (64-bit on Linux), `SDF_AuthDec` would overwrite stack memory adjacent to `tag_len`.",
+    "code": "LONG ret = g_sdf_functions.SDF_AuthDec(\n        (HANDLE)sessionHandle,\n        (HANDLE)keyHandle,\n        (ULONG)algID,\n        (BYTE*)iv_buf,\n        (ULONG)iv_len,\n        (BYTE*)aad_buf,\n        (ULONG)aad_len,\n        (BYTE*)tag_buf,\n        (ULONG *)&tag_len,\n        (BYTE*)enc_buf,",
+    "fix": "ULONG ul_tag_len = (ULONG)tag_len;\n    LONG ret = g_sdf_functions.SDF_AuthDec(\n        (HANDLE)sessionHandle,\n        (HANDLE)keyHandle,\n        (ULONG)algID,\n        (BYTE*)iv_buf,\n        (ULONG)iv_len,\n        (BYTE*)aad_buf,\n        (ULONG)aad_len,\n        (BYTE*)tag_buf,\n        &ul_tag_len,\n        (BYTE*)enc_buf,"
   }
 ]

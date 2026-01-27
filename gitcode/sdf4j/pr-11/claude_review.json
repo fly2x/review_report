@@ -1,72 +1,110 @@
 [
   {
     "source": "claude",
-    "file": "sdf4j/src/main/native/include/dynamic_loader.h",
-    "line": "93-97",
-    "severity": "high",
-    "title": "Duplicate typedef for SDF_ImportKey_FN",
-    "problem": "The typedef for SDF_ImportKey_FN is defined twice on lines 93-94 and 97-98. The second definition on lines 97-98 is redundant and will cause a compilation warning or error.",
-    "code": "typedef LONG (*SDF_ImportKey_FN)(HANDLE hSessionHandle, BYTE *pucKey,\n                                 ULONG uiKeyLength, HANDLE *phKeyHandle);\ntypedef LONG (*SDF_DestroyKey_FN)(HANDLE hSessionHandle, HANDLE hKeyHandle);\n\ntypedef LONG (*SDF_ImportKey_FN)(HANDLE hSessionHandle, BYTE *pucKey,\n                                 ULONG uiKeyLength, HANDLE *phKeyHandle);",
-    "fix": "typedef LONG (*SDF_ImportKey_FN)(HANDLE hSessionHandle, BYTE *pucKey,\n                                 ULONG uiKeyLength, HANDLE *phKeyHandle);\ntypedef LONG (*SDF_DestroyKey_FN)(HANDLE hSessionHandle, HANDLE hKeyHandle);\n\ntypedef LONG (*SDF_ExchangeDigitEnvelopeBaseOnECC_FN)(HANDLE hSessionHandle, ULONG uiKEKIndex,\n                                        ULONG uiAlgID, ECCrefPublicKey *pucPublicKey, ECCCipher *pucEncDataIn,\n                                        ECCCipher *pucEncDataOut);"
-  },
-  {
-    "source": "claude",
-    "file": "sdf4j/src/main/native/src/dynamic_loader.c",
-    "line": "135-139",
-    "severity": "high",
-    "title": "SDF_ImportKey loaded twice from library",
-    "problem": "The code calls load_function twice for SDF_ImportKey (lines 135-136 and 137-138). The second call is redundant and may cause confusion or unexpected behavior if the function pointers were different.",
-    "code": "load_function(handle, (void**)&g_sdf_functions.SDF_ImportKey,\n                 \"SDF_ImportKey\", false);\n    load_function(handle, (void**)&g_sdf_functions.SDF_DestroyKey,\n                 \"SDF_DestroyKey\", false);\n    load_function(handle, (void**)&g_sdf_functions.SDF_ImportKey,\n                 \"SDF_ImportKey\", false);",
-    "fix": "load_function(handle, (void**)&g_sdf_functions.SDF_DestroyKey,\n                 \"SDF_DestroyKey\", false);\n    load_function(handle, (void**)&g_sdf_functions.SDF_ImportKey,\n                 \"SDF_ImportKey\", false);\n    load_function(handle, (void**)&g_sdf_functions.SDF_ExchangeDigitEnvelopeBaseOnECC,\n                 \"SDF_ExchangeDigitEnvelopeBaseOnECC\", false);"
+    "file": "sdf4j/src/main/java/org/openhitls/sdf4j/SDF.java",
+    "line": "70",
+    "severity": "critical",
+    "title": "Resource leak in DeviceResource.finalize() - gDevHandle may be null",
+    "problem": "In DeviceResource.finalize(), the code directly calls `SDF_CloseDevice(gDevHandle)` without checking if gDevHandle is null. When finalize() is called after SDF_CloseDevice() has already been invoked (which sets gDevHandle = null at line 187), the method will pass null to the native call. Additionally, finalize() does not validate the deviceHandle before calling SDF_CloseDevice, which could cause issues with handle validation.",
+    "code": "@Override\nprotected void finalize() throws Throwable {\n    try {\n        SDF_CloseDevice(gDevHandle);  // gDevHandle could be null here\n    } finally {\n        super.finalize();\n    }\n}",
+    "fix": "@Override\nprotected void finalize() throws Throwable {\n    try {\n        if (gDevHandle != null) {\n            // Only close if not already manually closed\n            long handle = gDevHandle.longValue();\n            // Close sessions directly using native method to avoid recursion\n            for (Long sessionHandle : new java.util.HashSet<>(sessions)) {\n                try {\n                    SDF_CloseSessionNative(sessionHandle);\n                } catch (Exception e) {\n                    // Ignore errors during finalize\n                }\n            }\n            SDF_CloseDeviceNative(handle);\n        }\n    } finally {\n        super.finalize();\n    }\n}"
   },
   {
     "source": "claude",
     "file": "sdf4j/src/main/java/org/openhitls/sdf4j/SDF.java",
-    "line": "443-444",
+    "line": "102",
+    "severity": "critical",
+    "title": "Resource leak in SessionResource.finalize() - exceptions not caught",
+    "problem": "In SessionResource.finalize(), if SDF_DestroyKey_Native throws an exception for any keyHandle, the loop terminates and remaining keys are not destroyed. The finalize() method should catch exceptions to ensure all keys are destroyed.",
+    "code": "for (Long keyHandle : keys) {\n    SDF_DestroyKey_Native(sessionHandle, keyHandle);\n}",
+    "fix": "for (Long keyHandle : keys) {\n    try {\n        SDF_DestroyKey_Native(sessionHandle, keyHandle);\n    } catch (Exception e) {\n        // Log but continue destroying remaining keys\n    }\n}"
+  },
+  {
+    "source": "claude",
+    "file": "sdf4j/src/main/java/org/openhitls/sdf4j/SDF.java",
+    "line": "136-145",
     "severity": "high",
-    "title": "Key handles not registered with SessionResource for tracking",
-    "problem": "Key generation functions that return long handles (SDF_ImportKeyWithISK_RSA, SDF_ImportKeyWithISK_ECC, SDF_GenerateAgreementDataWithECC, SDF_GenerateKeyWithECC, SDF_GenerateAgreementDataAndKeyWithECC, SDF_ImportKeyWithKEK, SDF_ImportKey) do not register their returned handles with SessionResource. This means these keys will not be automatically cleaned up when the session is closed, causing resource leaks. Only SDF_GenerateKeyWithIPK_RSA, SDF_GenerateKeyWithEPK_RSA, SDF_GenerateKeyWithIPK_ECC, SDF_GenerateKeyWithEPK_ECC, and SDF_GenerateKeyWithKEK properly register keys.",
-    "code": "public native long SDF_ImportKeyWithISK_RSA(\n            long sessionHandle, int keyIndex, byte[] encryptedKey) throws SDFException;\n\n    public native long SDF_ImportKeyWithISK_ECC(\n            long sessionHandle, int keyIndex, ECCCipher cipher) throws SDFException;\n\n    public native long SDF_GenerateAgreementDataWithECC(\n            long sessionHandle, int keyIndex, int keyBits,\n            byte[] sponsorID, ECCPublicKey sponsorPublicKey,\n            ECCPublicKey sponsorTmpPublicKey) throws SDFException;",
-    "fix": "public long SDF_ImportKeyWithISK_RSA(\n            long sessionHandle, int keyIndex, byte[] encryptedKey) throws SDFException {\n        long keyHandle = SDF_ImportKeyWithISK_RSA_Native(sessionHandle, keyIndex, encryptedKey);\n        if (keyHandle != 0) {\n            SessionResource sessionResource = gSessResource.get(sessionHandle);\n            if (sessionResource != null) {\n                sessionResource.addKey(keyHandle);\n            }\n        }\n        return keyHandle;\n    }\n\n    private native long SDF_ImportKeyWithISK_RSA_Native(\n            long sessionHandle, int keyIndex, byte[] encryptedKey) throws SDFException;\n\n    // Apply similar wrapper pattern to SDF_ImportKeyWithISK_ECC,\n    // SDF_GenerateAgreementDataWithECC, SDF_GenerateKeyWithECC,\n    // SDF_GenerateAgreementDataAndKeyWithECC, SDF_ImportKeyWithKEK, and SDF_ImportKey"
+    "title": "SDF_OpenDevice does not validate deviceHandle before returning cached value",
+    "problem": "The SDF_OpenDevice method returns a cached gDevHandle without validating that the device is still open. If the underlying device was closed externally (e.g., by another SDF instance or native code), the cached handle becomes invalid.",
+    "code": "public long SDF_OpenDevice() throws SDFException {\n    // 如果已初始化，直接返回\n    if (gDevHandle != null) {\n        return gDevHandle;\n    }\n    // 初始化 device\n    gDevHandle = SDF_OpenDeviceNative();\n    gDevResource = new DeviceResource();\n    return gDevHandle;\n}",
+    "fix": "public long SDF_OpenDevice() throws SDFException {\n    // 如果已初始化，直接返回\n    if (gDevHandle != null) {\n        return gDevHandle.longValue();\n    }\n    // 初始化 device\n    long handle = SDF_OpenDeviceNative();\n    if (handle == 0) {\n        throw new SDFException(ErrorCode.SDR_UNOPENERR);  // Or appropriate error\n    }\n    gDevHandle = Long.valueOf(handle);\n    gDevResource = new DeviceResource();\n    return gDevHandle.longValue();\n}"
+  },
+  {
+    "source": "claude",
+    "file": "sdf4j/src/main/java/org/openhitls/sdf4j/SDF.java",
+    "line": "175",
+    "severity": "high",
+    "title": "SDF_CloseDevice compares Long to long using == for null check",
+    "problem": "Line 175 checks `if (gDevHandle == 0 || deviceHandle != gDevHandle)` - when gDevHandle is null, the comparison `gDevHandle == 0` will auto-unbox null to a long, causing a NullPointerException. Also, the check `deviceHandle != gDevHandle` is comparing long to Long, which auto-unboxes.",
+    "code": "if (gDevHandle == 0 || deviceHandle != gDevHandle) {\n    return;\n}",
+    "fix": "if (gDevHandle == null || deviceHandle != gDevHandle.longValue()) {\n    return;\n}"
+  },
+  {
+    "source": "claude",
+    "file": "sdf4j/src/main/java/org/openhitls/sdf4j/SDF.java",
+    "line": "377-391",
+    "severity": "medium",
+    "title": "Key generation methods don't handle null result from native call",
+    "problem": "All the `SDF_GenerateKeyWith*` wrapper methods check `if (result != null)` before adding to sessionResource, but they don't validate that `result.getKeyHandle()` is valid (non-zero). A KeyEncryptionResult with a 0 keyHandle should not be tracked.",
+    "code": "if (result != null) {\n    SessionResource sessionResource = gSessResource.get(sessionHandle);\n    if (sessionResource != null) {\n        sessionResource.addKey(result.getKeyHandle());\n    }\n}\nreturn result;",
+    "fix": "if (result != null && result.getKeyHandle() != 0) {\n    SessionResource sessionResource = gSessResource.get(sessionHandle);\n    if (sessionResource != null) {\n        sessionResource.addKey(result.getKeyHandle());\n    }\n}\nreturn result;"
+  },
+  {
+    "source": "claude",
+    "file": "sdf4j/src/main/native/src/sdf_jni_keygen.c",
+    "line": "267-270",
+    "severity": "medium",
+    "title": "Memory leak if create_key_encryption_result returns NULL",
+    "problem": "If create_key_encryption_result fails and returns NULL, cipher_data is freed but key_handle is leaked because SDF_DestroyKey is not called.",
+    "code": "jobject result = create_key_encryption_result(env, cipher_data, cipher_data_len, key_handle);\nfree(cipher_data);\nif (result == NULL) {\n    g_sdf_functions.SDF_DestroyKey((HANDLE)sessionHandle, (HANDLE)key_handle);\n    throw_sdf_exception(env, 0x0100001C);\n    return NULL;\n}"
+  },
+  {
+    "source": "claude",
+    "file": "sdf4j/src/main/java/org/openhitls/sdf4j/SDF.java",
+    "line": "57-59",
+    "severity": "medium",
+    "title": "Instance variables used instead of static for resource management",
+    "problem": "The resource management variables `gDevHandle`, `gDevResource`, and `gSessResource` are instance variables (non-static) but use \"g\" prefix convention typically used for globals. More importantly, the current design creates a problem: if multiple SDF instances are created, each will have its own resource tracking but SDF_OpenDevice returns the cached handle across instances incorrectly. The singleton pattern should be properly implemented or the \"g\" prefix removed.",
+    "code": "private Long gDevHandle = null;\nprivate DeviceResource gDevResource = null;\nprivate java.util.Map<Long, SessionResource> gSessResource = new java.util.HashMap<>();",
+    "fix": "private Long deviceHandle = null;\nprivate DeviceResource deviceResource = null;\nprivate java.util.Map<Long, SessionResource> sessionResources = new java.util.HashMap<>();"
+  },
+  {
+    "source": "claude",
+    "file": "sdf4j/src/main/java/org/openhitls/sdf4j/SDF.java",
+    "line": "644",
+    "severity": "medium",
+    "title": "SDF_ExchangeDigitEnvelopeBaseOnECC is declared as native but should track key handle",
+    "problem": "The new method `SDF_ExchangeDigitEnvelopeBaseOnECC` is declared as native and returns an ECCCipher. If this operation creates/returns a key handle that needs tracking, it should follow the same pattern as other key generation methods to register the key with the SessionResource.",
+    "code": "public native ECCCipher SDF_ExchangeDigitEnvelopeBaseOnECC(\n        long sessionHandle, int keyIndex, int algID, ECCPublicKey publicKey, ECCCipher encDataIn) throws SDFException;",
+    "fix": "public ECCCipher SDF_ExchangeDigitEnvelopeBaseOnECC(\n        long sessionHandle, int keyIndex, int algID, ECCPublicKey publicKey, ECCCipher encDataIn) throws SDFException {\n    ECCCipher result = SDF_ExchangeDigitEnvelopeBaseOnECC_Native(sessionHandle, keyIndex, algID, publicKey, encDataIn);\n    // Track key if this operation creates one\n    return result;\n}\nprivate native ECCCipher SDF_ExchangeDigitEnvelopeBaseOnECC_Native(\n        long sessionHandle, int keyIndex, int algID, ECCPublicKey publicKey, ECCCipher encDataIn) throws SDFException;"
   },
   {
     "source": "claude",
     "file": "sdf4j/src/main/native/src/sdf_jni_asymmetric.c",
-    "line": "47-57",
-    "severity": "medium",
-    "title": "Potential JNI exception pending after native call",
-    "problem": "After calling g_sdf_functions.SDF_InternalSign_ECC on line 48-49, the code releases the primitive array critical on line 50 BEFORE checking the return value and throwing an exception on lines 51-55. If ret != SDR_OK, a Java exception is thrown, but the array is already released. While JNI_ABORT is correct, the error logging on lines 52-53 happens after release which could lose context. More critically, if native_to_java_ECCSignature fails on line 57, the exception is thrown without proper context.",
-    "code": "LONG ret = g_sdf_functions.SDF_InternalSign_ECC((HANDLE)sessionHandle, keyIndex,\n                                                     (BYTE*)data_buf, data_len, &signature);\n    (*env)->ReleasePrimitiveArrayCritical(env, data, data_buf, JNI_ABORT);\n    if (ret != SDR_OK) {\n        SDF_LOG_HEX(\"SDF_InternalSign_ECC signature.r\", signature.r, ECCref_MAX_LEN);\n        SDF_LOG_HEX(\"SDF_InternalSign_ECC signature.s\", signature.s, ECCref_MAX_LEN);\n        throw_sdf_exception(env, ret);\n        return NULL;\n    }",
-    "fix": "LONG ret = g_sdf_functions.SDF_InternalSign_ECC((HANDLE)sessionHandle, keyIndex,\n                                                     (BYTE*)data_buf, data_len, &signature);\n    \n    if (ret != SDR_OK) {\n        (*env)->ReleasePrimitiveArrayCritical(env, data, data_buf, JNI_ABORT);\n        SDF_LOG_HEX(\"SDF_InternalSign_ECC signature.r\", signature.r, ECCref_MAX_LEN);\n        SDF_LOG_HEX(\"SDF_InternalSign_ECC signature.s\", signature.s, ECCref_MAX_LEN);\n        throw_sdf_exception(env, ret);\n        return NULL;\n    }\n    \n    (*env)->ReleasePrimitiveArrayCritical(env, data, data_buf, JNI_ABORT);"
-  },
-  {
-    "source": "claude",
-    "file": "sdf4j/src/main/java/org/openhitls/sdf4j/SDF.java",
-    "line": "57-85",
-    "severity": "medium",
-    "title": "DeviceResource finalize uses obsolete gDevHandle after close",
-    "problem": "In DeviceResource.finalize(), if SDF_CloseDevice(gDevHandle) is called on line 70 but gDevHandle has already been set to null by another thread, a NullPointerException could occur. Also, the finalize method doesn't check if gDevHandle is null before calling SDF_CloseDevice.",
-    "code": "private class DeviceResource {\n        private java.util.Set<Long> sessions = new java.util.HashSet<>();\n\n        @Override\n        protected void finalize() throws Throwable {\n            try {\n                SDF_CloseDevice(gDevHandle);\n            } catch (Exception e) {\n                // 忽略异常\n            } finally {\n                super.finalize();\n            }\n        }",
-    "fix": "private class DeviceResource {\n        private java.util.Set<Long> sessions = new java.util.HashSet<>();\n\n        @Override\n        protected void finalize() throws Throwable {\n            try {\n                if (gDevHandle != null) {\n                    SDF_CloseDevice(gDevHandle);\n                }\n            } catch (Exception e) {\n                // 忽略异常\n            } finally {\n                super.finalize();\n            }\n        }"
-  },
-  {
-    "source": "claude",
-    "file": "sdf4j/src/main/java/org/openhitls/sdf4j/SDF.java",
-    "line": "144-153",
+    "line": "176-177",
     "severity": "low",
-    "title": "SDF_OpenDevice returns cached handle without thread-safety",
-    "problem": "The SDF_OpenDevice method checks if gDevHandle != null on line 146 and returns the cached handle. This has two issues: 1) If gDevHandle is non-null but the device was actually closed externally, it returns an invalid handle. 2) The check and assignment is not thread-safe - multiple threads could race and create multiple DeviceResource instances.",
-    "code": "public long SDF_OpenDevice() throws SDFException {\n        // 如果已初始化，直接返回\n        if (gDevHandle != null) {\n            return gDevHandle;\n        }\n        \n        // 初始化 device\n        gDevHandle = SDF_OpenDeviceNative();\n        gDevResource = new DeviceResource();\n        return gDevHandle;\n    }",
-    "fix": "public long SDF_OpenDevice() throws SDFException {\n        // 如果已初始化，直接返回\n        Long cachedHandle;\n        synchronized (this) {\n            cachedHandle = gDevHandle;\n            if (cachedHandle != null) {\n                return cachedHandle;\n            }\n            // 初始化 device\n            gDevHandle = SDF_OpenDeviceNative();\n            gDevResource = new DeviceResource();\n            return gDevHandle;\n        }\n    }"
+    "title": "Wrong error log message in JNI_SDF_InternalEncrypt_ECC",
+    "problem": "Error log message says \"GetPrimitiveArrayCritical failed\" but it's for JNI_SDF_InternalEncrypt_ECC, not JNI_SDF_ExternalEncrypt_ECC.",
+    "code": "} else {\n    jbyte *data_buf = (*env)->GetPrimitiveArrayCritical(env, data, NULL);\n    if (data_buf == NULL) {\n        SDF_LOG_ERROR(\"SDF_ExternalEncrypt_ECC\", \"GetPrimitiveArrayCritical failed\");",
+    "fix": "} else {\n    jbyte *data_buf = (*env)->GetPrimitiveArrayCritical(env, data, NULL);\n    if (data_buf == NULL) {\n        SDF_LOG_ERROR(\"SDF_InternalEncrypt_ECC\", \"GetPrimitiveArrayCritical failed\");"
+  },
+  {
+    "source": "claude",
+    "file": "sdf4j/src/main/native/src/sdf_jni_symmetric.c",
+    "line": "641",
+    "severity": "low",
+    "title": "Stack-allocated buffers for MAC/HMAC may be too small",
+    "problem": "Using stack allocation for `BYTE mac_buf[32]` and `BYTE hmac_buf[64]` assumes these are fixed maximum sizes. If the SDF library returns larger values, this would cause a buffer overflow. The original code used malloc which allowed dynamic sizing.",
+    "code": "ULONG mac_len = 32;\nBYTE mac_buf[32];",
+    "fix": "ULONG mac_len = 32;\nBYTE mac_buf[64];  // Allocate larger buffer to be safe"
   },
   {
     "source": "claude",
     "file": "examples/src/test/java/org/openhitls/sdf4j/examples/ResourceManagementTest.java",
-    "line": "64-70",
+    "line": "189-205",
     "severity": "low",
-    "title": "Test comment says \"自动清理\" but manually closes session",
-    "problem": "The testAutoCleanup method's comment says it tests automatic cleanup, but the code manually closes the device on line 70 without closing the session first. The comment and implementation are misleading.",
-    "code": "/**\n     * 自动清理\n     */\n    @Test\n    public void testAutoCleanup() throws SDFException {\n        SDF sdf2 = new SDF();\n        System.out.println(\"--- 自动清理 ---\");\n        long deviceHandle = sdf2.SDF_OpenDevice();\n        assertNotEquals(\"设备句柄有效\", 0, deviceHandle);\n        System.out.println(\"打开设备成功: handle=0x\" + Long.toHexString(deviceHandle));\n\n        long sessionHandle = sdf2.SDF_OpenSession(deviceHandle);\n        assertNotEquals(\"会话句柄有效\", 0, sessionHandle);\n        System.out.println(\"打开会话成功: handle=0x\" + Long.toHexString(sessionHandle));\n\n        // 获取设备信息\n        DeviceInfo info = sdf2.SDF_GetDeviceInfo(sessionHandle);\n        assertNotNull(\"设备信息应该不为空\", info);\n        System.out.println(\"获取设备信息: \" + info.getIssuerName());\n        // 直接关闭设备，保证session也能被关闭\n        sdf2.SDF_CloseDevice(deviceHandle);",
-    "fix": "/**\n     * 自动清理 - 依赖 finalize() 方法自动清理资源\n     */\n    @Test\n    public void testAutoCleanup() throws SDFException {\n        SDF sdf2 = new SDF();\n        System.out.println(\"--- 自动清理 ---\");\n        long deviceHandle = sdf2.SDF_OpenDevice();\n        assertNotEquals(\"设备句柄有效\", 0, deviceHandle);\n        System.out.println(\"打开设备成功: handle=0x\" + Long.toHexString(deviceHandle));\n\n        long sessionHandle = sdf2.SDF_OpenSession(deviceHandle);\n        assertNotEquals(\"会话句柄有效\", 0, sessionHandle);\n        System.out.println(\"打开会话成功: handle=0x\" + Long.toHexString(sessionHandle));\n\n        // 获取设备信息\n        DeviceInfo info = sdf2.SDF_GetDeviceInfo(sessionHandle);\n        assertNotNull(\"设备信息应该不为空\", info);\n        System.out.println(\"获取设备信息: \" + info.getIssuerName());\n        \n        // 不手动关闭，依赖 finalize() 自动清理 (实际使用不建议)\n        System.out.println(\"测试完成，资源将由 finalize() 自动清理\\n\");"
+    "title": "testKeyHandleAutoCleanup doesn't verify cleanup actually happens",
+    "problem": "The test creates a key handle and then closes the device without verifying that the key was actually destroyed. The test comment says \"验证自动释放功能\" (verify auto-cleanup) but no verification is performed.",
+    "code": "// 创建密钥句柄（不手动调用 destroy）\nSystem.out.println(\"创建密钥句柄，不手动调用 destroy\");\nKeyEncryptionResult result = sdf6.SDF_GenerateKeyWithIPK_ECC(sessionHandle, 1, 128);\n// ... uses key ...\n// 直接关闭设备，保证session和key也能被关闭释放\nsdf6.SDF_CloseDevice(deviceHandle);"
   }
 ]

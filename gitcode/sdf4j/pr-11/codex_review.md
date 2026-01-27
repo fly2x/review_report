@@ -4,42 +4,48 @@
 
 ## Critical
 
-### Buffer overflow in ECC conversions (missing length clamps)
-`sdf4j/src/main/native/src/type_conversion.c:300-449`
+### Missing bounds checks when copying ECC byte arrays
+`sdf4j/src/main/native/src/type_conversion.c:319-399`
 ```
-jsize len = (*env)->GetArrayLength(env, x_array);
-(*env)->GetByteArrayRegion(env, x_array, 0, len, (jbyte*)native_key->x);
+if (x_array != NULL) {
+    jsize len = (*env)->GetArrayLength(env, x_array);
+    (*env)->GetByteArrayRegion(env, x_array, 0, len, (jbyte*)native_cipher->x);
+}
 ...
-jsize len = (*env)->GetArrayLength(env, y_array);
-(*env)->GetByteArrayRegion(env, y_array, 0, len, (jbyte*)native_key->y);
+if (x_array != NULL) {
+    jsize len = (*env)->GetArrayLength(env, x_array);
+    (*env)->GetByteArrayRegion(env, x_array, 0, len, (jbyte*)native_key->x);
+}
+...
+if (r_array != NULL) {
+    jsize len = (*env)->GetArrayLength(env, r_array);
+    (*env)->GetByteArrayRegion(env, r_array, 0, len, (jbyte*)native_sig->r);
+}
 ```
-**Issue**: The new code copies Java byte arrays directly into fixed-size ECC buffers without clamping to `ECCref_MAX_LEN`. If Java supplies longer arrays, this writes past the end of `ECCrefPublicKey`, `ECCSignature`, and `ECCCipher` fields, causing memory corruption.
+**Issue**: Java-provided arrays are copied into fixed-size ECC buffers without clamping to `ECCref_MAX_LEN`. This enables out-of-bounds writes (memory corruption) if the Java arrays are longer than the native fields. Additionally, ECCSignature is no longer zeroed before partial copies.
 **Fix**:
 ```
-jsize len = (*env)->GetArrayLength(env, x_array);
-if (len > ECCref_MAX_LEN) len = ECCref_MAX_LEN;
-(*env)->GetByteArrayRegion(env, x_array, 0, len, (jbyte*)native_key->x);
+/* ECCCipher x */
+if (x_array != NULL) {
+    jsize len = (*env)->GetArrayLength(env, x_array);
+    if (len > ECCref_MAX_LEN) len = ECCref_MAX_LEN;
+    (*env)->GetByteArrayRegion(env, x_array, 0, len, (jbyte*)native_cipher->x);
+}
 
-len = (*env)->GetArrayLength(env, y_array);
-if (len > ECCref_MAX_LEN) len = ECCref_MAX_LEN;
-(*env)->GetByteArrayRegion(env, y_array, 0, len, (jbyte*)native_key->y);
-```
+/* ECCPublicKey x */
+if (x_array != NULL) {
+    jsize len = (*env)->GetArrayLength(env, x_array);
+    if (len > ECCref_MAX_LEN) len = ECCref_MAX_LEN;
+    (*env)->GetByteArrayRegion(env, x_array, 0, len, (jbyte*)native_key->x);
+}
 
----
-
-### Buffer overflow in ECC private key conversion
-`sdf4j/src/main/native/src/type_conversion.c:667-678`
-```
-jsize len = (*env)->GetArrayLength(env, k_array);
-(*env)->GetByteArrayRegion(env, k_array, 0, len, (jbyte*)native_key->K);
-```
-**Issue**: `java_to_native_ECCPrivateKey` copies the Java `k` array into a fixed-size `ECCrefPrivateKey.K` buffer without clamping. Oversized input overflows the native struct.
-**Fix**:
-```
-memset(native_key, 0, sizeof(ECCrefPrivateKey));
-jsize len = (*env)->GetArrayLength(env, k_array);
-if (len > ECCref_MAX_LEN) len = ECCref_MAX_LEN;
-(*env)->GetByteArrayRegion(env, k_array, 0, len, (jbyte*)native_key->K);
+/* ECCSignature */
+memset(native_sig, 0, sizeof(ECCSignature));
+if (r_array != NULL) {
+    jsize len = (*env)->GetArrayLength(env, r_array);
+    if (len > ECCref_MAX_LEN) len = ECCref_MAX_LEN;
+    (*env)->GetByteArrayRegion(env, r_array, 0, len, (jbyte*)native_sig->r);
+}
 ```
 
 ---
@@ -47,104 +53,25 @@ if (len > ECCref_MAX_LEN) len = ECCref_MAX_LEN;
 
 ## High
 
-### Build break: undefined variable keyHandle
-`sdf4j/src/main/native/src/sdf_jni_keygen.c:662-668`
+### ECC private key copy can overflow native buffer
+`sdf4j/src/main/native/src/type_conversion.c:617-628`
 ```
-SDF_LOG_EXIT("SDF_ImportKey", ret);
-SDF_JNI_LOG("SDF_ImportKey: keyHandle=0x%lX", (unsigned long)keyHandle);
-return (jlong)key_handle;
+jbyteArray k_array = (jbyteArray)(*env)->GetObjectField(env, java_key,
+                                                         g_jni_cache.eccPrivateKey.k);
+if (k_array != NULL) {
+    jsize len = (*env)->GetArrayLength(env, k_array);
+    (*env)->GetByteArrayRegion(env, k_array, 0, len, (jbyte*)native_key->K);
+}
 ```
-**Issue**: The new `SDF_ImportKey` JNI method logs `keyHandle`, but the variable is named `key_handle`. This is a compile error.
+**Issue**: `java_to_native_ECCPrivateKey` copies the full Java array length into `native_key->K` without clamping to `ECCref_MAX_LEN`, and it no longer zeroes the struct. This can overflow the fixed-size buffer and leave uninitialized bytes.
 **Fix**:
 ```
-SDF_LOG_EXIT("SDF_ImportKey", ret);
-SDF_JNI_LOG("SDF_ImportKey: keyHandle=0x%lX", (unsigned long)key_handle);
-return (jlong)key_handle;
-```
-
----
-
-### Double ReleasePrimitiveArrayCritical on aad_buf
-`sdf4j/src/main/native/src/sdf_jni_symmetric.c:960-967`
-```
-if (aad_buf != NULL) {
-    (*env)->ReleasePrimitiveArrayCritical(env, aad, aad_buf, JNI_ABORT);
+memset(native_key, 0, sizeof(ECCrefPrivateKey));
+if (k_array != NULL) {
+    jsize len = (*env)->GetArrayLength(env, k_array);
+    if (len > ECCref_MAX_LEN) len = ECCref_MAX_LEN;
+    (*env)->GetByteArrayRegion(env, k_array, 0, len, (jbyte*)native_key->K);
 }
-if (aad_buf != NULL) {
-    (*env)->ReleasePrimitiveArrayCritical(env, aad, aad_buf, JNI_ABORT);
-}
-```
-**Issue**: `aad_buf` is released twice in `JNI_SDF_AuthDec`, which can corrupt JNI state or crash the JVM.
-**Fix**:
-```
-if (aad_buf != NULL) {
-    (*env)->ReleasePrimitiveArrayCritical(env, aad, aad_buf, JNI_ABORT);
-}
-```
-
----
-
-### Invalid free() of pinned JNI array
-`sdf4j/src/main/native/src/sdf_jni_symmetric.c:1229-1236`
-```
-if (aad_buf != NULL) {
-    (*env)->ReleasePrimitiveArrayCritical(env, aad, aad_buf, JNI_ABORT);
-}
-if (aad_buf != NULL) free(aad_buf);
-```
-**Issue**: `aad_buf` is obtained via `GetPrimitiveArrayCritical` and must be released via `ReleasePrimitiveArrayCritical`. Calling `free(aad_buf)` is undefined behavior and can crash.
-**Fix**:
-```
-if (aad_buf != NULL) {
-    (*env)->ReleasePrimitiveArrayCritical(env, aad, aad_buf, JNI_ABORT);
-}
-```
-
----
-
-### Invalid free() on GetPrimitiveArrayCritical buffers
-`sdf4j/src/main/native/src/sdf_jni_util.c:405-448`
-```
-if (iv_buf == NULL) {
-    free(key_buf);
-    throw_sdf_exception(env, 0x0100001C);
-    return NULL;
-}
-...
-if (enc_buf == NULL) {
-    free(key_buf);
-    if (iv_buf) free(iv_buf);
-    throw_sdf_exception(env, 0x0100001C);
-    return NULL;
-}
-...
-free(key_buf);
-if (iv_buf) free(iv_buf);
-free(enc_buf);
-```
-**Issue**: `key_buf`, `iv_buf`, and `enc_buf` are obtained via `GetPrimitiveArrayCritical` but are freed with `free(...)`. This is invalid and can cause memory corruption or JVM crashes, including in error paths.
-**Fix**:
-```
-if (iv_buf == NULL) {
-    (*env)->ReleasePrimitiveArrayCritical(env, key, key_buf, JNI_ABORT);
-    throw_sdf_exception(env, 0x0100001C);
-    return NULL;
-}
-...
-if (enc_buf == NULL) {
-    (*env)->ReleasePrimitiveArrayCritical(env, key, key_buf, JNI_ABORT);
-    if (iv_buf != NULL) {
-        (*env)->ReleasePrimitiveArrayCritical(env, iv, iv_buf, JNI_ABORT);
-    }
-    throw_sdf_exception(env, 0x0100001C);
-    return NULL;
-}
-...
-(*env)->ReleasePrimitiveArrayCritical(env, key, key_buf, JNI_ABORT);
-if (iv_buf != NULL) {
-    (*env)->ReleasePrimitiveArrayCritical(env, iv, iv_buf, JNI_ABORT);
-}
-(*env)->ReleasePrimitiveArrayCritical(env, encData, enc_buf, JNI_ABORT);
 ```
 
 ---
@@ -152,14 +79,14 @@ if (iv_buf != NULL) {
 
 ## Medium
 
-### NullPointerException on CloseDevice when gDevHandle is null
-`sdf4j/src/main/java/org/openhitls/sdf4j/SDF.java:181-184`
+### Null unboxing in device close guard
+`sdf4j/src/main/java/org/openhitls/sdf4j/SDF.java:173-176`
 ```
-if (deviceHandle != gDevHandle) {
+if (gDevHandle == 0 || deviceHandle != gDevHandle) {
     return;
 }
 ```
-**Issue**: `deviceHandle != gDevHandle` auto-unboxes `gDevHandle`. If `SDF_CloseDevice` is called before `SDF_OpenDevice` or after a close, `gDevHandle` is null and this throws a NullPointerException instead of behaving as a no-op or clean error.
+**Issue**: `gDevHandle` is a `Long`. The comparison `gDevHandle == 0` auto-unboxes; when `gDevHandle` is `null` (e.g., close called before open or after a previous close), this throws `NullPointerException` instead of a safe no-op.
 **Fix**:
 ```
 if (gDevHandle == null || deviceHandle != gDevHandle.longValue()) {
@@ -169,23 +96,71 @@ if (gDevHandle == null || deviceHandle != gDevHandle.longValue()) {
 
 ---
 
-### OpenSession can throw NPE when device resource is missing
-`sdf4j/src/main/java/org/openhitls/sdf4j/SDF.java:216-221`
+### ConcurrentModificationException while closing session keys
+`sdf4j/src/main/java/org/openhitls/sdf4j/SDF.java:229-234`
 ```
-long handle = SDF_OpenSessionNative(deviceHandle);
-// 创建 SessionResource 并注册到 gDevResource 和 gSessResource
-SessionResource sessionResource = new SessionResource(handle);
-gSessResource.put(handle, sessionResource);
+for (Long keyHandle : sessionResource.keys) {
+    sessionResource.removeKey(keyHandle);
+    SDF_DestroyKey_Native(sessionHandle, keyHandle);
+}
 ```
-**Issue**: `SessionResource` uses `gDevResource.addSession(...)` but `gDevResource` is only set in `SDF_OpenDevice`. Calling `SDF_OpenSession` without an open device (or after closing) now throws a NullPointerException instead of a controlled `SDFException`.
+**Issue**: The code iterates `sessionResource.keys` and removes from the same set inside the loop, which triggers `ConcurrentModificationException` and may leave keys undisposed.
 **Fix**:
 ```
-if (gDevResource == null) {
-    throw new SDFException(SDR_INARGERR);
+for (Long keyHandle : new java.util.HashSet<>(sessionResource.keys)) {
+    sessionResource.removeKey(keyHandle);
+    SDF_DestroyKey_Native(sessionHandle, keyHandle);
 }
-long handle = SDF_OpenSessionNative(deviceHandle);
-SessionResource sessionResource = new SessionResource(handle);
-gSessResource.put(handle, sessionResource);
+```
+
+---
+
+### Session tracking NPE if device resource not initialized
+`sdf4j/src/main/java/org/openhitls/sdf4j/SDF.java:92-95`
+```
+SessionResource(long sessionHandle) {
+    this.sessionHandle = sessionHandle;
+    gDevResource.addSession(sessionHandle);
+}
+```
+**Issue**: `SessionResource` assumes `gDevResource` is non-null. If `SDF_OpenSession` is called without a prior `SDF_OpenDevice` on this instance (or after device close), this throws `NullPointerException` after the native session is opened, leaking the native session handle.
+**Fix**:
+```
+SessionResource(long sessionHandle) {
+    if (gDevResource == null) {
+        throw new IllegalStateException("Device not opened");
+    }
+    this.sessionHandle = sessionHandle;
+    gDevResource.addSession(sessionHandle);
+}
+```
+
+---
+
+
+## Low
+
+### Decrypt logs plaintext before checking return code
+`sdf4j/src/main/native/src/sdf_jni_symmetric.c:303-309`
+```
+LONG ret = g_sdf_functions.SDF_Decrypt((HANDLE)sessionHandle, (HANDLE)keyHandle,
+                                        algID, (BYTE*)iv_buf, (BYTE*)enc_data_buf, enc_data_len,
+                                        data_buf, &data_len);
+
+SDF_JNI_LOG("SDF_Decrypt: output_len=%lu", data_len);
+SDF_LOG_HEX("SDF_Decrypt plaintext", data_buf, data_len);
+```
+**Issue**: Plaintext is logged unconditionally before verifying `ret == SDR_OK`, which can log uninitialized data or partial plaintext when decryption/authentication fails.
+**Fix**:
+```
+LONG ret = g_sdf_functions.SDF_Decrypt((HANDLE)sessionHandle, (HANDLE)keyHandle,
+                                        algID, (BYTE*)iv_buf, (BYTE*)enc_data_buf, enc_data_len,
+                                        data_buf, &data_len);
+
+if (ret == SDR_OK) {
+    SDF_JNI_LOG("SDF_Decrypt: output_len=%lu", data_len);
+    SDF_LOG_HEX("SDF_Decrypt plaintext", data_buf, data_len);
+}
 ```
 
 ---
