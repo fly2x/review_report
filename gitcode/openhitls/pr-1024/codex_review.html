@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Code Review: openHiTLS/openhitls#1024 - CODEX</title>
+    <style>
+        :root { --critical: #dc2626; --high: #ea580c; --medium: #ca8a04; --low: #65a30d; }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: system-ui, sans-serif; background: #f8fafc; color: #1e293b; padding: 2rem; line-height: 1.6; }
+        .container { max-width: 900px; margin: 0 auto; }
+        h1 { font-size: 1.5rem; margin-bottom: 0.5rem; }
+        .subtitle { color: #64748b; margin-bottom: 2rem; }
+        .section { margin-bottom: 2rem; }
+        .section-title { font-size: 1.1rem; font-weight: 600; padding: 0.5rem 1rem; border-radius: 0.5rem 0.5rem 0 0; color: white; }
+        .section-title.critical { background: var(--critical); }
+        .section-title.high { background: var(--high); }
+        .section-title.medium { background: var(--medium); }
+        .section-title.low { background: var(--low); }
+        .issue { background: white; border: 1px solid #e2e8f0; border-top: none; padding: 1rem; }
+        .issue:last-child { border-radius: 0 0 0.5rem 0.5rem; }
+        .issue-title { font-weight: 600; margin-bottom: 0.25rem; }
+        .issue-location { font-family: monospace; font-size: 0.875rem; color: #64748b; margin-bottom: 0.75rem; }
+        .issue-source { font-size: 0.75rem; color: #94a3b8; margin-top: 0.5rem; }
+        pre { background: #1e293b; color: #e2e8f0; padding: 0.75rem; border-radius: 0.375rem; overflow-x: auto; font-size: 0.875rem; margin: 0.5rem 0; }
+        .problem { margin: 0.75rem 0; }
+        .fix-label { font-weight: 600; margin-top: 0.75rem; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Code Review: openHiTLS/openhitls#1024 - CODEX</h1>
+        <div class="subtitle"></div>
+<div class="section"><div class="section-title medium">Medium</div>
+<div class="issue">
+                <div class="issue-title">Base64 output not finalized for AEAD encryption</div>
+                <div class="issue-location">apps/src/app_enc.c:1119-1126</div>
+                <pre>if (isAeadId == 1) {
+        return HITLS_APP_SUCCESS;
+    }</pre>
+                <div class="problem"><strong>Issue:</strong> For AEAD ciphers, the function returns before calling `EncWriteEncodedFinal`. When `-base64` is used, the encoder still has buffered bytes that need finalization, so the output becomes truncated/invalid and decryption fails.</div>
+                <div class="fix-label">Fix:</div><pre>if (isAeadId == 1) {
+        if (encOpt-&gt;encTag == HITLS_APP_ENC_TAG_ENC &amp;&amp; encOpt-&gt;format == HITLS_APP_FORMAT_BASE64) {
+            int32_t wret = EncWriteEncodedFinal(encOpt);
+            if (wret != HITLS_APP_SUCCESS) {
+                return HITLS_APP_UIO_FAIL;
+            }
+        }
+        return HITLS_APP_SUCCESS;
+    }</pre>
+                <div class="issue-source">Reviewer: codex</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">Output buffer size can overflow in decryption</div>
+                <div class="issue-location">apps/src/app_enc.c:1076-1078</div>
+                <pre>uint32_t outLen = encOpt-&gt;cipherBufLen + encOpt-&gt;keySet-&gt;blockSize;
+    uint8_t *resBuf = (uint8_t *)BSL_SAL_Malloc(outLen);</pre>
+                <div class="problem"><strong>Issue:</strong> `cipherBufLen` is derived from user input; adding `blockSize` without a bounds check can wrap `uint32_t` and allocate a too-small buffer. This risks incorrect decryption or memory corruption if the cipher API writes more than `outLen`.</div>
+                <div class="fix-label">Fix:</div><pre>if (encOpt-&gt;cipherBufLen &gt; UINT32_MAX - encOpt-&gt;keySet-&gt;blockSize) {
+        AppPrintError("enc: Input too large.\n");
+        return HITLS_APP_UIO_FAIL;
+    }
+    uint32_t outLen = encOpt-&gt;cipherBufLen + encOpt-&gt;keySet-&gt;blockSize;
+    uint8_t *resBuf = (uint8_t *)BSL_SAL_Malloc(outLen);</pre>
+                <div class="issue-source">Reviewer: codex</div>
+            </div>
+</div>
+</div></body></html>

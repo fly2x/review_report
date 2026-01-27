@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Code Review: openHiTLS/openhitls#1024 - GEMINI</title>
+    <style>
+        :root { --critical: #dc2626; --high: #ea580c; --medium: #ca8a04; --low: #65a30d; }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: system-ui, sans-serif; background: #f8fafc; color: #1e293b; padding: 2rem; line-height: 1.6; }
+        .container { max-width: 900px; margin: 0 auto; }
+        h1 { font-size: 1.5rem; margin-bottom: 0.5rem; }
+        .subtitle { color: #64748b; margin-bottom: 2rem; }
+        .section { margin-bottom: 2rem; }
+        .section-title { font-size: 1.1rem; font-weight: 600; padding: 0.5rem 1rem; border-radius: 0.5rem 0.5rem 0 0; color: white; }
+        .section-title.critical { background: var(--critical); }
+        .section-title.high { background: var(--high); }
+        .section-title.medium { background: var(--medium); }
+        .section-title.low { background: var(--low); }
+        .issue { background: white; border: 1px solid #e2e8f0; border-top: none; padding: 1rem; }
+        .issue:last-child { border-radius: 0 0 0.5rem 0.5rem; }
+        .issue-title { font-weight: 600; margin-bottom: 0.25rem; }
+        .issue-location { font-family: monospace; font-size: 0.875rem; color: #64748b; margin-bottom: 0.75rem; }
+        .issue-source { font-size: 0.75rem; color: #94a3b8; margin-top: 0.5rem; }
+        pre { background: #1e293b; color: #e2e8f0; padding: 0.75rem; border-radius: 0.375rem; overflow-x: auto; font-size: 0.875rem; margin: 0.5rem 0; }
+        .problem { margin: 0.75rem 0; }
+        .fix-label { font-weight: 600; margin-top: 0.75rem; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Code Review: openHiTLS/openhitls#1024 - GEMINI</h1>
+        <div class="subtitle"></div>
+<div class="section"><div class="section-title critical">Critical</div>
+<div class="issue">
+                <div class="issue-title">Breaking change in file format without version increment</div>
+                <div class="issue-location">apps/src/app_enc.c:597</div>
+                <pre>#define HITLS_APP_ENC_VERSION 1
+// ...
+static void WriteUint32Be(uint8_t *buf, uint32_t value)
+{
+    buf[HITLS_APP_ENC_U32_IDX_0] = (uint8_t)((value &gt;&gt; HITLS_APP_ENC_SHIFT_24) &amp; 0xFFU);
+// ...
+}</pre>
+                <div class="problem"><strong>Issue:</strong> The encryption file format has changed from ASCII hex strings to big-endian binary integers (and optionally encoded body), but `HITLS_APP_ENC_VERSION` remains `1`. This breaks backward compatibility: new tools cannot decrypt old files (header parsing will fail or produce garbage), and old tools cannot decrypt new files.</div>
+                <div class="fix-label">Fix:</div><pre>// Increment version to distinguish from legacy format
+#define HITLS_APP_ENC_VERSION 2</pre>
+                <div class="issue-source">Reviewer: gemini</div>
+            </div>
+</div>
+<div class="section"><div class="section-title high">High</div>
+<div class="issue">
+                <div class="issue-title">Integer truncation and potential buffer overflow in DecodeInputForDec</div>
+                <div class="issue-location">apps/src/app_enc.c:631</div>
+                <pre>if (encOpt-&gt;format == HITLS_APP_FORMAT_HEX) {
+        if ((readLen % HITLS_APP_ENC_HEX_CHAR_STEP) != 0) {
+            BSL_SAL_FREE(readBuf);
+            AppPrintError("enc: Invalid hex string length, must be even.\n");
+            return HITLS_APP_ENCODE_FAIL;
+        }
+        uint32_t decodedLen = (uint32_t)(readLen / HITLS_APP_ENC_HEX_CHAR_STEP);
+        uint8_t *decoded = (uint8_t *)BSL_SAL_Calloc(decodedLen + 1, 1);</pre>
+                <div class="problem"><strong>Issue:</strong> `readLen` (uint64_t) is cast to `uint32_t` without checking if it exceeds `UINT32_MAX`. If the input file is larger than 4GB, `readLen` will be truncated, leading to incorrect buffer allocation sizes (e.g., `decodedLen`) and subsequent memory corruption or logic errors. This effectively breaks support for large files and introduces security risks.</div>
+                <div class="fix-label">Fix:</div><pre>if (encOpt-&gt;format == HITLS_APP_FORMAT_HEX) {
+        if (readLen &gt; UINT32_MAX || (readLen % HITLS_APP_ENC_HEX_CHAR_STEP) != 0) {
+            BSL_SAL_FREE(readBuf);
+            AppPrintError("enc: Invalid hex string length or file too large.\n");
+            return HITLS_APP_ENCODE_FAIL;
+        }
+        uint32_t decodedLen = (uint32_t)(readLen / HITLS_APP_ENC_HEX_CHAR_STEP);</pre>
+                <div class="issue-source">Reviewer: gemini</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">Integer truncation in base64 decoding length calculation</div>
+                <div class="issue-location">apps/src/app_enc.c:663</div>
+                <pre>if (encOpt-&gt;format == HITLS_APP_FORMAT_BASE64) {
+        uint32_t decodedLen = HITLS_BASE64_DECODE_LENGTH((uint32_t)readLen);
+        uint8_t *decoded = (uint8_t *)BSL_SAL_Calloc(decodedLen + 1, 1);</pre>
+                <div class="problem"><strong>Issue:</strong> Similar to the hex case, `readLen` is cast to `uint32_t` before calculating the base64 decode length. If `readLen` exceeds `UINT32_MAX`, the length is truncated, leading to insufficient memory allocation and potential heap corruption during decoding.</div>
+                <div class="fix-label">Fix:</div><pre>if (encOpt-&gt;format == HITLS_APP_FORMAT_BASE64) {
+        if (readLen &gt; UINT32_MAX) {
+            BSL_SAL_FREE(readBuf);
+            return HITLS_APP_ENCODE_FAIL;
+        }
+        uint32_t decodedLen = HITLS_BASE64_DECODE_LENGTH((uint32_t)readLen);</pre>
+                <div class="issue-source">Reviewer: gemini</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">Integer overflow in buffer allocation causing heap overflow</div>
+                <div class="issue-location">apps/src/app_enc.c:1076</div>
+                <pre>uint32_t outLen = encOpt-&gt;cipherBufLen + encOpt-&gt;keySet-&gt;blockSize;
+    uint8_t *resBuf = (uint8_t *)BSL_SAL_Malloc(outLen);
+    if (resBuf == NULL) {</pre>
+                <div class="problem"><strong>Issue:</strong> `outLen` calculation `encOpt->cipherBufLen + encOpt->keySet->blockSize` can overflow if `cipherBufLen` is close to `UINT32_MAX`. This would result in `BSL_SAL_Malloc` allocating a small buffer, while `CRYPT_EAL_CipherUpdate` writes the full decrypted output, causing a heap buffer overflow.</div>
+                <div class="fix-label">Fix:</div><pre>if (encOpt-&gt;cipherBufLen &gt; UINT32_MAX - encOpt-&gt;keySet-&gt;blockSize) {
+        return HITLS_APP_MEM_ALLOC_FAIL;
+    }
+    uint32_t outLen = encOpt-&gt;cipherBufLen + encOpt-&gt;keySet-&gt;blockSize;
+    uint8_t *resBuf = (uint8_t *)BSL_SAL_Malloc(outLen);</pre>
+                <div class="issue-source">Reviewer: gemini</div>
+            </div>
+</div>
+<div class="section"><div class="section-title medium">Medium</div>
+<div class="issue">
+                <div class="issue-title">Regression in large file support (Decryption)</div>
+                <div class="issue-location">apps/src/app_enc.c:629</div>
+                <pre>static int32_t DecodeInputForDec(EncCmdOpt *encOpt)
+{
+    uint8_t *readBuf = NULL;
+    uint64_t readLen = 0;
+    int32_t ret = HITLS_APP_OptReadUio(encOpt-&gt;encUio-&gt;rUio, &amp;readBuf, &amp;readLen, UINT64_MAX);</pre>
+                <div class="problem"><strong>Issue:</strong> The new decryption implementation (`DoCipherUpdateDec` relying on `DecodeInputForDec`) reads the *entire* input file into memory using `HITLS_APP_OptReadUio` (with `UINT64_MAX` limit). This causes denial of service (OOM) for large files that fit in the previous streaming implementation. Encryption (`DoCipherUpdateEnc`) still appears to support streaming.</div>
+                <div class="fix-label">Fix:</div><pre>// Restore streaming processing for decryption, or strictly limit input size and document the limitation.
+// Ideally, implement a streaming decoder for Hex/Base64 to feed the cipher update loop.</pre>
+                <div class="issue-source">Reviewer: gemini</div>
+            </div>
+</div>
+<div class="section"><div class="section-title low">Low</div>
+<div class="issue">
+                <div class="issue-title">Typo in constant name HILTS_APP_FORMAT_UNDEF</div>
+                <div class="issue-location">apps/src/app_enc.c:376</div>
+                <pre>if (encOpt-&gt;format == HILTS_APP_FORMAT_UNDEF) {
+        encOpt-&gt;format = HITLS_APP_FORMAT_BINARY;
+    }</pre>
+                <div class="problem"><strong>Issue:</strong> The constant `HILTS_APP_FORMAT_UNDEF` contains a typo (`HILTS` instead of `HITLS`). While this matches the definition in `apps/include/app_opt.h`, it is inconsistent with other constants like `HITLS_APP_FORMAT_HEX` and the project naming convention.</div>
+                <div class="fix-label">Fix:</div><pre>if (encOpt-&gt;format == HITLS_APP_FORMAT_UNDEF) { // Requires fixing header definition as well
+        encOpt-&gt;format = HITLS_APP_FORMAT_BINARY;
+    }</pre>
+                <div class="issue-source">Reviewer: gemini</div>
+            </div>
+</div>
+</div></body></html>

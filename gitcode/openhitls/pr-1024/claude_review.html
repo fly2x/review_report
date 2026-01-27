@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Code Review: openHiTLS/openhitls#1024 - CLAUDE</title>
+    <style>
+        :root { --critical: #dc2626; --high: #ea580c; --medium: #ca8a04; --low: #65a30d; }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: system-ui, sans-serif; background: #f8fafc; color: #1e293b; padding: 2rem; line-height: 1.6; }
+        .container { max-width: 900px; margin: 0 auto; }
+        h1 { font-size: 1.5rem; margin-bottom: 0.5rem; }
+        .subtitle { color: #64748b; margin-bottom: 2rem; }
+        .section { margin-bottom: 2rem; }
+        .section-title { font-size: 1.1rem; font-weight: 600; padding: 0.5rem 1rem; border-radius: 0.5rem 0.5rem 0 0; color: white; }
+        .section-title.critical { background: var(--critical); }
+        .section-title.high { background: var(--high); }
+        .section-title.medium { background: var(--medium); }
+        .section-title.low { background: var(--low); }
+        .issue { background: white; border: 1px solid #e2e8f0; border-top: none; padding: 1rem; }
+        .issue:last-child { border-radius: 0 0 0.5rem 0.5rem; }
+        .issue-title { font-weight: 600; margin-bottom: 0.25rem; }
+        .issue-location { font-family: monospace; font-size: 0.875rem; color: #64748b; margin-bottom: 0.75rem; }
+        .issue-source { font-size: 0.75rem; color: #94a3b8; margin-top: 0.5rem; }
+        pre { background: #1e293b; color: #e2e8f0; padding: 0.75rem; border-radius: 0.375rem; overflow-x: auto; font-size: 0.875rem; margin: 0.5rem 0; }
+        .problem { margin: 0.75rem 0; }
+        .fix-label { font-weight: 600; margin-top: 0.75rem; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Code Review: openHiTLS/openhitls#1024 - CLAUDE</h1>
+        <div class="subtitle"></div>
+<div class="section"><div class="section-title high">High</div>
+<div class="issue">
+                <div class="issue-title">Potential integer overflow when casting uint64_t to uint32_t</div>
+                <div class="issue-location">apps/src/app_enc.c:647</div>
+                <pre>uint32_t decodedLen = (uint32_t)(readLen / HITLS_APP_ENC_HEX_CHAR_STEP);</pre>
+                <div class="problem"><strong>Issue:</strong> At line 647, `readLen` is of type `uint64_t` (returned from HITLS_APP_OptReadUio). When dividing by 2 and casting to `uint32_t`, if `readLen` is larger than UINT32_MAX * 2, an integer truncation occurs. This could lead to a buffer overflow attack where a large file causes the decoded buffer to be smaller than expected, while `HITLS_APP_HexToBytes` still reads the full original data.</div>
+                <div class="fix-label">Fix:</div><pre>if (readLen &gt; UINT64_MAX / HITLS_APP_ENC_HEX_CHAR_STEP || (readLen / HITLS_APP_ENC_HEX_CHAR_STEP) &gt; UINT32_MAX) {
+    BSL_SAL_FREE(readBuf);
+    AppPrintError("enc: Input size too large.\n");
+    return HITLS_APP_ENCODE_FAIL;
+}
+uint32_t decodedLen = (uint32_t)(readLen / HITLS_APP_ENC_HEX_CHAR_STEP);</pre>
+                <div class="issue-source">Reviewer: claude</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">Missing upper bound validation for file size when reading</div>
+                <div class="issue-location">apps/src/app_enc.c:632</div>
+                <pre>int32_t ret = HITLS_APP_OptReadUio(encOpt-&gt;encUio-&gt;rUio, &amp;readBuf, &amp;readLen, UINT64_MAX);</pre>
+                <div class="problem"><strong>Issue:</strong> At line 632, `HITLS_APP_OptReadUio` is called with `UINT64_MAX` as maxBufLen. For a decryption tool, this allows reading arbitrarily large files which could lead to denial of service through memory exhaustion.</div>
+                <div class="fix-label">Fix:</div><pre>#define HITLS_APP_ENC_MAX_INPUT_SIZE (100 * 1024 * 1024)  // 100MB limit
+int32_t ret = HITLS_APP_OptReadUio(encOpt-&gt;encUio-&gt;rUio, &amp;readBuf, &amp;readLen, HITLS_APP_ENC_MAX_INPUT_SIZE);</pre>
+                <div class="issue-source">Reviewer: claude</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">Potential integer overflow when casting uint64_t to uint32_t</div>
+                <div class="issue-location">apps/src/app_enc.c:638</div>
+                <pre>encOpt-&gt;decBufLen = (uint32_t)readLen;</pre>
+                <div class="problem"><strong>Issue:</strong> At line 638, `readLen` (uint64_t) is cast to `uint32_t` without checking if it exceeds UINT32_MAX. On 32-bit systems or with large files, this truncation could lead to buffer overflows.</div>
+                <div class="fix-label">Fix:</div><pre>if (readLen &gt; UINT32_MAX) {
+    BSL_SAL_FREE(readBuf);
+    AppPrintError("enc: Input size too large.\n");
+    return HITLS_APP_ENCODE_FAIL;
+}
+encOpt-&gt;decBufLen = (uint32_t)readLen;</pre>
+                <div class="issue-source">Reviewer: claude</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">Potential integer overflow when casting uint64_t to uint32_t</div>
+                <div class="issue-location">apps/src/app_enc.c:666</div>
+                <pre>uint32_t decodedLen = HITLS_BASE64_DECODE_LENGTH((uint32_t)readLen);</pre>
+                <div class="problem"><strong>Issue:</strong> At line 666, `readLen` (uint64_t) is cast to `uint32_t` without bounds checking. The macro `HITLS_BASE64_DECODE_LENGTH` expects a uint32_t, but readLen is uint64_t.</div>
+                <div class="fix-label">Fix:</div><pre>if (readLen &gt; UINT32_MAX) {
+    BSL_SAL_FREE(readBuf);
+    AppPrintError("enc: Input size too large.\n");
+    return HITLS_APP_ENCODE_FAIL;
+}
+uint32_t decodedLen = HITLS_BASE64_DECODE_LENGTH((uint32_t)readLen);</pre>
+                <div class="issue-source">Reviewer: claude</div>
+            </div>
+</div>
+<div class="section"><div class="section-title medium">Medium</div>
+<div class="issue">
+                <div class="issue-title">Memory leak when BSL_BASE64_EncodeInit fails</div>
+                <div class="issue-location">apps/src/app_enc.c:189</div>
+                <pre>if (BSL_BASE64_EncodeInit(encOpt-&gt;b64EncCtx) != BSL_SUCCESS) {
+    return HITLS_APP_ENCODE_FAIL;
+}</pre>
+                <div class="problem"><strong>Issue:</strong> At line 189, if `BSL_BASE64_EncodeInit` fails, the function returns an error but `encOpt->b64EncCtx` is not freed. The context was allocated at line 184 and will leak.</div>
+                <div class="fix-label">Fix:</div><pre>if (BSL_BASE64_EncodeInit(encOpt-&gt;b64EncCtx) != BSL_SUCCESS) {
+    BSL_BASE64_CtxFree(encOpt-&gt;b64EncCtx);
+    encOpt-&gt;b64EncCtx = NULL;
+    return HITLS_APP_ENCODE_FAIL;
+}</pre>
+                <div class="issue-source">Reviewer: claude</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">Assignment of potentially freed pointer</div>
+                <div class="issue-location">apps/src/app_enc.c:638</div>
+                <pre>if (encOpt-&gt;format == HITLS_APP_FORMAT_BINARY) {
+    encOpt-&gt;decBuf = readBuf;
+    encOpt-&gt;decBufLen = (uint32_t)readLen;
+    return HITLS_APP_SUCCESS;
+}
+...
+encOpt-&gt;cipherBuf = encOpt-&gt;decBuf + offset;  // line 762</pre>
+                <div class="problem"><strong>Issue:</strong> When `encOpt->format == HITLS_APP_FORMAT_BINARY`, `readBuf` is directly assigned to `encOpt->decBuf` at line 637. However, in `FreeEnc()`, `decBuf` is freed using `BSL_SAL_FREE()` while `cipherBuf` is set to NULL without freeing. The `cipherBuf` at line 762 points to an offset within `decBuf`, so this creates a dangling pointer issue.</div>
+                <div class="fix-label">Fix:</div><pre>// In FreeEnc(), set cipherBuf to NULL before freeing decBuf:
+if (encOpt-&gt;decBuf != NULL) {
+    encOpt-&gt;cipherBuf = NULL;  // Clear before freeing
+    encOpt-&gt;cipherBufLen = 0;
+    BSL_SAL_FREE(encOpt-&gt;decBuf);
+    encOpt-&gt;decBuf = NULL;
+}</pre>
+                <div class="issue-source">Reviewer: claude</div>
+            </div>
+</div>
+</div></body></html>

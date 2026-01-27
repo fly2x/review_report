@@ -1,0 +1,141 @@
+I will start by checking the file statistics for the pull request to confirm the scope of changes.
+I will now retrieve the detailed differences for `apps/src/app_enc.c` to analyze the code modifications.
+I will search for the string "HILTS" in `apps/src/app_enc.c` to confirm if it is a typo for "HITLS". I will also read `apps/include/app_opt.h` and `apps/include/app_utils.h` to check the definitions of `HITLS_APP_FORMAT_UNDEF`, `HITLS_APP_OptReadUio`, and `HITLS_APP_HexToBytes` to verify their behavior and signatures. Finally, I will read `testcode/sdv/testcase/apps/test_suite_ut_enc.c` to see how the changes are being tested.
+I will read `apps/include/app_opt.h` to check the definitions of the format constants and `apps/include/app_utils.h` to check the signature of `HITLS_APP_OptReadUio`. I will also read `testcode/sdv/testcase/apps/test_suite_ut_enc.c` to review the test coverage.
+===ISSUE===
+FILE: apps/src/app_enc.c
+LINE: 376
+SEVERITY: low
+TITLE: Typo in constant name HILTS_APP_FORMAT_UNDEF
+PROBLEM: The constant `HILTS_APP_FORMAT_UNDEF` contains a typo (`HILTS` instead of `HITLS`). While this matches the definition in `apps/include/app_opt.h`, it is inconsistent with other constants like `HITLS_APP_FORMAT_HEX` and the project naming convention.
+CODE:
+```c
+    if (encOpt->format == HILTS_APP_FORMAT_UNDEF) {
+        encOpt->format = HITLS_APP_FORMAT_BINARY;
+    }
+```
+FIX:
+```c
+    if (encOpt->format == HITLS_APP_FORMAT_UNDEF) { // Requires fixing header definition as well
+        encOpt->format = HITLS_APP_FORMAT_BINARY;
+    }
+```
+===END===
+
+===ISSUE===
+FILE: apps/src/app_enc.c
+LINE: 597
+SEVERITY: critical
+TITLE: Breaking change in file format without version increment
+PROBLEM: The encryption file format has changed from ASCII hex strings to big-endian binary integers (and optionally encoded body), but `HITLS_APP_ENC_VERSION` remains `1`. This breaks backward compatibility: new tools cannot decrypt old files (header parsing will fail or produce garbage), and old tools cannot decrypt new files.
+CODE:
+```c
+#define HITLS_APP_ENC_VERSION 1
+// ...
+static void WriteUint32Be(uint8_t *buf, uint32_t value)
+{
+    buf[HITLS_APP_ENC_U32_IDX_0] = (uint8_t)((value >> HITLS_APP_ENC_SHIFT_24) & 0xFFU);
+// ...
+}
+```
+FIX:
+```c
+// Increment version to distinguish from legacy format
+#define HITLS_APP_ENC_VERSION 2
+```
+===END===
+
+===ISSUE===
+FILE: apps/src/app_enc.c
+LINE: 631
+SEVERITY: high
+TITLE: Integer truncation and potential buffer overflow in DecodeInputForDec
+PROBLEM: `readLen` (uint64_t) is cast to `uint32_t` without checking if it exceeds `UINT32_MAX`. If the input file is larger than 4GB, `readLen` will be truncated, leading to incorrect buffer allocation sizes (e.g., `decodedLen`) and subsequent memory corruption or logic errors. This effectively breaks support for large files and introduces security risks.
+CODE:
+```c
+    if (encOpt->format == HITLS_APP_FORMAT_HEX) {
+        if ((readLen % HITLS_APP_ENC_HEX_CHAR_STEP) != 0) {
+            BSL_SAL_FREE(readBuf);
+            AppPrintError("enc: Invalid hex string length, must be even.\n");
+            return HITLS_APP_ENCODE_FAIL;
+        }
+        uint32_t decodedLen = (uint32_t)(readLen / HITLS_APP_ENC_HEX_CHAR_STEP);
+        uint8_t *decoded = (uint8_t *)BSL_SAL_Calloc(decodedLen + 1, 1);
+```
+FIX:
+```c
+    if (encOpt->format == HITLS_APP_FORMAT_HEX) {
+        if (readLen > UINT32_MAX || (readLen % HITLS_APP_ENC_HEX_CHAR_STEP) != 0) {
+            BSL_SAL_FREE(readBuf);
+            AppPrintError("enc: Invalid hex string length or file too large.\n");
+            return HITLS_APP_ENCODE_FAIL;
+        }
+        uint32_t decodedLen = (uint32_t)(readLen / HITLS_APP_ENC_HEX_CHAR_STEP);
+```
+===END===
+
+===ISSUE===
+FILE: apps/src/app_enc.c
+LINE: 663
+SEVERITY: high
+TITLE: Integer truncation in base64 decoding length calculation
+PROBLEM: Similar to the hex case, `readLen` is cast to `uint32_t` before calculating the base64 decode length. If `readLen` exceeds `UINT32_MAX`, the length is truncated, leading to insufficient memory allocation and potential heap corruption during decoding.
+CODE:
+```c
+    if (encOpt->format == HITLS_APP_FORMAT_BASE64) {
+        uint32_t decodedLen = HITLS_BASE64_DECODE_LENGTH((uint32_t)readLen);
+        uint8_t *decoded = (uint8_t *)BSL_SAL_Calloc(decodedLen + 1, 1);
+```
+FIX:
+```c
+    if (encOpt->format == HITLS_APP_FORMAT_BASE64) {
+        if (readLen > UINT32_MAX) {
+            BSL_SAL_FREE(readBuf);
+            return HITLS_APP_ENCODE_FAIL;
+        }
+        uint32_t decodedLen = HITLS_BASE64_DECODE_LENGTH((uint32_t)readLen);
+```
+===END===
+
+===ISSUE===
+FILE: apps/src/app_enc.c
+LINE: 1076
+SEVERITY: high
+TITLE: Integer overflow in buffer allocation causing heap overflow
+PROBLEM: `outLen` calculation `encOpt->cipherBufLen + encOpt->keySet->blockSize` can overflow if `cipherBufLen` is close to `UINT32_MAX`. This would result in `BSL_SAL_Malloc` allocating a small buffer, while `CRYPT_EAL_CipherUpdate` writes the full decrypted output, causing a heap buffer overflow.
+CODE:
+```c
+    uint32_t outLen = encOpt->cipherBufLen + encOpt->keySet->blockSize;
+    uint8_t *resBuf = (uint8_t *)BSL_SAL_Malloc(outLen);
+    if (resBuf == NULL) {
+```
+FIX:
+```c
+    if (encOpt->cipherBufLen > UINT32_MAX - encOpt->keySet->blockSize) {
+        return HITLS_APP_MEM_ALLOC_FAIL;
+    }
+    uint32_t outLen = encOpt->cipherBufLen + encOpt->keySet->blockSize;
+    uint8_t *resBuf = (uint8_t *)BSL_SAL_Malloc(outLen);
+```
+===END===
+
+===ISSUE===
+FILE: apps/src/app_enc.c
+LINE: 629
+SEVERITY: medium
+TITLE: Regression in large file support (Decryption)
+PROBLEM: The new decryption implementation (`DoCipherUpdateDec` relying on `DecodeInputForDec`) reads the *entire* input file into memory using `HITLS_APP_OptReadUio` (with `UINT64_MAX` limit). This causes denial of service (OOM) for large files that fit in the previous streaming implementation. Encryption (`DoCipherUpdateEnc`) still appears to support streaming.
+CODE:
+```c
+static int32_t DecodeInputForDec(EncCmdOpt *encOpt)
+{
+    uint8_t *readBuf = NULL;
+    uint64_t readLen = 0;
+    int32_t ret = HITLS_APP_OptReadUio(encOpt->encUio->rUio, &readBuf, &readLen, UINT64_MAX);
+```
+FIX:
+```c
+// Restore streaming processing for decryption, or strictly limit input size and document the limitation.
+// Ideally, implement a streaming decoder for Hex/Base64 to feed the cipher update loop.
+```
+===END===

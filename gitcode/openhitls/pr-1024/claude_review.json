@@ -1,0 +1,62 @@
+[
+  {
+    "source": "claude",
+    "file": "apps/src/app_enc.c",
+    "line": "647",
+    "severity": "high",
+    "title": "Potential integer overflow when casting uint64_t to uint32_t",
+    "problem": "At line 647, `readLen` is of type `uint64_t` (returned from HITLS_APP_OptReadUio). When dividing by 2 and casting to `uint32_t`, if `readLen` is larger than UINT32_MAX * 2, an integer truncation occurs. This could lead to a buffer overflow attack where a large file causes the decoded buffer to be smaller than expected, while `HITLS_APP_HexToBytes` still reads the full original data.",
+    "code": "uint32_t decodedLen = (uint32_t)(readLen / HITLS_APP_ENC_HEX_CHAR_STEP);",
+    "fix": "if (readLen > UINT64_MAX / HITLS_APP_ENC_HEX_CHAR_STEP || (readLen / HITLS_APP_ENC_HEX_CHAR_STEP) > UINT32_MAX) {\n    BSL_SAL_FREE(readBuf);\n    AppPrintError(\"enc: Input size too large.\\n\");\n    return HITLS_APP_ENCODE_FAIL;\n}\nuint32_t decodedLen = (uint32_t)(readLen / HITLS_APP_ENC_HEX_CHAR_STEP);"
+  },
+  {
+    "source": "claude",
+    "file": "apps/src/app_enc.c",
+    "line": "632",
+    "severity": "high",
+    "title": "Missing upper bound validation for file size when reading",
+    "problem": "At line 632, `HITLS_APP_OptReadUio` is called with `UINT64_MAX` as maxBufLen. For a decryption tool, this allows reading arbitrarily large files which could lead to denial of service through memory exhaustion.",
+    "code": "int32_t ret = HITLS_APP_OptReadUio(encOpt->encUio->rUio, &readBuf, &readLen, UINT64_MAX);",
+    "fix": "#define HITLS_APP_ENC_MAX_INPUT_SIZE (100 * 1024 * 1024)  // 100MB limit\nint32_t ret = HITLS_APP_OptReadUio(encOpt->encUio->rUio, &readBuf, &readLen, HITLS_APP_ENC_MAX_INPUT_SIZE);"
+  },
+  {
+    "source": "claude",
+    "file": "apps/src/app_enc.c",
+    "line": "638",
+    "severity": "high",
+    "title": "Potential integer overflow when casting uint64_t to uint32_t",
+    "problem": "At line 638, `readLen` (uint64_t) is cast to `uint32_t` without checking if it exceeds UINT32_MAX. On 32-bit systems or with large files, this truncation could lead to buffer overflows.",
+    "code": "encOpt->decBufLen = (uint32_t)readLen;",
+    "fix": "if (readLen > UINT32_MAX) {\n    BSL_SAL_FREE(readBuf);\n    AppPrintError(\"enc: Input size too large.\\n\");\n    return HITLS_APP_ENCODE_FAIL;\n}\nencOpt->decBufLen = (uint32_t)readLen;"
+  },
+  {
+    "source": "claude",
+    "file": "apps/src/app_enc.c",
+    "line": "666",
+    "severity": "high",
+    "title": "Potential integer overflow when casting uint64_t to uint32_t",
+    "problem": "At line 666, `readLen` (uint64_t) is cast to `uint32_t` without bounds checking. The macro `HITLS_BASE64_DECODE_LENGTH` expects a uint32_t, but readLen is uint64_t.",
+    "code": "uint32_t decodedLen = HITLS_BASE64_DECODE_LENGTH((uint32_t)readLen);",
+    "fix": "if (readLen > UINT32_MAX) {\n    BSL_SAL_FREE(readBuf);\n    AppPrintError(\"enc: Input size too large.\\n\");\n    return HITLS_APP_ENCODE_FAIL;\n}\nuint32_t decodedLen = HITLS_BASE64_DECODE_LENGTH((uint32_t)readLen);"
+  },
+  {
+    "source": "claude",
+    "file": "apps/src/app_enc.c",
+    "line": "189",
+    "severity": "medium",
+    "title": "Memory leak when BSL_BASE64_EncodeInit fails",
+    "problem": "At line 189, if `BSL_BASE64_EncodeInit` fails, the function returns an error but `encOpt->b64EncCtx` is not freed. The context was allocated at line 184 and will leak.",
+    "code": "if (BSL_BASE64_EncodeInit(encOpt->b64EncCtx) != BSL_SUCCESS) {\n    return HITLS_APP_ENCODE_FAIL;\n}",
+    "fix": "if (BSL_BASE64_EncodeInit(encOpt->b64EncCtx) != BSL_SUCCESS) {\n    BSL_BASE64_CtxFree(encOpt->b64EncCtx);\n    encOpt->b64EncCtx = NULL;\n    return HITLS_APP_ENCODE_FAIL;\n}"
+  },
+  {
+    "source": "claude",
+    "file": "apps/src/app_enc.c",
+    "line": "638",
+    "severity": "medium",
+    "title": "Assignment of potentially freed pointer",
+    "problem": "When `encOpt->format == HITLS_APP_FORMAT_BINARY`, `readBuf` is directly assigned to `encOpt->decBuf` at line 637. However, in `FreeEnc()`, `decBuf` is freed using `BSL_SAL_FREE()` while `cipherBuf` is set to NULL without freeing. The `cipherBuf` at line 762 points to an offset within `decBuf`, so this creates a dangling pointer issue.",
+    "code": "if (encOpt->format == HITLS_APP_FORMAT_BINARY) {\n    encOpt->decBuf = readBuf;\n    encOpt->decBufLen = (uint32_t)readLen;\n    return HITLS_APP_SUCCESS;\n}\n...\nencOpt->cipherBuf = encOpt->decBuf + offset;  // line 762",
+    "fix": "// In FreeEnc(), set cipherBuf to NULL before freeing decBuf:\nif (encOpt->decBuf != NULL) {\n    encOpt->cipherBuf = NULL;  // Clear before freeing\n    encOpt->cipherBufLen = 0;\n    BSL_SAL_FREE(encOpt->decBuf);\n    encOpt->decBuf = NULL;\n}"
+  }
+]

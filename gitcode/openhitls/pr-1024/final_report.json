@@ -1,0 +1,77 @@
+{
+  "context": {
+    "owner": "openHiTLS",
+    "repo": "openhitls",
+    "pr_id": "1024",
+    "title": "",
+    "reviewers": [
+      "claude",
+      "gemini",
+      "codex"
+    ]
+  },
+  "statistics": {
+    "total": 5,
+    "critical": 0,
+    "high": 2,
+    "medium": 3,
+    "low": 0
+  },
+  "issues": [
+    {
+      "file": "apps/src/app_enc.c",
+      "line": "636-667",
+      "severity": "high",
+      "title": "Missing bounds checks when downcasting readLen to uint32_t",
+      "reviewers": "CLAUDE, GEMINI",
+      "confidence": "trusted",
+      "problem": "readLen is uint64_t but is truncated to uint32_t for binary, hex, and base64 paths without validating size. This can allocate undersized buffers and lead to incorrect decoding or memory corruption when inputs exceed UINT32_MAX.",
+      "code": "if (encOpt->format == HITLS_APP_FORMAT_BINARY) {\n    encOpt->decBuf = readBuf;\n    encOpt->decBufLen = (uint32_t)readLen;\n    return HITLS_APP_SUCCESS;\n}\n...\nuint32_t decodedLen = (uint32_t)(readLen / HITLS_APP_ENC_HEX_CHAR_STEP);\n...\nuint32_t decodedLen = HITLS_BASE64_DECODE_LENGTH((uint32_t)readLen);",
+      "fix": "if (readLen > UINT32_MAX) {\n    BSL_SAL_FREE(readBuf);\n    AppPrintError(\"enc: Input size too large.\\n\");\n    return HITLS_APP_ENCODE_FAIL;\n}\nif (encOpt->format == HITLS_APP_FORMAT_HEX) {\n    if ((readLen % HITLS_APP_ENC_HEX_CHAR_STEP) != 0 ||\n        (readLen / HITLS_APP_ENC_HEX_CHAR_STEP) > UINT32_MAX) {\n        BSL_SAL_FREE(readBuf);\n        AppPrintError(\"enc: Invalid hex string length or file too large.\\n\");\n        return HITLS_APP_ENCODE_FAIL;\n    }\n    uint32_t decodedLen = (uint32_t)(readLen / HITLS_APP_ENC_HEX_CHAR_STEP);\n}\nif (encOpt->format == HITLS_APP_FORMAT_BASE64) {\n    uint32_t decodedLen = HITLS_BASE64_DECODE_LENGTH((uint32_t)readLen);\n}"
+    },
+    {
+      "file": "apps/src/app_enc.c",
+      "line": "1076-1077",
+      "severity": "high",
+      "title": "Potential overflow when computing decryption output buffer size",
+      "reviewers": "GEMINI, CODEX",
+      "confidence": "trusted",
+      "problem": "Adding blockSize to cipherBufLen can wrap uint32_t, resulting in a too-small allocation and potential heap overflow during CRYPT_EAL_CipherUpdate.",
+      "code": "uint32_t outLen = encOpt->cipherBufLen + encOpt->keySet->blockSize;\nuint8_t *resBuf = (uint8_t *)BSL_SAL_Malloc(outLen);",
+      "fix": "if (encOpt->cipherBufLen > UINT32_MAX - encOpt->keySet->blockSize) {\n    AppPrintError(\"enc: Input too large.\\n\");\n    return HITLS_APP_UIO_FAIL;\n}\nuint32_t outLen = encOpt->cipherBufLen + encOpt->keySet->blockSize;\nuint8_t *resBuf = (uint8_t *)BSL_SAL_Malloc(outLen);"
+    },
+    {
+      "file": "apps/src/app_enc.c",
+      "line": "632",
+      "severity": "medium",
+      "title": "Unbounded read allows memory exhaustion during decryption",
+      "reviewers": "CLAUDE, GEMINI",
+      "confidence": "trusted",
+      "problem": "Decryption reads the entire input into memory with a UINT64_MAX cap, enabling OOM/DoS on large inputs and removing any practical size guard.",
+      "code": "int32_t ret = HITLS_APP_OptReadUio(encOpt->encUio->rUio, &readBuf, &readLen, UINT64_MAX);",
+      "fix": "#define HITLS_APP_ENC_MAX_INPUT_SIZE (100U * 1024U * 1024U) /* example limit */\nint32_t ret = HITLS_APP_OptReadUio(encOpt->encUio->rUio, &readBuf, &readLen, HITLS_APP_ENC_MAX_INPUT_SIZE);"
+    },
+    {
+      "file": "apps/src/app_enc.c",
+      "line": "184-190",
+      "severity": "medium",
+      "title": "Base64 encoder context leak on initialization failure",
+      "reviewers": "CLAUDE",
+      "confidence": "likely",
+      "problem": "If BSL_BASE64_EncodeInit fails, the allocated context is not freed, leaking memory.",
+      "code": "encOpt->b64EncCtx = BSL_BASE64_CtxNew();\n...\nif (BSL_BASE64_EncodeInit(encOpt->b64EncCtx) != BSL_SUCCESS) {\n    return HITLS_APP_ENCODE_FAIL;\n}",
+      "fix": "if (BSL_BASE64_EncodeInit(encOpt->b64EncCtx) != BSL_SUCCESS) {\n    BSL_BASE64_CtxFree(encOpt->b64EncCtx);\n    encOpt->b64EncCtx = NULL;\n    return HITLS_APP_ENCODE_FAIL;\n}"
+    },
+    {
+      "file": "apps/src/app_enc.c",
+      "line": "1119-1125",
+      "severity": "medium",
+      "title": "Base64 output not finalized for AEAD encryption",
+      "reviewers": "CODEX",
+      "confidence": "likely",
+      "problem": "AEAD paths return early and skip EncWriteEncodedFinal, leaving buffered Base64 data unflushed and producing truncated/invalid output.",
+      "code": "if (isAeadId == 1) {\n    return HITLS_APP_SUCCESS;\n}",
+      "fix": "if (isAeadId == 1) {\n    if (encOpt->encTag == HITLS_APP_ENC_TAG_ENC &&\n        encOpt->format == HITLS_APP_FORMAT_BASE64) {\n        if (EncWriteEncodedFinal(encOpt) != HITLS_APP_SUCCESS) {\n            return HITLS_APP_UIO_FAIL;\n        }\n    }\n    return HITLS_APP_SUCCESS;\n}"
+    }
+  ]
+}

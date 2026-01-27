@@ -1,0 +1,138 @@
+===ISSUE===
+FILE: apps/src/app_enc.c
+LINE: 632
+SEVERITY: medium
+TITLE: Unbounded read allows memory exhaustion during decryption
+REVIEWERS: CLAUDE, GEMINI
+CONFIDENCE: trusted
+PROBLEM: Decryption reads the entire input into memory with a UINT64_MAX cap, enabling OOM/DoS on large inputs and removing any practical size guard.
+CODE:
+```
+int32_t ret = HITLS_APP_OptReadUio(encOpt->encUio->rUio, &readBuf, &readLen, UINT64_MAX);
+```
+FIX:
+```
+#define HITLS_APP_ENC_MAX_INPUT_SIZE (100U * 1024U * 1024U) /* example limit */
+int32_t ret = HITLS_APP_OptReadUio(encOpt->encUio->rUio, &readBuf, &readLen, HITLS_APP_ENC_MAX_INPUT_SIZE);
+```
+===END===
+
+===ISSUE===
+FILE: apps/src/app_enc.c
+LINE: 636-667
+SEVERITY: high
+TITLE: Missing bounds checks when downcasting readLen to uint32_t
+REVIEWERS: CLAUDE, GEMINI
+CONFIDENCE: trusted
+PROBLEM: readLen is uint64_t but is truncated to uint32_t for binary, hex, and base64 paths without validating size. This can allocate undersized buffers and lead to incorrect decoding or memory corruption when inputs exceed UINT32_MAX.
+CODE:
+```
+if (encOpt->format == HITLS_APP_FORMAT_BINARY) {
+    encOpt->decBuf = readBuf;
+    encOpt->decBufLen = (uint32_t)readLen;
+    return HITLS_APP_SUCCESS;
+}
+...
+uint32_t decodedLen = (uint32_t)(readLen / HITLS_APP_ENC_HEX_CHAR_STEP);
+...
+uint32_t decodedLen = HITLS_BASE64_DECODE_LENGTH((uint32_t)readLen);
+```
+FIX:
+```
+if (readLen > UINT32_MAX) {
+    BSL_SAL_FREE(readBuf);
+    AppPrintError("enc: Input size too large.\n");
+    return HITLS_APP_ENCODE_FAIL;
+}
+if (encOpt->format == HITLS_APP_FORMAT_HEX) {
+    if ((readLen % HITLS_APP_ENC_HEX_CHAR_STEP) != 0 ||
+        (readLen / HITLS_APP_ENC_HEX_CHAR_STEP) > UINT32_MAX) {
+        BSL_SAL_FREE(readBuf);
+        AppPrintError("enc: Invalid hex string length or file too large.\n");
+        return HITLS_APP_ENCODE_FAIL;
+    }
+    uint32_t decodedLen = (uint32_t)(readLen / HITLS_APP_ENC_HEX_CHAR_STEP);
+}
+if (encOpt->format == HITLS_APP_FORMAT_BASE64) {
+    uint32_t decodedLen = HITLS_BASE64_DECODE_LENGTH((uint32_t)readLen);
+}
+```
+===END===
+
+===ISSUE===
+FILE: apps/src/app_enc.c
+LINE: 1076-1077
+SEVERITY: high
+TITLE: Potential overflow when computing decryption output buffer size
+REVIEWERS: GEMINI, CODEX
+CONFIDENCE: trusted
+PROBLEM: Adding blockSize to cipherBufLen can wrap uint32_t, resulting in a too-small allocation and potential heap overflow during CRYPT_EAL_CipherUpdate.
+CODE:
+```
+uint32_t outLen = encOpt->cipherBufLen + encOpt->keySet->blockSize;
+uint8_t *resBuf = (uint8_t *)BSL_SAL_Malloc(outLen);
+```
+FIX:
+```
+if (encOpt->cipherBufLen > UINT32_MAX - encOpt->keySet->blockSize) {
+    AppPrintError("enc: Input too large.\n");
+    return HITLS_APP_UIO_FAIL;
+}
+uint32_t outLen = encOpt->cipherBufLen + encOpt->keySet->blockSize;
+uint8_t *resBuf = (uint8_t *)BSL_SAL_Malloc(outLen);
+```
+===END===
+
+===ISSUE===
+FILE: apps/src/app_enc.c
+LINE: 184-190
+SEVERITY: medium
+TITLE: Base64 encoder context leak on initialization failure
+REVIEWERS: CLAUDE
+CONFIDENCE: likely
+PROBLEM: If BSL_BASE64_EncodeInit fails, the allocated context is not freed, leaking memory.
+CODE:
+```
+encOpt->b64EncCtx = BSL_BASE64_CtxNew();
+...
+if (BSL_BASE64_EncodeInit(encOpt->b64EncCtx) != BSL_SUCCESS) {
+    return HITLS_APP_ENCODE_FAIL;
+}
+```
+FIX:
+```
+if (BSL_BASE64_EncodeInit(encOpt->b64EncCtx) != BSL_SUCCESS) {
+    BSL_BASE64_CtxFree(encOpt->b64EncCtx);
+    encOpt->b64EncCtx = NULL;
+    return HITLS_APP_ENCODE_FAIL;
+}
+```
+===END===
+
+===ISSUE===
+FILE: apps/src/app_enc.c
+LINE: 1119-1125
+SEVERITY: medium
+TITLE: Base64 output not finalized for AEAD encryption
+REVIEWERS: CODEX
+CONFIDENCE: likely
+PROBLEM: AEAD paths return early and skip EncWriteEncodedFinal, leaving buffered Base64 data unflushed and producing truncated/invalid output.
+CODE:
+```
+if (isAeadId == 1) {
+    return HITLS_APP_SUCCESS;
+}
+```
+FIX:
+```
+if (isAeadId == 1) {
+    if (encOpt->encTag == HITLS_APP_ENC_TAG_ENC &&
+        encOpt->format == HITLS_APP_FORMAT_BASE64) {
+        if (EncWriteEncodedFinal(encOpt) != HITLS_APP_SUCCESS) {
+            return HITLS_APP_UIO_FAIL;
+        }
+    }
+    return HITLS_APP_SUCCESS;
+}
+```
+===END===

@@ -1,0 +1,22 @@
+[
+  {
+    "source": "codex",
+    "file": "apps/src/app_enc.c",
+    "line": "1119-1126",
+    "severity": "medium",
+    "title": "Base64 output not finalized for AEAD encryption",
+    "problem": "For AEAD ciphers, the function returns before calling `EncWriteEncodedFinal`. When `-base64` is used, the encoder still has buffered bytes that need finalization, so the output becomes truncated/invalid and decryption fails.",
+    "code": "if (isAeadId == 1) {\n        return HITLS_APP_SUCCESS;\n    }",
+    "fix": "if (isAeadId == 1) {\n        if (encOpt->encTag == HITLS_APP_ENC_TAG_ENC && encOpt->format == HITLS_APP_FORMAT_BASE64) {\n            int32_t wret = EncWriteEncodedFinal(encOpt);\n            if (wret != HITLS_APP_SUCCESS) {\n                return HITLS_APP_UIO_FAIL;\n            }\n        }\n        return HITLS_APP_SUCCESS;\n    }"
+  },
+  {
+    "source": "codex",
+    "file": "apps/src/app_enc.c",
+    "line": "1076-1078",
+    "severity": "medium",
+    "title": "Output buffer size can overflow in decryption",
+    "problem": "`cipherBufLen` is derived from user input; adding `blockSize` without a bounds check can wrap `uint32_t` and allocate a too-small buffer. This risks incorrect decryption or memory corruption if the cipher API writes more than `outLen`.",
+    "code": "uint32_t outLen = encOpt->cipherBufLen + encOpt->keySet->blockSize;\n    uint8_t *resBuf = (uint8_t *)BSL_SAL_Malloc(outLen);",
+    "fix": "if (encOpt->cipherBufLen > UINT32_MAX - encOpt->keySet->blockSize) {\n        AppPrintError(\"enc: Input too large.\\n\");\n        return HITLS_APP_UIO_FAIL;\n    }\n    uint32_t outLen = encOpt->cipherBufLen + encOpt->keySet->blockSize;\n    uint8_t *resBuf = (uint8_t *)BSL_SAL_Malloc(outLen);"
+  }
+]
