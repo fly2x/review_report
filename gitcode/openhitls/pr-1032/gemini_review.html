@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Code Review: openHiTLS/openhitls#1032 - GEMINI</title>
+    <style>
+        :root { --critical: #dc2626; --high: #ea580c; --medium: #ca8a04; --low: #65a30d; }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: system-ui, sans-serif; background: #f8fafc; color: #1e293b; padding: 2rem; line-height: 1.6; }
+        .container { max-width: 900px; margin: 0 auto; }
+        h1 { font-size: 1.5rem; margin-bottom: 0.5rem; }
+        .subtitle { color: #64748b; margin-bottom: 2rem; }
+        .section { margin-bottom: 2rem; }
+        .section-title { font-size: 1.1rem; font-weight: 600; padding: 0.5rem 1rem; border-radius: 0.5rem 0.5rem 0 0; color: white; }
+        .section-title.critical { background: var(--critical); }
+        .section-title.high { background: var(--high); }
+        .section-title.medium { background: var(--medium); }
+        .section-title.low { background: var(--low); }
+        .issue { background: white; border: 1px solid #e2e8f0; border-top: none; padding: 1rem; }
+        .issue:last-child { border-radius: 0 0 0.5rem 0.5rem; }
+        .issue-title { font-weight: 600; margin-bottom: 0.25rem; }
+        .issue-location { font-family: monospace; font-size: 0.875rem; color: #64748b; margin-bottom: 0.75rem; }
+        .issue-source { font-size: 0.75rem; color: #94a3b8; margin-top: 0.5rem; }
+        pre { background: #1e293b; color: #e2e8f0; padding: 0.75rem; border-radius: 0.375rem; overflow-x: auto; font-size: 0.875rem; margin: 0.5rem 0; }
+        .problem { margin: 0.75rem 0; }
+        .fix-label { font-weight: 600; margin-top: 0.75rem; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Code Review: openHiTLS/openhitls#1032 - GEMINI</h1>
+        <div class="subtitle"></div>
+<div class="section"><div class="section-title high">High</div>
+<div class="issue">
+                <div class="issue-title">Integer overflow in memory allocation size calculation</div>
+                <div class="issue-location">pki/x509_verify/src/hitls_x509_verify.c:277</div>
+                <pre>char *tmp = BSL_SAL_Calloc(valLen + 1, sizeof(char));</pre>
+                <div class="problem"><strong>Issue:</strong> The calculation `valLen + 1` can overflow if `valLen` is equal to `UINT32_MAX`. This would result in `BSL_SAL_Calloc` allocating a zero-sized buffer (or a very small one), leading to a heap buffer overflow during the subsequent `memcpy_s` which uses the original `valLen`.</div>
+                <div class="fix-label">Fix:</div><pre>if (valLen == UINT32_MAX) {
+        BSL_ERR_PUSH_ERROR(HITLS_X509_ERR_INVALID_PARAM);
+        return HITLS_X509_ERR_INVALID_PARAM;
+    }
+    char *tmp = BSL_SAL_Calloc(valLen + 1, sizeof(char));</pre>
+                <div class="issue-source">Reviewer: gemini</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">Integer overflow in memory allocation size calculation</div>
+                <div class="issue-location">pki/x509_verify/src/hitls_x509_verify.c:306</div>
+                <pre>storeCtx-&gt;verifyParam.ip = BSL_SAL_Calloc(valLen + 1, sizeof(char));</pre>
+                <div class="problem"><strong>Issue:</strong> Similar to `X509_SetVerifyDns`, the calculation `valLen + 1` can overflow if `valLen` is equal to `UINT32_MAX`. This would result in `BSL_SAL_Calloc` allocating a zero-sized buffer, leading to a heap buffer overflow during the subsequent `memcpy_s`.</div>
+                <div class="fix-label">Fix:</div><pre>if (valLen == UINT32_MAX) {
+        BSL_ERR_PUSH_ERROR(HITLS_X509_ERR_INVALID_PARAM);
+        return HITLS_X509_ERR_INVALID_PARAM;
+    }
+    storeCtx-&gt;verifyParam.ip = BSL_SAL_Calloc(valLen + 1, sizeof(char));</pre>
+                <div class="issue-source">Reviewer: gemini</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">Incorrect IP address comparison logic</div>
+                <div class="issue-location">pki/x509_common/src/hitls_x509_util.c:183</div>
+                <pre>} else if (gn-&gt;type == HITLS_X509_GN_IP) {
+            ret = memcmp(gn-&gt;value.data, hostname, gn-&gt;value.dataLen);
+            if (ret == HITLS_PKI_SUCCESS) {
+                break;
+            }
+        }</pre>
+                <div class="problem"><strong>Issue:</strong> The code compares `hostname` (which is a string, e.g., "127.0.0.1") with `gn->value.data` (which is likely the raw IP address bytes in network byte order) using `memcmp`. This comparison will always fail. Additionally, `gn->value.dataLen` (4 for IPv4, 16 for IPv6) is used as the length for `memcmp`. If `hostname` string is shorter than `dataLen` (possible for IPv6 strings like "::1"), this results in a buffer over-read.</div>
+                <div class="fix-label">Fix:</div><pre>} else if (gn-&gt;type == HITLS_X509_GN_IP) {
+            /* 
+             * Note: Caller must ensure hostname is converted to raw IP bytes for comparison,
+             * or we need to parse hostname here. Assuming hostname is string and gn-&gt;value is raw:
+             */
+             // FIX implementation depends on available IP parsing util, 
+             // but current memcmp is definitely wrong.
+             // Suggestion: Parse 'hostname' to raw bytes (ipv4_addr or ipv6_addr) then compare.
+             // If unavailable, this feature is incomplete.
+             // For now, removing the broken check or implementing proper parsing is required.
+        }</pre>
+                <div class="issue-source">Reviewer: gemini</div>
+            </div>
+</div>
+<div class="section"><div class="section-title medium">Medium</div>
+<div class="issue">
+                <div class="issue-title">Potential endianness issue and unsafe pointer casting</div>
+                <div class="issue-location">tls/cert/hitls_x509_adapt/hitls_x509_cert_store.c:109</div>
+                <pre>return HITLS_X509_StoreCtxCtrl(store, HITLS_X509_STORECTX_SET_HOST_FLAG, (int64_t *)input,
+                sizeof(uint32_t));</pre>
+                <div class="problem"><strong>Issue:</strong> The code casts `input` (which points to an `int64_t`) to `int64_t*`, validates it, and then passes it to `HITLS_X509_StoreCtxCtrl`. `HITLS_X509_StoreCtxCtrl` eventually calls `X509_SetHostFlags` which treats the pointer as `uint32_t*`. On Big Endian systems, dereferencing an `int64_t*` as `uint32_t*` will read the upper 32 bits (which are 0 for small positive values), effectively treating the flag as 0.</div>
+                <div class="fix-label">Fix:</div><pre>uint32_t flags = (uint32_t)(*(int64_t *)input);
+            return HITLS_X509_StoreCtxCtrl(store, HITLS_X509_STORECTX_SET_HOST_FLAG, &amp;flags,
+                sizeof(uint32_t));</pre>
+                <div class="issue-source">Reviewer: gemini</div>
+            </div>
+</div>
+</div></body></html>

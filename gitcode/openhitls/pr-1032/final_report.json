@@ -1,0 +1,110 @@
+{
+  "context": {
+    "owner": "openHiTLS",
+    "repo": "openhitls",
+    "pr_id": "1032",
+    "title": "",
+    "reviewers": [
+      "claude",
+      "gemini",
+      "codex"
+    ]
+  },
+  "statistics": {
+    "total": 8,
+    "critical": 0,
+    "high": 3,
+    "medium": 3,
+    "low": 2
+  },
+  "issues": [
+    {
+      "file": "pki/x509_common/src/hitls_x509_util.c",
+      "line": "182-186",
+      "severity": "high",
+      "title": "Incorrect IP SAN comparison causing false verification failures",
+      "reviewers": "CLAUDE, GEMINI, CODEX",
+      "confidence": "trusted",
+      "problem": "The code compares raw IP address bytes from the certificate SAN (gn->value.data) directly against the hostname string using memcmp. This is fundamentally broken because:\n1. hostname is a string representation like \"192.168.1.1\" or \"::1\"\n2. gn->value.data contains raw binary IP bytes (4 bytes for IPv4, 16 for IPv6)\n3. The memcmp will never match valid IP addresses\n4. If hostname string is shorter than gn->value.dataLen (e.g., \"::1\" is 2 chars but IPv6 SAN is 16 bytes), this causes out-of-bounds read",
+      "code": "} else if (gn->type == HITLS_X509_GN_IP) {\n    ret = memcmp(gn->value.data, hostname, gn->value.dataLen);\n    if (ret == HITLS_PKI_SUCCESS) {\n        break;\n    }\n}",
+      "fix": "} else if (gn->type == HITLS_X509_GN_IP) {\n    /* Parse hostname string to binary IP for comparison with SAN */\n    uint8_t ipbuf[16];\n    int af = (gn->value.dataLen == 4) ? AF_INET :\n             (gn->value.dataLen == 16) ? AF_INET6 : -1;\n    if (af != -1 && inet_pton(af, hostname, ipbuf) == 1 &&\n        memcmp(gn->value.data, ipbuf, gn->value.dataLen) == 0) {\n        ret = HITLS_PKI_SUCCESS;\n        break;\n    }\n}"
+    },
+    {
+      "file": "tls/cert/hitls_x509_adapt/hitls_x509_cert_store.c",
+      "line": "105-110",
+      "severity": "high",
+      "title": "Big-endian bug and missing NULL check in SET_HOST_FLAG",
+      "reviewers": "CLAUDE, GEMINI, CODEX",
+      "confidence": "trusted",
+      "problem": "Multiple issues:\n1. No NULL check on input before dereferencing - NULL input will crash\n2. The code casts input to int64_t* for validation, then passes (int64_t*)input with sizeof(uint32_t) to X509_SetHostFlags. On big-endian systems, dereferencing an int64_t* as uint32_t* will read the high 32 bits instead of the low 32 bits (where the value is stored), causing hostflags to be ignored",
+      "code": "case CERT_STORE_CTRL_SET_HOST_FLAG:\n    if (*(int64_t *)input > UINT32_MAX || *(int64_t *)input < 0) {\n        return HITLS_CERT_STORE_CTRL_ERR_SET_HOST_FLAG;\n    }\n    return HITLS_X509_StoreCtxCtrl(store, HITLS_X509_STORECTX_SET_HOST_FLAG, (int64_t *)input,\n        sizeof(uint32_t));",
+      "fix": "case CERT_STORE_CTRL_SET_HOST_FLAG: {\n    if (input == NULL) {\n        return HITLS_CERT_STORE_CTRL_ERR_SET_HOST_FLAG;\n    }\n    uint32_t flags = (uint32_t)(*(int64_t *)input);\n    return HITLS_X509_StoreCtxCtrl(store, HITLS_X509_STORECTX_SET_HOST_FLAG, &flags,\n        sizeof(uint32_t));\n}"
+    },
+    {
+      "file": "pki/x509_verify/src/hitls_x509_verify.c",
+      "line": "846",
+      "severity": "high",
+      "title": "Integer underflow in IPv6 validation length calculation",
+      "reviewers": "CLAUDE",
+      "confidence": "likely",
+      "problem": "When ipv4Start is 0, the calculation `ipv4Start - 1` becomes -1 (or SIZE_MAX when cast to unsigned). This negative length is then passed to ParseIPv6Segments, which could cause incorrect behavior or buffer issues",
+      "code": "int ipv6Len = hasIpv4 ? ipv4Start - 1 : (int)strlen(ipstr);\nif (!ParseIPv6Segments(ipstr, ipv6Len, &stats)) {",
+      "fix": "int ipv6Len = hasIpv4 ? ipv4Start - 1 : (int)strlen(ipstr);\nif (ipv6Len <= 0) {\n    return false;  // Invalid IPv6 format\n}\nif (!ParseIPv6Segments(ipstr, ipv6Len, &stats)) {"
+    },
+    {
+      "file": "pki/x509_verify/src/hitls_x509_verify.c",
+      "line": "969-973",
+      "severity": "medium",
+      "title": "Missing error check for BSL_LIST_Copy allocation failure",
+      "reviewers": "CLAUDE, CODEX",
+      "confidence": "trusted",
+      "problem": "BSL_LIST_Copy can return NULL on memory allocation failure, but the code doesn't check for this. If allocation fails, storeCtx->verifyParam.hostnames becomes NULL but the function continues, silently dropping all hostname verification",
+      "code": "if (verifyParam->hostnames != NULL) {\n    BSL_LIST_FREE(storeCtx->verifyParam.hostnames, (BSL_LIST_PFUNC_FREE)BSL_SAL_Free);\n    storeCtx->verifyParam.hostnames = BSL_LIST_Copy(verifyParam->hostnames, (BSL_LIST_PFUNC_DUP)DupString,\n        (BSL_LIST_PFUNC_FREE)BSL_SAL_Free);\n}",
+      "fix": "if (verifyParam->hostnames != NULL) {\n    BSL_LIST_FREE(storeCtx->verifyParam.hostnames, (BSL_LIST_PFUNC_FREE)BSL_SAL_Free);\n    storeCtx->verifyParam.hostnames = BSL_LIST_Copy(verifyParam->hostnames, (BSL_LIST_PFUNC_DUP)DupString,\n        (BSL_LIST_PFUNC_FREE)BSL_SAL_Free);\n    if (storeCtx->verifyParam.hostnames == NULL) {\n        BSL_ERR_PUSH_ERROR(BSL_MALLOC_FAIL);\n        return BSL_MALLOC_FAIL;\n    }\n}"
+    },
+    {
+      "file": "pki/x509_verify/src/hitls_x509_verify.c",
+      "line": "723-726",
+      "severity": "medium",
+      "title": "Insufficient buffer overflow protection in ValidateIPv4Section",
+      "reviewers": "CLAUDE",
+      "confidence": "likely",
+      "problem": "The loop condition `j < 15` doesn't prevent writing to ipv4Part[15] when j reaches 15. The subsequent null terminator write `ipv4Part[j] = '\\0'` at index 15 is valid (buffer is size 16), but the loop logic is fragile. If source input has exactly 15 chars before null, j becomes 15 after loop, which is at the boundary",
+      "code": "for (int i = ipv4Start; i < (int)strlen(ipstr) && j < 15; i++) {\n    ipv4Part[j++] = ipstr[i];\n}\nipv4Part[j] = '\\0';",
+      "fix": "for (int i = ipv4Start; i < (int)strlen(ipstr) && j < 15; i++) {\n    ipv4Part[j++] = ipstr[i];\n}\nif (j >= 15) {\n    return false;  // IPv4 part too long\n}\nipv4Part[j] = '\\0';"
+    },
+    {
+      "file": "pki/x509_verify/src/hitls_x509_verify.c",
+      "line": "1977-1978",
+      "severity": "medium",
+      "title": "Hostname verification ignores configured hostflags",
+      "reviewers": "CODEX",
+      "confidence": "trusted",
+      "problem": "DNS hostname verification passes `0` as flags instead of `storeCtx->verifyParam.hostflags`, so the newly added host flag API is ineffective for DNS hostname validation",
+      "code": "for (char *hostname = BSL_LIST_GET_FIRST(storeCtx->verifyParam.hostnames); hostname != NULL;) {\n    ret = HITLS_X509_VerifyHostname(certee, 0, hostname, strlen(hostname));",
+      "fix": "for (char *hostname = BSL_LIST_GET_FIRST(storeCtx->verifyParam.hostnames); hostname != NULL;) {\n    ret = HITLS_X509_VerifyHostname(certee, storeCtx->verifyParam.hostflags, hostname, strlen(hostname));"
+    },
+    {
+      "file": "pki/x509_verify/src/hitls_x509_verify.c",
+      "line": "665",
+      "severity": "low",
+      "title": "Off-by-one loop reads null terminator unnecessarily",
+      "reviewers": "CLAUDE",
+      "confidence": "likely",
+      "problem": "The loop condition `i <= len` accesses str[len] which is the null terminator. While this works (null terminator fails isdigit() check), it's fragile and unclear",
+      "code": "for (int i = 0; i <= len; i++) {\n    if (str[i] == '.' || str[i] == '\\0') {",
+      "fix": "for (int i = 0; i < len; i++) {\n    if (str[i] == '.') {\n        if (!CheckIpv4Part(str, partStart, i)) {\n            return false;\n        }\n        partCount++;\n        partStart = i + 1;\n    }\n}\n// Check final part after loop\nif (partCount == 3) {\n    if (!CheckIpv4Part(str, partStart, len)) {\n        return false;\n    }\n    partCount++;\n}"
+    },
+    {
+      "file": "pki/x509_verify/src/hitls_x509_verify.c",
+      "line": "798-800",
+      "severity": "low",
+      "title": "Potential undefined behavior in ValidateIPv6Format",
+      "reviewers": "CLAUDE",
+      "confidence": "likely",
+      "problem": "When ipv6Len is 1, `ipstr[ipv6Len - 2]` accesses `ipstr[-1]` which is undefined behavior. The check order should verify length >= 2 before accessing index - 2",
+      "code": "if (ipstr[ipv6Len - 1] == ':' && (ipv6Len == 1 || ipstr[ipv6Len - 2] != ':')) {\n    return false;\n}",
+      "fix": "if (ipv6Len >= 1 && ipstr[ipv6Len - 1] == ':') {\n    if (ipv6Len == 1 || ipstr[ipv6Len - 2] != ':') {\n        return false;\n    }\n}"
+    }
+  ]
+}

@@ -1,0 +1,86 @@
+# Code Review: openHiTLS/openhitls#1032
+**Reviewer**: GEMINI
+
+
+## High
+
+### Integer overflow in memory allocation size calculation
+`pki/x509_verify/src/hitls_x509_verify.c:277`
+```
+char *tmp = BSL_SAL_Calloc(valLen + 1, sizeof(char));
+```
+**Issue**: The calculation `valLen + 1` can overflow if `valLen` is equal to `UINT32_MAX`. This would result in `BSL_SAL_Calloc` allocating a zero-sized buffer (or a very small one), leading to a heap buffer overflow during the subsequent `memcpy_s` which uses the original `valLen`.
+**Fix**:
+```
+if (valLen == UINT32_MAX) {
+        BSL_ERR_PUSH_ERROR(HITLS_X509_ERR_INVALID_PARAM);
+        return HITLS_X509_ERR_INVALID_PARAM;
+    }
+    char *tmp = BSL_SAL_Calloc(valLen + 1, sizeof(char));
+```
+
+---
+
+### Integer overflow in memory allocation size calculation
+`pki/x509_verify/src/hitls_x509_verify.c:306`
+```
+storeCtx->verifyParam.ip = BSL_SAL_Calloc(valLen + 1, sizeof(char));
+```
+**Issue**: Similar to `X509_SetVerifyDns`, the calculation `valLen + 1` can overflow if `valLen` is equal to `UINT32_MAX`. This would result in `BSL_SAL_Calloc` allocating a zero-sized buffer, leading to a heap buffer overflow during the subsequent `memcpy_s`.
+**Fix**:
+```
+if (valLen == UINT32_MAX) {
+        BSL_ERR_PUSH_ERROR(HITLS_X509_ERR_INVALID_PARAM);
+        return HITLS_X509_ERR_INVALID_PARAM;
+    }
+    storeCtx->verifyParam.ip = BSL_SAL_Calloc(valLen + 1, sizeof(char));
+```
+
+---
+
+### Incorrect IP address comparison logic
+`pki/x509_common/src/hitls_x509_util.c:183`
+```
+} else if (gn->type == HITLS_X509_GN_IP) {
+            ret = memcmp(gn->value.data, hostname, gn->value.dataLen);
+            if (ret == HITLS_PKI_SUCCESS) {
+                break;
+            }
+        }
+```
+**Issue**: The code compares `hostname` (which is a string, e.g., "127.0.0.1") with `gn->value.data` (which is likely the raw IP address bytes in network byte order) using `memcmp`. This comparison will always fail. Additionally, `gn->value.dataLen` (4 for IPv4, 16 for IPv6) is used as the length for `memcmp`. If `hostname` string is shorter than `dataLen` (possible for IPv6 strings like "::1"), this results in a buffer over-read.
+**Fix**:
+```
+} else if (gn->type == HITLS_X509_GN_IP) {
+            /* 
+             * Note: Caller must ensure hostname is converted to raw IP bytes for comparison,
+             * or we need to parse hostname here. Assuming hostname is string and gn->value is raw:
+             */
+             // FIX implementation depends on available IP parsing util, 
+             // but current memcmp is definitely wrong.
+             // Suggestion: Parse 'hostname' to raw bytes (ipv4_addr or ipv6_addr) then compare.
+             // If unavailable, this feature is incomplete.
+             // For now, removing the broken check or implementing proper parsing is required.
+        }
+```
+
+---
+
+
+## Medium
+
+### Potential endianness issue and unsafe pointer casting
+`tls/cert/hitls_x509_adapt/hitls_x509_cert_store.c:109`
+```
+return HITLS_X509_StoreCtxCtrl(store, HITLS_X509_STORECTX_SET_HOST_FLAG, (int64_t *)input,
+                sizeof(uint32_t));
+```
+**Issue**: The code casts `input` (which points to an `int64_t`) to `int64_t*`, validates it, and then passes it to `HITLS_X509_StoreCtxCtrl`. `HITLS_X509_StoreCtxCtrl` eventually calls `X509_SetHostFlags` which treats the pointer as `uint32_t*`. On Big Endian systems, dereferencing an `int64_t*` as `uint32_t*` will read the upper 32 bits (which are 0 for small positive values), effectively treating the flag as 0.
+**Fix**:
+```
+uint32_t flags = (uint32_t)(*(int64_t *)input);
+            return HITLS_X509_StoreCtxCtrl(store, HITLS_X509_STORECTX_SET_HOST_FLAG, &flags,
+                sizeof(uint32_t));
+```
+
+---

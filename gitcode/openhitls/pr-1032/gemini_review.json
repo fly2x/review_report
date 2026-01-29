@@ -1,0 +1,42 @@
+[
+  {
+    "source": "gemini",
+    "file": "pki/x509_verify/src/hitls_x509_verify.c",
+    "line": "277",
+    "severity": "high",
+    "title": "Integer overflow in memory allocation size calculation",
+    "problem": "The calculation `valLen + 1` can overflow if `valLen` is equal to `UINT32_MAX`. This would result in `BSL_SAL_Calloc` allocating a zero-sized buffer (or a very small one), leading to a heap buffer overflow during the subsequent `memcpy_s` which uses the original `valLen`.",
+    "code": "char *tmp = BSL_SAL_Calloc(valLen + 1, sizeof(char));",
+    "fix": "if (valLen == UINT32_MAX) {\n        BSL_ERR_PUSH_ERROR(HITLS_X509_ERR_INVALID_PARAM);\n        return HITLS_X509_ERR_INVALID_PARAM;\n    }\n    char *tmp = BSL_SAL_Calloc(valLen + 1, sizeof(char));"
+  },
+  {
+    "source": "gemini",
+    "file": "pki/x509_verify/src/hitls_x509_verify.c",
+    "line": "306",
+    "severity": "high",
+    "title": "Integer overflow in memory allocation size calculation",
+    "problem": "Similar to `X509_SetVerifyDns`, the calculation `valLen + 1` can overflow if `valLen` is equal to `UINT32_MAX`. This would result in `BSL_SAL_Calloc` allocating a zero-sized buffer, leading to a heap buffer overflow during the subsequent `memcpy_s`.",
+    "code": "storeCtx->verifyParam.ip = BSL_SAL_Calloc(valLen + 1, sizeof(char));",
+    "fix": "if (valLen == UINT32_MAX) {\n        BSL_ERR_PUSH_ERROR(HITLS_X509_ERR_INVALID_PARAM);\n        return HITLS_X509_ERR_INVALID_PARAM;\n    }\n    storeCtx->verifyParam.ip = BSL_SAL_Calloc(valLen + 1, sizeof(char));"
+  },
+  {
+    "source": "gemini",
+    "file": "pki/x509_common/src/hitls_x509_util.c",
+    "line": "183",
+    "severity": "high",
+    "title": "Incorrect IP address comparison logic",
+    "problem": "The code compares `hostname` (which is a string, e.g., \"127.0.0.1\") with `gn->value.data` (which is likely the raw IP address bytes in network byte order) using `memcmp`. This comparison will always fail. Additionally, `gn->value.dataLen` (4 for IPv4, 16 for IPv6) is used as the length for `memcmp`. If `hostname` string is shorter than `dataLen` (possible for IPv6 strings like \"::1\"), this results in a buffer over-read.",
+    "code": "} else if (gn->type == HITLS_X509_GN_IP) {\n            ret = memcmp(gn->value.data, hostname, gn->value.dataLen);\n            if (ret == HITLS_PKI_SUCCESS) {\n                break;\n            }\n        }",
+    "fix": "} else if (gn->type == HITLS_X509_GN_IP) {\n            /* \n             * Note: Caller must ensure hostname is converted to raw IP bytes for comparison,\n             * or we need to parse hostname here. Assuming hostname is string and gn->value is raw:\n             */\n             // FIX implementation depends on available IP parsing util, \n             // but current memcmp is definitely wrong.\n             // Suggestion: Parse 'hostname' to raw bytes (ipv4_addr or ipv6_addr) then compare.\n             // If unavailable, this feature is incomplete.\n             // For now, removing the broken check or implementing proper parsing is required.\n        }"
+  },
+  {
+    "source": "gemini",
+    "file": "tls/cert/hitls_x509_adapt/hitls_x509_cert_store.c",
+    "line": "109",
+    "severity": "medium",
+    "title": "Potential endianness issue and unsafe pointer casting",
+    "problem": "The code casts `input` (which points to an `int64_t`) to `int64_t*`, validates it, and then passes it to `HITLS_X509_StoreCtxCtrl`. `HITLS_X509_StoreCtxCtrl` eventually calls `X509_SetHostFlags` which treats the pointer as `uint32_t*`. On Big Endian systems, dereferencing an `int64_t*` as `uint32_t*` will read the upper 32 bits (which are 0 for small positive values), effectively treating the flag as 0.",
+    "code": "return HITLS_X509_StoreCtxCtrl(store, HITLS_X509_STORECTX_SET_HOST_FLAG, (int64_t *)input,\n                sizeof(uint32_t));",
+    "fix": "uint32_t flags = (uint32_t)(*(int64_t *)input);\n            return HITLS_X509_StoreCtxCtrl(store, HITLS_X509_STORECTX_SET_HOST_FLAG, &flags,\n                sizeof(uint32_t));"
+  }
+]
