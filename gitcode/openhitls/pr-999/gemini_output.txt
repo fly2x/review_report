@@ -1,0 +1,57 @@
+I will start by checking the diff statistics to understand the scope of the changes in the PR.
+I will examine the changes in `crypto/mldsa/src/ml_dsa_ntt.c` to identify any potential security issues or logic errors.
+I will now read the file `crypto/mldsa/src/ml_dsa_local.h` to check the definitions of the constants used in the Plantard arithmetic.
+I will now examine the changes in `crypto/mldsa/src/ml_dsa_core.c` to identify any potential security issues or logic errors.
+Based on the code review, I have identified a critical linkage issue regarding the `inline` function definition.
+
+===ISSUE===
+FILE: crypto/mldsa/src/ml_dsa_ntt.c
+LINE: 62
+SEVERITY: high
+TITLE: Inline function definition without external symbol
+PROBLEM: The function `MLDSA_PlantardMulReduce` is defined as `inline` in `ml_dsa_ntt.c` but declared as a prototype in `ml_dsa_local.h` and used in `ml_dsa_core.c`. In C99/C11, an `inline` definition without `extern` does not emit an external symbol, which will cause a linker error ("undefined reference") when `ml_dsa_core.c` tries to call it.
+CODE:
+```c
+inline int32_t MLDSA_PlantardMulReduce(int64_t a)
+{
+    int64_t tmp = a;
+```
+FIX:
+Move the function definition to `crypto/mldsa/src/ml_dsa_local.h` and make it `static inline` so it is visible to all translation units and can be inlined correctly.
+
+In `crypto/mldsa/src/ml_dsa_local.h`:
+```c
+// Replace the prototype with the definition
+static inline int32_t MLDSA_PlantardMulReduce(int64_t a)
+{
+    int64_t tmp = a;
+    tmp >>= MLDSA_PLANTARD_L;
+    tmp = (tmp + (1 << MLDSA_PLANTARD_ALPHA)) * MLDSA_Q;
+    tmp >>= MLDSA_PLANTARD_L;
+    return (int32_t)tmp;
+}
+```
+
+And remove the definition from `crypto/mldsa/src/ml_dsa_ntt.c`.
+===END===
+
+===ISSUE===
+FILE: crypto/mldsa/src/ml_dsa_core.c
+LINE: 187
+SEVERITY: low
+TITLE: Buffer overflow risk if SHAKE128 block size is not multiple of 4
+PROBLEM: The buffer `buf` is defined as `uint32_t` with size `CRYPT_SHAKE128_BLOCKSIZE / 4`. If `CRYPT_SHAKE128_BLOCKSIZE` is not divisible by 4, the allocated size will be smaller than `CRYPT_SHAKE128_BLOCKSIZE` (due to integer truncation), but `hashMethod->squeeze` is called with `outlen` (the full block size), leading to a heap/stack buffer overflow. While the standard SHAKE128 rate (168) is divisible by 4, this assumption is brittle.
+CODE:
+```c
+    unsigned int outlen = CRYPT_SHAKE128_BLOCKSIZE;
+    const uint32_t buflen = CRYPT_SHAKE128_BLOCKSIZE / 4;
+    uint32_t buf[CRYPT_SHAKE128_BLOCKSIZE / 4];
+```
+FIX:
+```c
+    unsigned int outlen = CRYPT_SHAKE128_BLOCKSIZE;
+    // Ensure buffer can hold the full output even if not divisible by 4
+    const uint32_t buflen = (CRYPT_SHAKE128_BLOCKSIZE + 3) / 4; 
+    uint32_t buf[(CRYPT_SHAKE128_BLOCKSIZE + 3) / 4];
+```
+===END===

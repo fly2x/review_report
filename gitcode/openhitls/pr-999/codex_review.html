@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Code Review: openHiTLS/openhitls#999 - CODEX</title>
+    <style>
+        :root { --critical: #dc2626; --high: #ea580c; --medium: #ca8a04; --low: #65a30d; }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: system-ui, sans-serif; background: #f8fafc; color: #1e293b; padding: 2rem; line-height: 1.6; }
+        .container { max-width: 900px; margin: 0 auto; }
+        h1 { font-size: 1.5rem; margin-bottom: 0.5rem; }
+        .subtitle { color: #64748b; margin-bottom: 2rem; }
+        .section { margin-bottom: 2rem; }
+        .section-title { font-size: 1.1rem; font-weight: 600; padding: 0.5rem 1rem; border-radius: 0.5rem 0.5rem 0 0; color: white; }
+        .section-title.critical { background: var(--critical); }
+        .section-title.high { background: var(--high); }
+        .section-title.medium { background: var(--medium); }
+        .section-title.low { background: var(--low); }
+        .issue { background: white; border: 1px solid #e2e8f0; border-top: none; padding: 1rem; }
+        .issue:last-child { border-radius: 0 0 0.5rem 0.5rem; }
+        .issue-title { font-weight: 600; margin-bottom: 0.25rem; }
+        .issue-location { font-family: monospace; font-size: 0.875rem; color: #64748b; margin-bottom: 0.75rem; }
+        .issue-source { font-size: 0.75rem; color: #94a3b8; margin-top: 0.5rem; }
+        pre { background: #1e293b; color: #e2e8f0; padding: 0.75rem; border-radius: 0.375rem; overflow-x: auto; font-size: 0.875rem; margin: 0.5rem 0; }
+        .problem { margin: 0.75rem 0; }
+        .fix-label { font-weight: 600; margin-top: 0.75rem; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Code Review: openHiTLS/openhitls#999 - CODEX</h1>
+        <div class="subtitle"></div>
+<div class="section"><div class="section-title high">High</div>
+<div class="issue">
+                <div class="issue-title">Inline definition drops external symbol under C99/C11</div>
+                <div class="issue-location">crypto/mldsa/src/ml_dsa_ntt.c:81-87</div>
+                <pre>inline int32_t MLDSA_PlantardMulReduce(int64_t a)
+{
+    int64_t tmp = a;
+    tmp &gt;&gt;= MLDSA_PLANTARD_L;
+    tmp = (tmp + (1 &lt;&lt; MLDSA_PLANTARD_ALPHA)) * MLDSA_Q;
+    tmp &gt;&gt;= MLDSA_PLANTARD_L;
+    return (int32_t)tmp;
+}</pre>
+                <div class="problem"><strong>Issue:</strong> `MLDSA_PlantardMulReduce` is defined as `inline` in a .c file but referenced from other translation units (e.g., `ml_dsa_core.c`). Under C99/C11 inline semantics this does not emit an external definition, causing undefined references at link time unless compiling with GNU89 inline semantics or LTO.</div>
+                <div class="fix-label">Fix:</div><pre>int32_t MLDSA_PlantardMulReduce(int64_t a)
+{
+    int64_t tmp = a;
+    tmp &gt;&gt;= MLDSA_PLANTARD_L;
+    tmp = (tmp + (1 &lt;&lt; MLDSA_PLANTARD_ALPHA)) * MLDSA_Q;
+    tmp &gt;&gt;= MLDSA_PLANTARD_L;
+    return (int32_t)tmp;
+}</pre>
+                <div class="issue-source">Reviewer: codex</div>
+            </div>
+</div>
+<div class="section"><div class="section-title medium">Medium</div>
+<div class="issue">
+                <div class="issue-title">Signed API for Plantard reduce forces implementation-defined conversions</div>
+                <div class="issue-location">crypto/mldsa/src/ml_dsa_local.h:99-101</div>
+                <pre>int32_t MLDSA_PlantardMulReduce(int64_t a);</pre>
+                <div class="problem"><strong>Issue:</strong> The reducer takes `int64_t`, but all new call sites multiply in `uint64_t` (often overflowing INT64_MAX due to `MLDSA_PLANTARD_INV`) and pass the result. Converting a large `uint64_t` to `int64_t` is implementation-defined and can change results across platforms, risking incorrect reductions. Use `uint64_t` in the API/implementation to keep arithmetic defined.</div>
+                <div class="fix-label">Fix:</div><pre>/* ml_dsa_local.h */
+int32_t MLDSA_PlantardMulReduce(uint64_t a);
+
+/* ml_dsa_ntt.c */
+int32_t MLDSA_PlantardMulReduce(uint64_t a)
+{
+    uint64_t tmp = a &gt;&gt; MLDSA_PLANTARD_L;
+    tmp = (tmp + (1ULL &lt;&lt; MLDSA_PLANTARD_ALPHA)) * MLDSA_Q;
+    tmp &gt;&gt;= MLDSA_PLANTARD_L;
+    return (int32_t)tmp;
+}</pre>
+                <div class="issue-source">Reviewer: codex</div>
+            </div>
+</div>
+</div></body></html>
