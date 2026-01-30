@@ -1,0 +1,385 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Final Report: openssl/openssl#29381</title>
+    <style>
+        :root { --critical: #dc2626; --high: #ea580c; --medium: #ca8a04; --low: #65a30d;
+                 --trusted: #059669; --likely: #0284c7; --evaluate: #7c3aed; }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: system-ui, sans-serif; background: #f8fafc; color: #1e293b; padding: 2rem; line-height: 1.6; }
+        .container { max-width: 900px; margin: 0 auto; }
+        h1 { font-size: 1.75rem; margin-bottom: 0.5rem; }
+        .subtitle { color: #64748b; margin-bottom: 1rem; }
+        .stats { display: flex; gap: 1rem; margin-bottom: 2rem; flex-wrap: wrap; }
+        .stat { background: white; border: 1px solid #e2e8f0; border-radius: 0.5rem; padding: 1rem; min-width: 100px; text-align: center; }
+        .stat-value { font-size: 1.5rem; font-weight: 700; }
+        .stat-label { font-size: 0.875rem; color: #64748b; }
+        .stat.critical .stat-value { color: var(--critical); }
+        .stat.high .stat-value { color: var(--high); }
+        .stat.medium .stat-value { color: var(--medium); }
+        .stat.low .stat-value { color: var(--low); }
+        .reviewers { background: #e0e7ff; color: #3730a3; padding: 0.5rem 1rem; border-radius: 0.5rem; margin-bottom: 2rem; }
+        .section { margin-bottom: 2rem; }
+        .section-title { font-size: 1.1rem; font-weight: 600; padding: 0.5rem 1rem; border-radius: 0.5rem 0.5rem 0 0; color: white; }
+        .section-title.critical { background: var(--critical); }
+        .section-title.high { background: var(--high); }
+        .section-title.medium { background: var(--medium); }
+        .section-title.low { background: var(--low); }
+        .issue { background: white; border: 1px solid #e2e8f0; border-top: none; padding: 1rem; }
+        .issue:last-child { border-radius: 0 0 0.5rem 0.5rem; }
+        .issue-title { font-weight: 600; margin-bottom: 0.25rem; }
+        .issue-location { font-family: monospace; font-size: 0.875rem; color: #64748b; margin-bottom: 0.5rem; }
+        .issue-meta { font-size: 0.75rem; margin-bottom: 0.75rem; display: flex; gap: 0.75rem; align-items: center; }
+        .issue-meta .reviewers { background: #f1f5f9; color: #475569; padding: 0.25rem 0.5rem; border-radius: 0.25rem; margin: 0; }
+        .confidence-badge { padding: 0.25rem 0.5rem; border-radius: 0.25rem; font-weight: 500; }
+        .confidence-badge.trusted { background: #d1fae5; color: #065f46; }
+        .confidence-badge.likely { background: #dbeafe; color: #1e40af; }
+        .confidence-badge.evaluate { background: #ede9fe; color: #5b21b6; }
+        pre { background: #1e293b; color: #e2e8f0; padding: 0.75rem; border-radius: 0.375rem; overflow-x: auto; font-size: 0.875rem; margin: 0.5rem 0; }
+        .problem { margin: 0.75rem 0; }
+        .fix-label { font-weight: 600; margin-top: 0.75rem; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Final Code Review Report</h1>
+        <div class="subtitle">openssl/openssl - PR #29381</div>
+        <p style="margin-bottom: 1rem;"> Added LMS support for OpenSSL commandline signature verification using pkeyutl.</p>
+
+        <div class="stats">
+            <div class="stat"><div class="stat-value">10</div><div class="stat-label">Total</div></div>
+            <div class="stat critical"><div class="stat-value">0</div><div class="stat-label">Critical</div></div>
+            <div class="stat high"><div class="stat-value">2</div><div class="stat-label">High</div></div>
+            <div class="stat medium"><div class="stat-value">5</div><div class="stat-label">Medium</div></div>
+            <div class="stat low"><div class="stat-value">3</div><div class="stat-label">Low</div></div>
+        </div>
+
+        <div class="reviewers">Reviewers: claude, gemini, codex</div>
+<div class="section"><div class="section-title high">High</div>
+<div class="issue">
+                <div class="issue-title">NULL pointer dereference before NULL check in ossl_lms_key_to_text()</div>
+                <div class="issue-location">providers/implementations/encode_decode/lms_codecs.c:145-148</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CODEX</span>
+                    <span class="confidence-badge trusted">置信度: 可信</span>
+                </div>
+                <pre>int ossl_lms_key_to_text(BIO *out, const LMS_KEY *key, int selection)
+{
+    const LMS_PARAMS *lms_params = key-&gt;lms_params;
+    const LM_OTS_PARAMS *ots_params = key-&gt;ots_params;
+
+    if (out == NULL || key == NULL) {
+        ERR_raise(ERR_LIB_PROV, ERR_R_PASSED_NULL_PARAMETER);
+        return 0;
+    }</pre>
+                <div class="problem"><strong>Issue:</strong> The function dereferences `key` to fetch `lms_params` and `ots_params` on lines 147-148, but the NULL check for `key` is on line 150. If called with a NULL key, the function will crash instead of returning the intended error.</div>
+                <div class="fix-label">Fix:</div><pre>int ossl_lms_key_to_text(BIO *out, const LMS_KEY *key, int selection)
+{
+    const LMS_PARAMS *lms_params;
+    const LM_OTS_PARAMS *ots_params;
+
+    if (out == NULL || key == NULL) {
+        ERR_raise(ERR_LIB_PROV, ERR_R_PASSED_NULL_PARAMETER);
+        return 0;
+    }
+
+    lms_params = key-&gt;lms_params;
+    ots_params = key-&gt;ots_params;</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">ossl_lms_i2d_pubkey() always uses 32-byte header regardless of key digest size</div>
+                <div class="issue-location">providers/implementations/encode_decode/lms_codecs.c:117-136</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CLAUDE, GEMINI</span>
+                    <span class="confidence-badge trusted">置信度: 可信</span>
+                </div>
+                <pre>int ossl_lms_i2d_pubkey(const LMS_KEY *key, unsigned char **out)
+{
+    if (key-&gt;pub.encoded == NULL || key-&gt;pub.encodedlen == 0) {
+        ERR_raise_data(ERR_LIB_PROV, PROV_R_NOT_A_PUBLIC_KEY,
+            "no %s public key data available", "LMS");
+        return 0;
+    }
+    if (out != NULL) {
+        uint8_t *buf = OPENSSL_malloc(HSS_HEADER + key-&gt;pub.encodedlen);
+
+        if (buf == NULL)
+            return 0;
+        /* Output HSS format which has a 4 byte value (L = 1) */
+        memcpy(buf, hss_lms_32_spkifmt.header + sizeof(hss_lms_32_spkifmt.header) - HSS_HEADER, HSS_HEADER);</pre>
+                <div class="problem"><strong>Issue:</strong> The function always copies the HSS header from `hss_lms_32_spkifmt.header` on line 130, regardless of the actual key's digest size (n=24 or n=32). This causes incorrect ASN.1 encoding for keys using 24-byte digest, as the length byte in the SPKI header will be wrong.</div>
+                <div class="fix-label">Fix:</div><pre>int ossl_lms_i2d_pubkey(const LMS_KEY *key, unsigned char **out)
+{
+    const uint8_t *header_src;
+    
+    if (key-&gt;pub.encoded == NULL || key-&gt;pub.encodedlen == 0) {
+        ERR_raise_data(ERR_LIB_PROV, PROV_R_NOT_A_PUBLIC_KEY,
+            "no %s public key data available", "LMS");
+        return 0;
+    }
+    if (key-&gt;lms_params == NULL) {
+        ERR_raise_data(ERR_LIB_PROV, PROV_R_BAD_ENCODING,
+            "LMS key parameters not available");
+        return 0;
+    }
+    if (out != NULL) {
+        uint8_t *buf = OPENSSL_malloc(HSS_HEADER + key-&gt;pub.encodedlen);
+
+        if (buf == NULL)
+            return 0;
+        /* Select the correct header based on digest size */
+        header_src = (key-&gt;lms_params-&gt;n == 24) 
+                    ? hss_lms_24_spkifmt.header + sizeof(hss_lms_24_spkifmt.header) - HSS_HEADER
+                    : hss_lms_32_spkifmt.header + sizeof(hss_lms_32_spkifmt.header) - HSS_HEADER;
+        memcpy(buf, header_src, HSS_HEADER);</pre>
+            </div>
+</div>
+<div class="section"><div class="section-title medium">Medium</div>
+<div class="issue">
+                <div class="issue-title">Missing NULL check in ossl_lms_key_get_pub()</div>
+                <div class="issue-location">crypto/lms/lms_key.c:111-114</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CLAUDE</span>
+                    <span class="confidence-badge likely">置信度: 较可信</span>
+                </div>
+                <pre>const uint8_t *ossl_lms_key_get_pub(const LMS_KEY *key)
+{
+    return key-&gt;pub.encoded;
+}</pre>
+                <div class="problem"><strong>Issue:</strong> The function returns `key->pub.encoded` without checking if `key` is NULL. While the caller in `lms_get_params()` does check for NULL, defensive programming suggests the getter should handle NULL input gracefully.</div>
+                <div class="fix-label">Fix:</div><pre>const uint8_t *ossl_lms_key_get_pub(const LMS_KEY *key)
+{
+    if (key == NULL)
+        return NULL;
+    return key-&gt;pub.encoded;
+}</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">Getter functions don't validate lms_params and ots_params pointers</div>
+                <div class="issue-location">crypto/lms/lms_key.c:117-130</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CLAUDE</span>
+                    <span class="confidence-badge likely">置信度: 较可信</span>
+                </div>
+                <pre>size_t ossl_lms_key_get_pub_len(const LMS_KEY *key)
+{
+    return 24 + key-&gt;lms_params-&gt;n;
+}
+
+size_t ossl_lms_key_get_collision_strength_bits(const LMS_KEY *key)
+{
+    return key-&gt;lms_params-&gt;n * 8;
+}
+
+size_t ossl_lms_key_get_sig_len(const LMS_KEY *key)
+{
+    return 12 + key-&gt;lms_params-&gt;n * (1 + key-&gt;ots_params-&gt;p + key-&gt;lms_params-&gt;h);
+}</pre>
+                <div class="problem"><strong>Issue:</strong> The functions `ossl_lms_key_get_pub_len()`, `ossl_lms_key_get_collision_strength_bits()`, and `ossl_lms_key_get_sig_len()` dereference `key->lms_params` and `key->ots_params` without NULL checks. These are called from `lms_get_params()` which only validates that `key` is non-NULL, not that its internal pointers are initialized. A partially initialized LMS_KEY could cause a crash.</div>
+                <div class="fix-label">Fix:</div><pre>size_t ossl_lms_key_get_pub_len(const LMS_KEY *key)
+{
+    if (key == NULL || key-&gt;lms_params == NULL)
+        return 0;
+    return 24 + key-&gt;lms_params-&gt;n;
+}
+
+size_t ossl_lms_key_get_collision_strength_bits(const LMS_KEY *key)
+{
+    if (key == NULL || key-&gt;lms_params == NULL)
+        return 0;
+    return key-&gt;lms_params-&gt;bit_strength;
+}
+
+size_t ossl_lms_key_get_sig_len(const LMS_KEY *key)
+{
+    if (key == NULL || key-&gt;lms_params == NULL || key-&gt;ots_params == NULL)
+        return 0;
+    return 12 + key-&gt;lms_params-&gt;n * (1 + key-&gt;ots_params-&gt;p + key-&gt;lms_params-&gt;h);
+}</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">Missing NULL checks in setdigest()</div>
+                <div class="issue-location">providers/implementations/signature/lms_signature.c:67-88</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CLAUDE</span>
+                    <span class="confidence-badge likely">置信度: 较可信</span>
+                </div>
+                <pre>static int setdigest(PROV_LMS_CTX *ctx, const char *digestname)
+{
+    /*
+     * Assume that only one digest can be used by LMS.
+     * Set the digest to the one contained in the public key.
+     * If the optional digestname passed in by the user is different
+     * then return an error.
+     */
+    LMS_KEY *key = ctx-&gt;key;
+    const char *pub_digestname = key-&gt;ots_params-&gt;digestname;</pre>
+                <div class="problem"><strong>Issue:</strong> The `setdigest()` function accesses `ctx->key->ots_params->digestname` without checking if `ctx->key` or `ctx->key->ots_params` are NULL. While the caller `lms_verify_msg_init()` checks for NULL key, a partially initialized key with NULL `ots_params` would cause a crash.</div>
+                <div class="fix-label">Fix:</div><pre>static int setdigest(PROV_LMS_CTX *ctx, const char *digestname)
+{
+    /*
+     * Assume that only one digest can be used by LMS.
+     * Set the digest to the one contained in the public key.
+     * If the optional digestname passed in by the user is different
+     * then return an error.
+     */
+    LMS_KEY *key = ctx-&gt;key;
+    
+    if (key == NULL || key-&gt;ots_params == NULL)
+        return 0;
+    const char *pub_digestname = key-&gt;ots_params-&gt;digestname;</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">ossl_lms_key_get_collision_strength_bits() ignores bit_strength field</div>
+                <div class="issue-location">crypto/lms/lms_key.c:122-125</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CODEX, CLAUDE, GEMINI</span>
+                    <span class="confidence-badge trusted">置信度: 可信</span>
+                </div>
+                <pre>size_t ossl_lms_key_get_collision_strength_bits(const LMS_KEY *key)
+{
+    return key-&gt;lms_params-&gt;n * 8;
+}</pre>
+                <div class="problem"><strong>Issue:</strong> The function returns `key->lms_params->n * 8` which equals the digest output size (256 or 192 bits), but the `lms_params` table has a `bit_strength` field that contains correct collision resistance values (128 or 96 bits). Using the digest size instead of collision resistance overstates security strength for policy checks.</div>
+                <div class="fix-label">Fix:</div><pre>size_t ossl_lms_key_get_collision_strength_bits(const LMS_KEY *key)
+{
+    if (key == NULL || key-&gt;lms_params == NULL)
+        return 0;
+    return key-&gt;lms_params-&gt;bit_strength;
+}</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">SHAKE security strength uses digest size instead of collision resistance</div>
+                <div class="issue-location">crypto/lms/lms_params.c:24-34</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: GEMINI</span>
+                    <span class="confidence-badge evaluate">置信度: 需评估</span>
+                </div>
+                <pre>{ OSSL_LMS_TYPE_SHAKE_N32_H5, "SHAKE-256", 32, 5, 256 },
+{ OSSL_LMS_TYPE_SHAKE_N32_H10, "SHAKE-256", 32, 10, 256 },
+{ OSSL_LMS_TYPE_SHAKE_N32_H15, "SHAKE-256", 32, 15, 256 },
+{ OSSL_LMS_TYPE_SHAKE_N32_H20, "SHAKE-256", 32, 20, 256 },
+{ OSSL_LMS_TYPE_SHAKE_N32_H25, "SHAKE-256", 32, 25, 256 },
+/* SHAKE-256/192 */
+{ OSSL_LMS_TYPE_SHAKE_N24_H5, "SHAKE-256", 24, 5, 192 },
+{ OSSL_LMS_TYPE_SHAKE_N24_H10, "SHAKE-256", 24, 10, 192 },
+{ OSSL_LMS_TYPE_SHAKE_N24_H15, "SHAKE-256", 24, 15, 192 },
+{ OSSL_LMS_TYPE_SHAKE_N24_H20, "SHAKE-256", 24, 20, 192 },
+{ OSSL_LMS_TYPE_SHAKE_N24_H25, "SHAKE-256", 24, 25, 192 },</pre>
+                <div class="problem"><strong>Issue:</strong> The SHAKE-based LMS parameters list 256/192 bit_strength, but collision resistance for hash-based signatures should be n/2. For SHAKE256 with 32-byte output, collision resistance is 128 bits, not 256. For 24-byte output, it's 96 bits, not 192. The SHA256 entries correctly use 128/96, but SHAKE entries use 256/192.</div>
+                <div class="fix-label">Fix:</div><pre>/* Collision resistance is n/2 for hash-based signatures */
+{ OSSL_LMS_TYPE_SHAKE_N32_H5, "SHAKE-256", 32, 5, 128 },
+{ OSSL_LMS_TYPE_SHAKE_N32_H10, "SHAKE-256", 32, 10, 128 },
+{ OSSL_LMS_TYPE_SHAKE_N32_H15, "SHAKE-256", 32, 15, 128 },
+{ OSSL_LMS_TYPE_SHAKE_N32_H20, "SHAKE-256", 32, 20, 128 },
+{ OSSL_LMS_TYPE_SHAKE_N32_H25, "SHAKE-256", 32, 25, 128 },
+/* SHAKE-256/192 */
+{ OSSL_LMS_TYPE_SHAKE_N24_H5, "SHAKE-256", 24, 5, 96 },
+{ OSSL_LMS_TYPE_SHAKE_N24_H10, "SHAKE-256", 24, 10, 96 },
+{ OSSL_LMS_TYPE_SHAKE_N24_H15, "SHAKE-256", 24, 15, 96 },
+{ OSSL_LMS_TYPE_SHAKE_N24_H20, "SHAKE-256", 24, 20, 96 },
+{ OSSL_LMS_TYPE_SHAKE_N24_H25, "SHAKE-256", 24, 25, 96 },</pre>
+            </div>
+</div>
+<div class="section"><div class="section-title low">Low</div>
+<div class="issue">
+                <div class="issue-title">Missing NULL pointer check for pk parameter</div>
+                <div class="issue-location">providers/implementations/encode_decode/lms_codecs.c:87-115</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CLAUDE</span>
+                    <span class="confidence-badge likely">置信度: 较可信</span>
+                </div>
+                <pre>LMS_KEY *
+ossl_lms_d2i_PUBKEY(const uint8_t *pk, int pk_len, PROV_CTX *provctx)
+{
+    OSSL_LIB_CTX *libctx = PROV_LIBCTX_OF(provctx);
+    LMS_KEY *ret;
+    const LMS_SPKI_FMT *spkifmt;
+
+    if (pk_len &lt;= 0)
+        return NULL;
+    spkifmt = find_spkifmt(pk, pk_len);</pre>
+                <div class="problem"><strong>Issue:</strong> The function `ossl_lms_d2i_PUBKEY()` does not check if `pk` is NULL before passing it to `memcmp()` in `find_spkifmt()`. If a NULL pointer is passed, `memcmp()` will crash.</div>
+                <div class="fix-label">Fix:</div><pre>LMS_KEY *
+ossl_lms_d2i_PUBKEY(const uint8_t *pk, int pk_len, PROV_CTX *provctx)
+{
+    OSSL_LIB_CTX *libctx = PROV_LIBCTX_OF(provctx);
+    LMS_KEY *ret;
+    const LMS_SPKI_FMT *spkifmt;
+
+    if (pk == NULL || pk_len &lt;= HSS_LMS_SPKI_OVERHEAD)
+        return NULL;
+    spkifmt = find_spkifmt(pk, pk_len);</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">Trace printf may dereference NULL description pointer</div>
+                <div class="issue-location">crypto/encode_decode/decoder_pkey.c:422-427</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CODEX</span>
+                    <span class="confidence-badge likely">置信度: 较可信</span>
+                </div>
+                <pre>OSSL_TRACE_BEGIN(DECODER)
+{
+    BIO_printf(trc_out,
+        "(Collecting KeyManager %s %s [id %d]:\n",
+        keymgmt-&gt;description, keymgmt-&gt;type_name, keymgmt-&gt;id);
+}</pre>
+                <div class="problem"><strong>Issue:</strong> `keymgmt->description` can be NULL (algorithm descriptions are optional in OpenSSL). Passing NULL to `%s` format specifier is undefined behavior and can crash on some libc implementations when decoder tracing is enabled.</div>
+                <div class="fix-label">Fix:</div><pre>OSSL_TRACE_BEGIN(DECODER)
+{
+    const char *desc = keymgmt-&gt;description != NULL ? keymgmt-&gt;description : "";
+    BIO_printf(trc_out,
+        "(Collecting KeyManager %s %s [id %d]:\n",
+        desc, keymgmt-&gt;type_name, keymgmt-&gt;id);
+}</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">Commented out code suggests incomplete implementation</div>
+                <div class="issue-location">providers/implementations/signature/lms_signature.c:128-142</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CLAUDE</span>
+                    <span class="confidence-badge evaluate">置信度: 需评估</span>
+                </div>
+                <pre>static int lms_digest_verify_init(void *vctx, const char *mdname, void *vkey,
+    const OSSL_PARAM params[])
+{
+    PROV_LMS_CTX *ctx = (PROV_LMS_CTX *)vctx;
+
+    if (mdname != NULL &amp;&amp; mdname[0] != '\0') {
+        ERR_raise_data(ERR_LIB_PROV, PROV_R_INVALID_DIGEST,
+            "Explicit digest not supported for LMS operations");
+        return 0;
+    }
+    if (vkey == NULL &amp;&amp; ctx-&gt;key != NULL)
+        return 1; /* lms_set_ctx_params(ctx, params); */
+
+    return lms_verify_msg_init(vctx, vkey, params);
+}</pre>
+                <div class="problem"><strong>Issue:</strong> Line 139 contains commented out code `/* lms_set_ctx_params(ctx, params); */` suggesting the `params` argument should be processed when `vkey == NULL && ctx->key != NULL`. Currently, the params are silently ignored, which may lead to unexpected behavior.</div>
+                <div class="fix-label">Fix:</div><pre>static int lms_digest_verify_init(void *vctx, const char *mdname, void *vkey,
+    const OSSL_PARAM params[])
+{
+    PROV_LMS_CTX *ctx = (PROV_LMS_CTX *)vctx;
+
+    if (mdname != NULL &amp;&amp; mdname[0] != '\0') {
+        ERR_raise_data(ERR_LIB_PROV, PROV_R_INVALID_DIGEST,
+            "Explicit digest not supported for LMS operations");
+        return 0;
+    }
+    if (vkey == NULL &amp;&amp; ctx-&gt;key != NULL) {
+        /* Process params if provided - currently no params are supported */
+        if (params != NULL &amp;&amp; OSSL_PARAM_locate_const(params, OSSL_SIGNATURE_PARAM_DIGEST) != NULL) {
+            ERR_raise_data(ERR_LIB_PROV, PROV_R_INVALID_DIGEST,
+                "Explicit digest not supported for LMS operations");
+            return 0;
+        }
+        return 1;
+    }
+
+    return lms_verify_msg_init(vctx, vkey, params);
+}</pre>
+            </div>
+</div>
+</div></body></html>

@@ -1,0 +1,32 @@
+[
+  {
+    "source": "codex",
+    "file": "crypto/lms/lms_key.c",
+    "line": "122-124",
+    "severity": "medium",
+    "title": "LMS security bits overstated for SHA256 variants",
+    "problem": "`ossl_lms_key_get_collision_strength_bits()` returns `n * 8`, which equals the digest output size, not the collision strength. For SHA256-based LMS (n=32/24), this reports 256/192 bits instead of the intended 128/96 (as reflected by the new `bit_strength` field). This feeds `OSSL_PKEY_PARAM_SECURITY_BITS` via `lms_get_params`, potentially bypassing security policy checks.",
+    "code": "size_t ossl_lms_key_get_collision_strength_bits(const LMS_KEY *key)\n{\n    return key->lms_params->n * 8;\n}",
+    "fix": "size_t ossl_lms_key_get_collision_strength_bits(const LMS_KEY *key)\n{\n    return key->lms_params->bit_strength;\n}"
+  },
+  {
+    "source": "codex",
+    "file": "providers/implementations/encode_decode/lms_codecs.c",
+    "line": "145-148",
+    "severity": "low",
+    "title": "NULL dereference before NULL check in LMS text encoder",
+    "problem": "`ossl_lms_key_to_text()` dereferences `key` to fetch `lms_params` and `ots_params` before validating `key` is non-NULL. If called with a NULL key, it will crash instead of returning the intended error.",
+    "code": "int ossl_lms_key_to_text(BIO *out, const LMS_KEY *key, int selection)\n{\n    const LMS_PARAMS *lms_params = key->lms_params;\n    const LM_OTS_PARAMS *ots_params = key->ots_params;\n\n    if (out == NULL || key == NULL) {\n        ERR_raise(ERR_LIB_PROV, ERR_R_PASSED_NULL_PARAMETER);\n        return 0;\n    }",
+    "fix": "int ossl_lms_key_to_text(BIO *out, const LMS_KEY *key, int selection)\n{\n    const LMS_PARAMS *lms_params;\n    const LM_OTS_PARAMS *ots_params;\n\n    if (out == NULL || key == NULL) {\n        ERR_raise(ERR_LIB_PROV, ERR_R_PASSED_NULL_PARAMETER);\n        return 0;\n    }\n\n    lms_params = key->lms_params;\n    ots_params = key->ots_params;"
+  },
+  {
+    "source": "codex",
+    "file": "crypto/encode_decode/decoder_pkey.c",
+    "line": "422-426",
+    "severity": "low",
+    "title": "Trace printf may dereference NULL description",
+    "problem": "`keymgmt->description` can be NULL (algorithm descriptions are optional). Passing NULL to `%s` is undefined and can crash on some libc implementations when decoder tracing is enabled.",
+    "code": "BIO_printf(trc_out,\n    \"(Collecting KeyManager %s %s [id %d]:\\n\",\n    keymgmt->description, keymgmt->type_name, keymgmt->id);",
+    "fix": "const char *desc = keymgmt->description != NULL ? keymgmt->description : \"\";\nBIO_printf(trc_out,\n    \"(Collecting KeyManager %s %s [id %d]:\\n\",\n    desc, keymgmt->type_name, keymgmt->id);"
+  }
+]

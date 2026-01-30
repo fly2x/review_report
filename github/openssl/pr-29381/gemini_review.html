@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Code Review: openssl/openssl#29381 - GEMINI</title>
+    <style>
+        :root { --critical: #dc2626; --high: #ea580c; --medium: #ca8a04; --low: #65a30d; }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: system-ui, sans-serif; background: #f8fafc; color: #1e293b; padding: 2rem; line-height: 1.6; }
+        .container { max-width: 900px; margin: 0 auto; }
+        h1 { font-size: 1.5rem; margin-bottom: 0.5rem; }
+        .subtitle { color: #64748b; margin-bottom: 2rem; }
+        .section { margin-bottom: 2rem; }
+        .section-title { font-size: 1.1rem; font-weight: 600; padding: 0.5rem 1rem; border-radius: 0.5rem 0.5rem 0 0; color: white; }
+        .section-title.critical { background: var(--critical); }
+        .section-title.high { background: var(--high); }
+        .section-title.medium { background: var(--medium); }
+        .section-title.low { background: var(--low); }
+        .issue { background: white; border: 1px solid #e2e8f0; border-top: none; padding: 1rem; }
+        .issue:last-child { border-radius: 0 0 0.5rem 0.5rem; }
+        .issue-title { font-weight: 600; margin-bottom: 0.25rem; }
+        .issue-location { font-family: monospace; font-size: 0.875rem; color: #64748b; margin-bottom: 0.75rem; }
+        .issue-source { font-size: 0.75rem; color: #94a3b8; margin-top: 0.5rem; }
+        pre { background: #1e293b; color: #e2e8f0; padding: 0.75rem; border-radius: 0.375rem; overflow-x: auto; font-size: 0.875rem; margin: 0.5rem 0; }
+        .problem { margin: 0.75rem 0; }
+        .fix-label { font-weight: 600; margin-top: 0.75rem; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Code Review: openssl/openssl#29381 - GEMINI</h1>
+        <div class="subtitle"> Added LMS support for OpenSSL commandline signature verification using pkeyutl.</div>
+<div class="section"><div class="section-title high">High</div>
+<div class="issue">
+                <div class="issue-title">ossl_lms_i2d_pubkey violates i2d semantics and leaks memory</div>
+                <div class="issue-location">providers/implementations/encode_decode/lms_codecs.c:117-136</div>
+                <pre>int ossl_lms_i2d_pubkey(const LMS_KEY *key, unsigned char **out)
+{
+    if (key-&gt;pub.encoded == NULL || key-&gt;pub.encodedlen == 0) {
+        ERR_raise_data(ERR_LIB_PROV, PROV_R_NOT_A_PUBLIC_KEY,
+            "no %s public key data available", "LMS");
+        return 0;
+    }
+    if (out != NULL) {
+        uint8_t *buf = OPENSSL_malloc(HSS_HEADER + key-&gt;pub.encodedlen);
+
+        if (buf == NULL)
+            return 0;
+        /* Output HSS format which has a 4 byte value (L = 1) */
+        memcpy(buf, hss_lms_32_spkifmt.header + sizeof(hss_lms_32_spkifmt.header) - HSS_HEADER, HSS_HEADER);
+        /* Output the LMS encoded public key */
+        memcpy(buf + HSS_HEADER, key-&gt;pub.encoded, key-&gt;pub.encodedlen);
+        *out = buf;
+    }
+    return (int)key-&gt;pub.encodedlen + HSS_HEADER;
+}</pre>
+                <div class="problem"><strong>Issue:</strong> The function `ossl_lms_i2d_pubkey` does not follow the standard OpenSSL `i2d` calling convention. 
+1. It ignores the value of `*out` if `out` is not NULL, and always allocates a new buffer. If `*out` pointed to an existing buffer (as expected by many OpenSSL internal encoders), that pointer is overwritten, leading to a memory leak of the ignored buffer or incorrect writing behavior.
+2. It returns `0` on error, whereas `i2d` functions typically return a negative value on error, or `0` could be ambiguous. However, returning `0` for length is generally considered an error in this context.
+3. It does not support the mode where it writes to a user-provided buffer (incrementing the pointer).
+
+Calls from `encode_key2any.c` (via `lms_spki_pub_to_der`) might expect standard `i2d` behavior (allocation only if `*out` is NULL).</div>
+                <div class="fix-label">Fix:</div><pre>int ossl_lms_i2d_pubkey(const LMS_KEY *key, unsigned char **out)
+{
+    int len;
+    unsigned char *p;
+
+    if (key-&gt;pub.encoded == NULL || key-&gt;pub.encodedlen == 0) {
+        ERR_raise_data(ERR_LIB_PROV, PROV_R_NOT_A_PUBLIC_KEY,
+            "no %s public key data available", "LMS");
+        return -1;
+    }
+    
+    len = (int)key-&gt;pub.encodedlen + HSS_HEADER;
+
+    if (out == NULL)
+        return len;
+
+    if (*out == NULL) {
+        if ((*out = OPENSSL_malloc(len)) == NULL)
+            return -1;
+        p = *out;
+    } else {
+        p = *out;
+    }
+
+    /* Output HSS format which has a 4 byte value (L = 1) */
+    memcpy(p, hss_lms_32_spkifmt.header + sizeof(hss_lms_32_spkifmt.header) - HSS_HEADER, HSS_HEADER);
+    /* Output the LMS encoded public key */
+    memcpy(p + HSS_HEADER, key-&gt;pub.encoded, key-&gt;pub.encodedlen);
+
+    if (*out != p) /* If we didn't allocate, advance the pointer */
+        *out += len;
+        
+    return len;
+}</pre>
+                <div class="issue-source">Reviewer: gemini</div>
+            </div>
+</div>
+<div class="section"><div class="section-title medium">Medium</div>
+<div class="issue">
+                <div class="issue-title">Brittle manual parsing of SPKI header violates DER rules</div>
+                <div class="issue-location">providers/implementations/encode_decode/lms_codecs.c:81</div>
+                <pre>if (memcmp(pk, codecs[i].spkifmt-&gt;header, HSS_LMS_SPKI_OVERHEAD) == 0)
+            return codecs[i].spkifmt;</pre>
+                <div class="problem"><strong>Issue:</strong> The function `find_spkifmt` (and thus `ossl_lms_d2i_PUBKEY`) uses `memcmp` to verify the SubjectPublicKeyInfo (SPKI) header against a hardcoded byte sequence. This rejects valid DER/BER encodings that use long-form length encoding (e.g., `81 4E` instead of `4E`) or other valid variations. It also relies on the exact byte match of the AlgorithmIdentifier OID and parameters, making it brittle. OpenSSL provides `d2i_X509_PUBKEY` for robust parsing of SPKI structures.</div>
+                <div class="fix-label">Fix:</div><pre>/* Use d2i_X509_PUBKEY to parse the header robustly */
+LMS_KEY *
+ossl_lms_d2i_PUBKEY(const uint8_t *pk, int pk_len, PROV_CTX *provctx)
+{
+    OSSL_LIB_CTX *libctx = PROV_LIBCTX_OF(provctx);
+    LMS_KEY *ret = NULL;
+    X509_PUBKEY *xpk = NULL;
+    const unsigned char *p = pk;
+    const unsigned char *pk_data;
+    int pk_data_len;
+    ASN1_OBJECT *oid;
+
+    /* robustly decode SPKI */
+    if ((xpk = d2i_X509_PUBKEY(NULL, &amp;p, pk_len)) == NULL)
+        return NULL;
+
+    if (!X509_PUBKEY_get0_param(&amp;oid, &amp;pk_data, &amp;pk_data_len, NULL, xpk))
+        goto err;
+
+    /* Verify OID is id-ad-hss-lms-hash-sig (1.2.840.113549.1.9.16.3.17) */
+    /* Implementation needs the OID object or NID check here */
+    /* For simplicity in this context, assuming we can check NID or data */
+    
+    if ((ret = ossl_lms_key_new(libctx)) == NULL)
+        goto err;
+
+    /* Skip the HSS L=1 header (4 bytes) contained in the BIT STRING if present */
+    /* The hardcoded check expected the BIT STRING content to start with 00 00 00 01 */
+    if (pk_data_len &lt; 4) 
+        goto err;
+    
+    /* Check HSS L=1 marker 00 00 00 01 */
+    /* Note: Previous code implied the input was SPKI, and extracted data after header */
+    
+    if (pk_data[3] != 1) { /* Simplified check, strictly should check 00 00 00 01 */
+         /* Handle error */
+    }
+
+    if (!ossl_lms_pubkey_decode(pk_data + 4, pk_data_len - 4, ret)) {
+        ERR_raise_data(ERR_LIB_PROV, PROV_R_BAD_ENCODING,
+            "error parsing %s public key from input SPKI", "LMS");
+        ossl_lms_key_free(ret);
+        ret = NULL;
+    }
+
+err:
+    X509_PUBKEY_free(xpk);
+    return ret;
+}</pre>
+                <div class="issue-source">Reviewer: gemini</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">OSSL_PKEY_PARAM_PUB_KEY returns incomplete HSS public key</div>
+                <div class="issue-location">providers/implementations/keymgmt/lms_kmgmt.c:184</div>
+                <pre>if (p.pubkey != NULL) {
+        d = ossl_lms_key_get_pub(key);
+        if (d != NULL) {
+            len = ossl_lms_key_get_pub_len(key);
+            if (!OSSL_PARAM_set_octet_string(p.pubkey, d, len))
+                return 0;
+        }
+    }</pre>
+                <div class="problem"><strong>Issue:</strong> `lms_get_params` exports the raw LMS public key (without the HSS L=1 header) for the `OSSL_PKEY_PARAM_PUB_KEY` parameter. However, `EVP_PKEY_HSS_LMS` keys are expected to be HSS keys (NIST SP 800-208). The standard representation of an HSS public key includes the 4-byte header (L || public_key). Exporting it without the header creates an invalid key for external consumers expecting the HSS format.</div>
+                <div class="fix-label">Fix:</div><pre>if (p.pubkey != NULL) {
+        d = ossl_lms_key_get_pub(key);
+        if (d != NULL) {
+            unsigned char buf[64]; /* Enough for HSS header + largest LMS key */
+            size_t lms_len = ossl_lms_key_get_pub_len(key);
+            
+            if (lms_len + 4 &gt; sizeof(buf)) /* Should not happen with current params */
+                return 0;
+
+            /* Prepend HSS Header (L=1) */
+            memset(buf, 0, 3);
+            buf[3] = 1;
+            memcpy(buf + 4, d, lms_len);
+            
+            if (!OSSL_PARAM_set_octet_string(p.pubkey, buf, lms_len + 4))
+                return 0;
+        }
+    }</pre>
+                <div class="issue-source">Reviewer: gemini</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">Incorrect security strength for SHAKE instances</div>
+                <div class="issue-location">crypto/lms/lms_params.c:22-26</div>
+                <pre>{ OSSL_LMS_TYPE_SHAKE_N32_H5, "SHAKE-256", 32, 5, 256 },
+    { OSSL_LMS_TYPE_SHAKE_N32_H10, "SHAKE-256", 32, 10, 256 },
+    ...
+    /* SHAKE-256/192 */
+    { OSSL_LMS_TYPE_SHAKE_N24_H5, "SHAKE-256", 24, 5, 192 },</pre>
+                <div class="problem"><strong>Issue:</strong> The bit strength for SHAKE-based LMS parameters is listed as 256 or 192 bits, which corresponds to the output length (N) * 8. However, the security strength of a signature scheme is typically defined by its collision resistance. For SHAKE256 with output length $d$, the collision resistance is $\min(d/2, 256)$ (or 128 for $d=256$). Listing 256 bits for N=32 (256-bit output) overstates the collision resistance, which is 128 bits. Similarly for N=24, it should be 96 bits, not 192.</div>
+                <div class="fix-label">Fix:</div><pre>/* Collision resistance is n/2 for SHAKE with length n */
+    { OSSL_LMS_TYPE_SHAKE_N32_H5, "SHAKE-256", 32, 5, 128 },
+    { OSSL_LMS_TYPE_SHAKE_N32_H10, "SHAKE-256", 32, 10, 128 },
+    { OSSL_LMS_TYPE_SHAKE_N32_H15, "SHAKE-256", 32, 15, 128 },
+    { OSSL_LMS_TYPE_SHAKE_N32_H20, "SHAKE-256", 32, 20, 128 },
+    { OSSL_LMS_TYPE_SHAKE_N32_H25, "SHAKE-256", 32, 25, 128 },
+    /* SHAKE-256/192 */
+    { OSSL_LMS_TYPE_SHAKE_N24_H5, "SHAKE-256", 24, 5, 96 },
+    { OSSL_LMS_TYPE_SHAKE_N24_H10, "SHAKE-256", 24, 10, 96 },
+    { OSSL_LMS_TYPE_SHAKE_N24_H15, "SHAKE-256", 24, 15, 96 },
+    { OSSL_LMS_TYPE_SHAKE_N24_H20, "SHAKE-256", 24, 20, 96 },
+    { OSSL_LMS_TYPE_SHAKE_N24_H25, "SHAKE-256", 24, 25, 96 },</pre>
+                <div class="issue-source">Reviewer: gemini</div>
+            </div>
+</div>
+</div></body></html>

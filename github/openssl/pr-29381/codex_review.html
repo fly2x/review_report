@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Code Review: openssl/openssl#29381 - CODEX</title>
+    <style>
+        :root { --critical: #dc2626; --high: #ea580c; --medium: #ca8a04; --low: #65a30d; }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: system-ui, sans-serif; background: #f8fafc; color: #1e293b; padding: 2rem; line-height: 1.6; }
+        .container { max-width: 900px; margin: 0 auto; }
+        h1 { font-size: 1.5rem; margin-bottom: 0.5rem; }
+        .subtitle { color: #64748b; margin-bottom: 2rem; }
+        .section { margin-bottom: 2rem; }
+        .section-title { font-size: 1.1rem; font-weight: 600; padding: 0.5rem 1rem; border-radius: 0.5rem 0.5rem 0 0; color: white; }
+        .section-title.critical { background: var(--critical); }
+        .section-title.high { background: var(--high); }
+        .section-title.medium { background: var(--medium); }
+        .section-title.low { background: var(--low); }
+        .issue { background: white; border: 1px solid #e2e8f0; border-top: none; padding: 1rem; }
+        .issue:last-child { border-radius: 0 0 0.5rem 0.5rem; }
+        .issue-title { font-weight: 600; margin-bottom: 0.25rem; }
+        .issue-location { font-family: monospace; font-size: 0.875rem; color: #64748b; margin-bottom: 0.75rem; }
+        .issue-source { font-size: 0.75rem; color: #94a3b8; margin-top: 0.5rem; }
+        pre { background: #1e293b; color: #e2e8f0; padding: 0.75rem; border-radius: 0.375rem; overflow-x: auto; font-size: 0.875rem; margin: 0.5rem 0; }
+        .problem { margin: 0.75rem 0; }
+        .fix-label { font-weight: 600; margin-top: 0.75rem; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Code Review: openssl/openssl#29381 - CODEX</h1>
+        <div class="subtitle"> Added LMS support for OpenSSL commandline signature verification using pkeyutl.</div>
+<div class="section"><div class="section-title medium">Medium</div>
+<div class="issue">
+                <div class="issue-title">LMS security bits overstated for SHA256 variants</div>
+                <div class="issue-location">crypto/lms/lms_key.c:122-124</div>
+                <pre>size_t ossl_lms_key_get_collision_strength_bits(const LMS_KEY *key)
+{
+    return key-&gt;lms_params-&gt;n * 8;
+}</pre>
+                <div class="problem"><strong>Issue:</strong> `ossl_lms_key_get_collision_strength_bits()` returns `n * 8`, which equals the digest output size, not the collision strength. For SHA256-based LMS (n=32/24), this reports 256/192 bits instead of the intended 128/96 (as reflected by the new `bit_strength` field). This feeds `OSSL_PKEY_PARAM_SECURITY_BITS` via `lms_get_params`, potentially bypassing security policy checks.</div>
+                <div class="fix-label">Fix:</div><pre>size_t ossl_lms_key_get_collision_strength_bits(const LMS_KEY *key)
+{
+    return key-&gt;lms_params-&gt;bit_strength;
+}</pre>
+                <div class="issue-source">Reviewer: codex</div>
+            </div>
+</div>
+<div class="section"><div class="section-title low">Low</div>
+<div class="issue">
+                <div class="issue-title">NULL dereference before NULL check in LMS text encoder</div>
+                <div class="issue-location">providers/implementations/encode_decode/lms_codecs.c:145-148</div>
+                <pre>int ossl_lms_key_to_text(BIO *out, const LMS_KEY *key, int selection)
+{
+    const LMS_PARAMS *lms_params = key-&gt;lms_params;
+    const LM_OTS_PARAMS *ots_params = key-&gt;ots_params;
+
+    if (out == NULL || key == NULL) {
+        ERR_raise(ERR_LIB_PROV, ERR_R_PASSED_NULL_PARAMETER);
+        return 0;
+    }</pre>
+                <div class="problem"><strong>Issue:</strong> `ossl_lms_key_to_text()` dereferences `key` to fetch `lms_params` and `ots_params` before validating `key` is non-NULL. If called with a NULL key, it will crash instead of returning the intended error.</div>
+                <div class="fix-label">Fix:</div><pre>int ossl_lms_key_to_text(BIO *out, const LMS_KEY *key, int selection)
+{
+    const LMS_PARAMS *lms_params;
+    const LM_OTS_PARAMS *ots_params;
+
+    if (out == NULL || key == NULL) {
+        ERR_raise(ERR_LIB_PROV, ERR_R_PASSED_NULL_PARAMETER);
+        return 0;
+    }
+
+    lms_params = key-&gt;lms_params;
+    ots_params = key-&gt;ots_params;</pre>
+                <div class="issue-source">Reviewer: codex</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">Trace printf may dereference NULL description</div>
+                <div class="issue-location">crypto/encode_decode/decoder_pkey.c:422-426</div>
+                <pre>BIO_printf(trc_out,
+    "(Collecting KeyManager %s %s [id %d]:\n",
+    keymgmt-&gt;description, keymgmt-&gt;type_name, keymgmt-&gt;id);</pre>
+                <div class="problem"><strong>Issue:</strong> `keymgmt->description` can be NULL (algorithm descriptions are optional). Passing NULL to `%s` is undefined and can crash on some libc implementations when decoder tracing is enabled.</div>
+                <div class="fix-label">Fix:</div><pre>const char *desc = keymgmt-&gt;description != NULL ? keymgmt-&gt;description : "";
+BIO_printf(trc_out,
+    "(Collecting KeyManager %s %s [id %d]:\n",
+    desc, keymgmt-&gt;type_name, keymgmt-&gt;id);</pre>
+                <div class="issue-source">Reviewer: codex</div>
+            </div>
+</div>
+</div></body></html>

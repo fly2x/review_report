@@ -1,0 +1,112 @@
+[
+  {
+    "source": "claude",
+    "file": "crypto/lms/lms_key.c",
+    "line": "117-119",
+    "severity": "critical",
+    "title": "NULL pointer dereference in ossl_lms_key_get_pub_len()",
+    "problem": "The function `ossl_lms_key_get_pub_len()` dereferences `key->lms_params->n` without checking if `key->lms_params` is NULL. This function is called from `lms_get_params()` in lms_kmgmt.c before validating the key. If a partially initialized or corrupted LMS_KEY is passed, this will cause a NULL pointer dereference crash.",
+    "code": "size_t ossl_lms_key_get_pub_len(const LMS_KEY *key)\n{\n    return 24 + key->lms_params->n;\n}",
+    "fix": "size_t ossl_lms_key_get_pub_len(const LMS_KEY *key)\n{\n    if (key == NULL || key->lms_params == NULL)\n        return 0;\n    return 24 + key->lms_params->n;\n}"
+  },
+  {
+    "source": "claude",
+    "file": "crypto/lms/lms_key.c",
+    "line": "122-125",
+    "severity": "critical",
+    "title": "NULL pointer dereference in ossl_lms_key_get_collision_strength_bits()",
+    "problem": "The function dereferences `key->lms_params->n` without checking if `key->lms_params` is NULL. This is called from `lms_get_params()` in lms_kmgmt.c and can crash if the key is not fully initialized.",
+    "code": "size_t ossl_lms_key_get_collision_strength_bits(const LMS_KEY *key)\n{\n    return key->lms_params->n * 8;\n}",
+    "fix": "size_t ossl_lms_key_get_collision_strength_bits(const LMS_KEY *key)\n{\n    if (key == NULL || key->lms_params == NULL)\n        return 0;\n    return key->lms_params->n * 8;\n}"
+  },
+  {
+    "source": "claude",
+    "file": "crypto/lms/lms_key.c",
+    "line": "127-130",
+    "severity": "critical",
+    "title": "NULL pointer dereference in ossl_lms_key_get_sig_len()",
+    "problem": "The function dereferences `key->lms_params` and `key->ots_params` without NULL checks. This is called from `lms_get_params()` in lms_kmgmt.c and can crash if the key is not fully initialized.",
+    "code": "size_t ossl_lms_key_get_sig_len(const LMS_KEY *key)\n{\n    return 12 + key->lms_params->n * (1 + key->ots_params->p + key->lms_params->h);\n}",
+    "fix": "size_t ossl_lms_key_get_sig_len(const LMS_KEY *key)\n{\n    if (key == NULL || key->lms_params == NULL || key->ots_params == NULL)\n        return 0;\n    return 12 + key->lms_params->n * (1 + key->ots_params->p + key->lms_params->h);\n}"
+  },
+  {
+    "source": "claude",
+    "file": "crypto/lms/lms_key.c",
+    "line": "111-114",
+    "severity": "high",
+    "title": "NULL pointer dereference in ossl_lms_key_get_pub()",
+    "problem": "The function returns `key->pub.encoded` without checking if `key` is NULL. While `lms_get_params()` checks for NULL before calling this, defensive programming suggests the check should be in the getter function itself.",
+    "code": "const uint8_t *ossl_lms_key_get_pub(const LMS_KEY *key)\n{\n    return key->pub.encoded;\n}",
+    "fix": "const uint8_t *ossl_lms_key_get_pub(const LMS_KEY *key)\n{\n    if (key == NULL)\n        return NULL;\n    return key->pub.encoded;\n}"
+  },
+  {
+    "source": "claude",
+    "file": "providers/implementations/encode_decode/lms_codecs.c",
+    "line": "87-115",
+    "severity": "high",
+    "title": "Missing validation in ossl_lms_d2i_PUBKEY()",
+    "problem": "The function does not validate that `pk_len` matches the expected size after finding the spkifmt. If `pk_len` is exactly `HSS_LMS_SPKI_OVERHEAD`, the function skips the check on line 79 but passes the `find_spkifmt` check. Then on lines 103-104, it subtracts `sizeof(spkifmt->header)` which is a compile-time constant (24), but uses `pk_len` which could be exactly 24, resulting in a zero-length payload being passed to `ossl_lms_pubkey_decode()`. Additionally, there's no check that `pk` is not NULL before dereferencing it.",
+    "code": "LMS_KEY *\nossl_lms_d2i_PUBKEY(const uint8_t *pk, int pk_len, PROV_CTX *provctx)\n{\n    OSSL_LIB_CTX *libctx = PROV_LIBCTX_OF(provctx);\n    LMS_KEY *ret;\n    const LMS_SPKI_FMT *spkifmt;\n\n    if (pk_len <= 0)\n        return NULL;\n    spkifmt = find_spkifmt(pk, pk_len);\n    if (spkifmt == NULL)\n        return NULL;\n\n    if ((ret = ossl_lms_key_new(libctx)) == NULL)\n        return NULL;\n\n    pk += sizeof(spkifmt->header);\n    pk_len -= sizeof(spkifmt->header);\n\n    if (!ossl_lms_pubkey_decode(pk, (size_t)pk_len, ret)) {",
+    "fix": "LMS_KEY *\nossl_lms_d2i_PUBKEY(const uint8_t *pk, int pk_len, PROV_CTX *provctx)\n{\n    OSSL_LIB_CTX *libctx = PROV_LIBCTX_OF(provctx);\n    LMS_KEY *ret;\n    const LMS_SPKI_FMT *spkifmt;\n\n    if (pk == NULL || pk_len <= HSS_LMS_SPKI_OVERHEAD)\n        return NULL;\n    spkifmt = find_spkifmt(pk, pk_len);\n    if (spkifmt == NULL)\n        return NULL;\n\n    if ((ret = ossl_lms_key_new(libctx)) == NULL)\n        return NULL;\n\n    pk += sizeof(spkifmt->header);\n    pk_len -= sizeof(spkifmt->header);\n\n    if (!ossl_lms_pubkey_decode(pk, (size_t)pk_len, ret)) {"
+  },
+  {
+    "source": "claude",
+    "file": "providers/implementations/keymgmt/lms_kmgmt.c",
+    "line": "175-203",
+    "severity": "high",
+    "title": "Missing NULL checks before calling getter functions",
+    "problem": "The `lms_get_params()` function checks if `key == NULL` but then calls getter functions like `ossl_lms_key_get_pub_len()` which dereference `key->lms_params` and `key->ots_params` without checking if those pointers are NULL. If a partially initialized LMS_KEY object is passed (where `key` is not NULL but `lms_params` or `ots_params` are), this will cause a crash.",
+    "code": "static int lms_get_params(void *keydata, OSSL_PARAM params[])\n{\n    LMS_KEY *key = keydata;\n    const uint8_t *d;\n    size_t len;\n    struct lms_get_params_st p;\n\n    if (key == NULL || !lms_get_params_decoder(params, &p))\n        return 0;\n\n    if (p.bits != NULL\n        && !OSSL_PARAM_set_size_t(p.bits, 8 * ossl_lms_key_get_pub_len(key)))\n        return 0;\n\n    if (p.secbits != NULL\n        && !OSSL_PARAM_set_size_t(p.secbits, ossl_lms_key_get_collision_strength_bits(key)))\n        return 0;\n\n    if (p.maxsize != NULL\n        && !OSSL_PARAM_set_size_t(p.maxsize, ossl_lms_key_get_sig_len(key)))",
+    "fix": "static int lms_get_params(void *keydata, OSSL_PARAM params[])\n{\n    LMS_KEY *key = keydata;\n    const uint8_t *d;\n    size_t len;\n    struct lms_get_params_st p;\n\n    if (key == NULL || !lms_get_params_decoder(params, &p))\n        return 0;\n    \n    /* Validate that the key is properly initialized */\n    if (key->lms_params == NULL || key->ots_params == NULL)\n        return 0;\n\n    if (p.bits != NULL\n        && !OSSL_PARAM_set_size_t(p.bits, 8 * ossl_lms_key_get_pub_len(key)))\n        return 0;\n\n    if (p.secbits != NULL\n        && !OSSL_PARAM_set_size_t(p.secbits, ossl_lms_key_get_collision_strength_bits(key)))\n        return 0;\n\n    if (p.maxsize != NULL\n        && !OSSL_PARAM_set_size_t(p.maxsize, ossl_lms_key_get_sig_len(key)))"
+  },
+  {
+    "source": "claude",
+    "file": "providers/implementations/signature/lms_signature.c",
+    "line": "67-88",
+    "severity": "high",
+    "title": "Missing NULL check in setdigest()",
+    "problem": "The `setdigest()` function accesses `ctx->key->ots_params->digestname` without checking if `ctx->key` is NULL. The function is called from `lms_verify_msg_init()` which does check for NULL key, but `setdigest()` is not defensive. If the key's `ots_params` is NULL, this will crash.",
+    "code": "static int setdigest(PROV_LMS_CTX *ctx, const char *digestname)\n{\n    /*\n     * Assume that only one digest can be used by LMS.\n     * Set the digest to the one contained in the public key.\n     * If the optional digestname passed in by the user is different\n     * then return an error.\n     */\n    LMS_KEY *key = ctx->key;\n    const char *pub_digestname = key->ots_params->digestname;",
+    "fix": "static int setdigest(PROV_LMS_CTX *ctx, const char *digestname)\n{\n    /*\n     * Assume that only one digest can be used by LMS.\n     * Set the digest to the one contained in the public key.\n     * If the optional digestname passed in by the user is different\n     * then return an error.\n     */\n    LMS_KEY *key = ctx->key;\n    \n    if (key == NULL || key->ots_params == NULL)\n        return 0;\n    const char *pub_digestname = key->ots_params->digestname;"
+  },
+  {
+    "source": "claude",
+    "file": "providers/implementations/encode_decode/lms_codecs.c",
+    "line": "117-136",
+    "severity": "high",
+    "title": "Hardcoded header format in ossl_lms_i2d_pubkey()",
+    "problem": "The function always uses `hss_lms_32_spkifmt.header` when copying the HSS header, regardless of the actual key's digest size. If the key uses 24-byte digest (n=24), the wrong header format is copied, which will result in incorrect ASN.1 encoding. The function should check the key's `lms_params->n` value to select the correct header.",
+    "code": "int ossl_lms_i2d_pubkey(const LMS_KEY *key, unsigned char **out)\n{\n    if (key->pub.encoded == NULL || key->pub.encodedlen == 0) {\n        ERR_raise_data(ERR_LIB_PROV, PROV_R_NOT_A_PUBLIC_KEY,\n            \"no %s public key data available\", \"LMS\");\n        return 0;\n    }\n    if (out != NULL) {\n        uint8_t *buf = OPENSSL_malloc(HSS_HEADER + key->pub.encodedlen);\n\n        if (buf == NULL)\n            return 0;\n        /* Output HSS format which has a 4 byte value (L = 1) */\n        memcpy(buf, hss_lms_32_spkifmt.header + sizeof(hss_lms_32_spkifmt.header) - HSS_HEADER, HSS_HEADER);\n        /* Output the LMS encoded public key */\n        memcpy(buf + HSS_HEADER, key->pub.encoded, key->pub.encodedlen);\n        *out = buf;\n    }\n    return (int)key->pub.encodedlen + HSS_HEADER;\n}",
+    "fix": "int ossl_lms_i2d_pubkey(const LMS_KEY *key, unsigned char **out)\n{\n    const uint8_t *header_src;\n    \n    if (key->pub.encoded == NULL || key->pub.encodedlen == 0) {\n        ERR_raise_data(ERR_LIB_PROV, PROV_R_NOT_A_PUBLIC_KEY,\n            \"no %s public key data available\", \"LMS\");\n        return 0;\n    }\n    if (key->lms_params == NULL) {\n        ERR_raise_data(ERR_LIB_PROV, PROV_R_BAD_ENCODING,\n            \"LMS key parameters not available\");\n        return 0;\n    }\n    if (out != NULL) {\n        uint8_t *buf = OPENSSL_malloc(HSS_HEADER + key->pub.encodedlen);\n\n        if (buf == NULL)\n            return 0;\n        /* Select the correct header based on digest size */\n        header_src = (key->lms_params->n == 24) \n                    ? hss_lms_24_spkifmt.header + sizeof(hss_lms_24_spkifmt.header) - HSS_HEADER\n                    : hss_lms_32_spkifmt.header + sizeof(hss_lms_32_spkifmt.header) - HSS_HEADER;\n        /* Output HSS format which has a 4 byte value (L = 1) */\n        memcpy(buf, header_src, HSS_HEADER);\n        /* Output the LMS encoded public key */\n        memcpy(buf + HSS_HEADER, key->pub.encoded, key->pub.encodedlen);\n        *out = buf;\n    }\n    return (int)key->pub.encodedlen + HSS_HEADER;\n}"
+  },
+  {
+    "source": "claude",
+    "file": "providers/implementations/signature/lms_signature.c",
+    "line": "128-142",
+    "severity": "medium",
+    "title": "Missing call to lms_set_ctx_params in lms_digest_verify_init()",
+    "problem": "The comment on line 139 says `/* lms_set_ctx_params(ctx, params); */` suggesting this code should be called but it's commented out. This means the `params` argument is completely ignored when `vkey == NULL`, which could lead to unexpected behavior if parameters are passed.",
+    "code": "static int lms_digest_verify_init(void *vctx, const char *mdname, void *vkey,\n    const OSSL_PARAM params[])\n{\n    PROV_LMS_CTX *ctx = (PROV_LMS_CTX *)vctx;\n\n    if (mdname != NULL && mdname[0] != '\\0') {\n        ERR_raise_data(ERR_LIB_PROV, PROV_R_INVALID_DIGEST,\n            \"Explicit digest not supported for LMS operations\");\n        return 0;\n    }\n    if (vkey == NULL && ctx->key != NULL)\n        return 1; /* lms_set_ctx_params(ctx, params); */\n\n    return lms_verify_msg_init(vctx, vkey, params);\n}",
+    "fix": "static int lms_digest_verify_init(void *vctx, const char *mdname, void *vkey,\n    const OSSL_PARAM params[])\n{\n    PROV_LMS_CTX *ctx = (PROV_LMS_CTX *)vctx;\n\n    if (mdname != NULL && mdname[0] != '\\0') {\n        ERR_raise_data(ERR_LIB_PROV, PROV_R_INVALID_DIGEST,\n            \"Explicit digest not supported for LMS operations\");\n        return 0;\n    }\n    if (vkey == NULL && ctx->key != NULL) {\n        /* Process params if provided */\n        if (params != NULL) {\n            /* TODO: Implement lms_set_ctx_params or handle params here */\n            return 0;\n        }\n        return 1;\n    }\n\n    return lms_verify_msg_init(vctx, vkey, params);\n}"
+  },
+  {
+    "source": "claude",
+    "file": "crypto/encode_decode/decoder_pkey.c",
+    "line": "422-427",
+    "severity": "medium",
+    "title": "Missing closing parenthesis in BIO_printf trace",
+    "problem": "The `BIO_printf` call on line 424 is missing the closing parenthesis at the end of the format string. This will cause a compilation error or undefined behavior.",
+    "code": "OSSL_TRACE_BEGIN(DECODER)\n{\n    BIO_printf(trc_out,\n        \"(Collecting KeyManager %s %s [id %d]:\\n\",\n        keymgmt->description, keymgmt->type_name, keymgmt->id);\n}",
+    "fix": "OSSL_TRACE_BEGIN(DECODER)\n{\n    BIO_printf(trc_out,\n        \"(Collecting KeyManager %s %s [id %d])\\n\",\n        keymgmt->description, keymgmt->type_name, keymgmt->id);\n}"
+  },
+  {
+    "source": "claude",
+    "file": "providers/implementations/keymgmt/lms_kmgmt.c",
+    "line": "54",
+    "severity": "low",
+    "title": "Incorrect selection check in lms_has()",
+    "problem": "The code changes `LMS_POSSIBLE_SELECTIONS` to `OSSL_KEYMGMT_SELECT_KEYPAIR` but `OSSL_KEYMGMT_SELECT_KEYPAIR` includes both public and private key selections. Since LMS only supports public keys, checking `OSSL_KEYMGMT_SELECT_KEYPAIR` will incorrectly return 1 when only private key is selected. The original `LMS_POSSIBLE_SELECTIONS` (defined as `OSSL_KEYMGMT_SELECT_PUBLIC_KEY`) was more correct.",
+    "code": "static int lms_has(const void *keydata, int selection)\n{\n    LMS_KEY *key = keydata;\n\n    if (!ossl_prov_is_running() || key == NULL)\n        return 0;\n-    if ((selection & LMS_POSSIBLE_SELECTIONS) == 0)\n+    if ((selection & OSSL_KEYMGMT_SELECT_KEYPAIR) == 0)\n        return 1; /* the selection is not missing */",
+    "fix": "static int lms_has(const void *keydata, int selection)\n{\n    LMS_KEY *key = keydata;\n\n    if (!ossl_prov_is_running() || key == NULL)\n        return 0;\n    if ((selection & OSSL_KEYMGMT_SELECT_KEYPAIR) == 0)\n        return 1; /* the selection is not missing */\n    \n    /* Only public key is supported for LMS */\n    if ((selection & OSSL_KEYMGMT_SELECT_PRIVATE_KEY) != 0)\n        return 0;\n    \n    return ossl_lms_key_has(key, selection);"
+  }
+]

@@ -1,0 +1,132 @@
+{
+  "context": {
+    "owner": "openssl",
+    "repo": "openssl",
+    "pr_id": "29381",
+    "title": " Added LMS support for OpenSSL commandline signature verification using pkeyutl.",
+    "reviewers": [
+      "claude",
+      "gemini",
+      "codex"
+    ]
+  },
+  "statistics": {
+    "total": 10,
+    "critical": 0,
+    "high": 2,
+    "medium": 5,
+    "low": 3
+  },
+  "issues": [
+    {
+      "file": "providers/implementations/encode_decode/lms_codecs.c",
+      "line": "145-148",
+      "severity": "high",
+      "title": "NULL pointer dereference before NULL check in ossl_lms_key_to_text()",
+      "reviewers": "CODEX",
+      "confidence": "trusted",
+      "problem": "The function dereferences `key` to fetch `lms_params` and `ots_params` on lines 147-148, but the NULL check for `key` is on line 150. If called with a NULL key, the function will crash instead of returning the intended error.",
+      "code": "int ossl_lms_key_to_text(BIO *out, const LMS_KEY *key, int selection)\n{\n    const LMS_PARAMS *lms_params = key->lms_params;\n    const LM_OTS_PARAMS *ots_params = key->ots_params;\n\n    if (out == NULL || key == NULL) {\n        ERR_raise(ERR_LIB_PROV, ERR_R_PASSED_NULL_PARAMETER);\n        return 0;\n    }",
+      "fix": "int ossl_lms_key_to_text(BIO *out, const LMS_KEY *key, int selection)\n{\n    const LMS_PARAMS *lms_params;\n    const LM_OTS_PARAMS *ots_params;\n\n    if (out == NULL || key == NULL) {\n        ERR_raise(ERR_LIB_PROV, ERR_R_PASSED_NULL_PARAMETER);\n        return 0;\n    }\n\n    lms_params = key->lms_params;\n    ots_params = key->ots_params;"
+    },
+    {
+      "file": "providers/implementations/encode_decode/lms_codecs.c",
+      "line": "117-136",
+      "severity": "high",
+      "title": "ossl_lms_i2d_pubkey() always uses 32-byte header regardless of key digest size",
+      "reviewers": "CLAUDE, GEMINI",
+      "confidence": "trusted",
+      "problem": "The function always copies the HSS header from `hss_lms_32_spkifmt.header` on line 130, regardless of the actual key's digest size (n=24 or n=32). This causes incorrect ASN.1 encoding for keys using 24-byte digest, as the length byte in the SPKI header will be wrong.",
+      "code": "int ossl_lms_i2d_pubkey(const LMS_KEY *key, unsigned char **out)\n{\n    if (key->pub.encoded == NULL || key->pub.encodedlen == 0) {\n        ERR_raise_data(ERR_LIB_PROV, PROV_R_NOT_A_PUBLIC_KEY,\n            \"no %s public key data available\", \"LMS\");\n        return 0;\n    }\n    if (out != NULL) {\n        uint8_t *buf = OPENSSL_malloc(HSS_HEADER + key->pub.encodedlen);\n\n        if (buf == NULL)\n            return 0;\n        /* Output HSS format which has a 4 byte value (L = 1) */\n        memcpy(buf, hss_lms_32_spkifmt.header + sizeof(hss_lms_32_spkifmt.header) - HSS_HEADER, HSS_HEADER);",
+      "fix": "int ossl_lms_i2d_pubkey(const LMS_KEY *key, unsigned char **out)\n{\n    const uint8_t *header_src;\n    \n    if (key->pub.encoded == NULL || key->pub.encodedlen == 0) {\n        ERR_raise_data(ERR_LIB_PROV, PROV_R_NOT_A_PUBLIC_KEY,\n            \"no %s public key data available\", \"LMS\");\n        return 0;\n    }\n    if (key->lms_params == NULL) {\n        ERR_raise_data(ERR_LIB_PROV, PROV_R_BAD_ENCODING,\n            \"LMS key parameters not available\");\n        return 0;\n    }\n    if (out != NULL) {\n        uint8_t *buf = OPENSSL_malloc(HSS_HEADER + key->pub.encodedlen);\n\n        if (buf == NULL)\n            return 0;\n        /* Select the correct header based on digest size */\n        header_src = (key->lms_params->n == 24) \n                    ? hss_lms_24_spkifmt.header + sizeof(hss_lms_24_spkifmt.header) - HSS_HEADER\n                    : hss_lms_32_spkifmt.header + sizeof(hss_lms_32_spkifmt.header) - HSS_HEADER;\n        memcpy(buf, header_src, HSS_HEADER);"
+    },
+    {
+      "file": "crypto/lms/lms_key.c",
+      "line": "111-114",
+      "severity": "medium",
+      "title": "Missing NULL check in ossl_lms_key_get_pub()",
+      "reviewers": "CLAUDE",
+      "confidence": "likely",
+      "problem": "The function returns `key->pub.encoded` without checking if `key` is NULL. While the caller in `lms_get_params()` does check for NULL, defensive programming suggests the getter should handle NULL input gracefully.",
+      "code": "const uint8_t *ossl_lms_key_get_pub(const LMS_KEY *key)\n{\n    return key->pub.encoded;\n}",
+      "fix": "const uint8_t *ossl_lms_key_get_pub(const LMS_KEY *key)\n{\n    if (key == NULL)\n        return NULL;\n    return key->pub.encoded;\n}"
+    },
+    {
+      "file": "crypto/lms/lms_key.c",
+      "line": "117-130",
+      "severity": "medium",
+      "title": "Getter functions don't validate lms_params and ots_params pointers",
+      "reviewers": "CLAUDE",
+      "confidence": "likely",
+      "problem": "The functions `ossl_lms_key_get_pub_len()`, `ossl_lms_key_get_collision_strength_bits()`, and `ossl_lms_key_get_sig_len()` dereference `key->lms_params` and `key->ots_params` without NULL checks. These are called from `lms_get_params()` which only validates that `key` is non-NULL, not that its internal pointers are initialized. A partially initialized LMS_KEY could cause a crash.",
+      "code": "size_t ossl_lms_key_get_pub_len(const LMS_KEY *key)\n{\n    return 24 + key->lms_params->n;\n}\n\nsize_t ossl_lms_key_get_collision_strength_bits(const LMS_KEY *key)\n{\n    return key->lms_params->n * 8;\n}\n\nsize_t ossl_lms_key_get_sig_len(const LMS_KEY *key)\n{\n    return 12 + key->lms_params->n * (1 + key->ots_params->p + key->lms_params->h);\n}",
+      "fix": "size_t ossl_lms_key_get_pub_len(const LMS_KEY *key)\n{\n    if (key == NULL || key->lms_params == NULL)\n        return 0;\n    return 24 + key->lms_params->n;\n}\n\nsize_t ossl_lms_key_get_collision_strength_bits(const LMS_KEY *key)\n{\n    if (key == NULL || key->lms_params == NULL)\n        return 0;\n    return key->lms_params->bit_strength;\n}\n\nsize_t ossl_lms_key_get_sig_len(const LMS_KEY *key)\n{\n    if (key == NULL || key->lms_params == NULL || key->ots_params == NULL)\n        return 0;\n    return 12 + key->lms_params->n * (1 + key->ots_params->p + key->lms_params->h);\n}"
+    },
+    {
+      "file": "providers/implementations/signature/lms_signature.c",
+      "line": "67-88",
+      "severity": "medium",
+      "title": "Missing NULL checks in setdigest()",
+      "reviewers": "CLAUDE",
+      "confidence": "likely",
+      "problem": "The `setdigest()` function accesses `ctx->key->ots_params->digestname` without checking if `ctx->key` or `ctx->key->ots_params` are NULL. While the caller `lms_verify_msg_init()` checks for NULL key, a partially initialized key with NULL `ots_params` would cause a crash.",
+      "code": "static int setdigest(PROV_LMS_CTX *ctx, const char *digestname)\n{\n    /*\n     * Assume that only one digest can be used by LMS.\n     * Set the digest to the one contained in the public key.\n     * If the optional digestname passed in by the user is different\n     * then return an error.\n     */\n    LMS_KEY *key = ctx->key;\n    const char *pub_digestname = key->ots_params->digestname;",
+      "fix": "static int setdigest(PROV_LMS_CTX *ctx, const char *digestname)\n{\n    /*\n     * Assume that only one digest can be used by LMS.\n     * Set the digest to the one contained in the public key.\n     * If the optional digestname passed in by the user is different\n     * then return an error.\n     */\n    LMS_KEY *key = ctx->key;\n    \n    if (key == NULL || key->ots_params == NULL)\n        return 0;\n    const char *pub_digestname = key->ots_params->digestname;"
+    },
+    {
+      "file": "crypto/lms/lms_key.c",
+      "line": "122-125",
+      "severity": "medium",
+      "title": "ossl_lms_key_get_collision_strength_bits() ignores bit_strength field",
+      "reviewers": "CODEX, CLAUDE, GEMINI",
+      "confidence": "trusted",
+      "problem": "The function returns `key->lms_params->n * 8` which equals the digest output size (256 or 192 bits), but the `lms_params` table has a `bit_strength` field that contains correct collision resistance values (128 or 96 bits). Using the digest size instead of collision resistance overstates security strength for policy checks.",
+      "code": "size_t ossl_lms_key_get_collision_strength_bits(const LMS_KEY *key)\n{\n    return key->lms_params->n * 8;\n}",
+      "fix": "size_t ossl_lms_key_get_collision_strength_bits(const LMS_KEY *key)\n{\n    if (key == NULL || key->lms_params == NULL)\n        return 0;\n    return key->lms_params->bit_strength;\n}"
+    },
+    {
+      "file": "crypto/lms/lms_params.c",
+      "line": "24-34",
+      "severity": "medium",
+      "title": "SHAKE security strength uses digest size instead of collision resistance",
+      "reviewers": "GEMINI",
+      "confidence": "evaluate",
+      "problem": "The SHAKE-based LMS parameters list 256/192 bit_strength, but collision resistance for hash-based signatures should be n/2. For SHAKE256 with 32-byte output, collision resistance is 128 bits, not 256. For 24-byte output, it's 96 bits, not 192. The SHA256 entries correctly use 128/96, but SHAKE entries use 256/192.",
+      "code": "{ OSSL_LMS_TYPE_SHAKE_N32_H5, \"SHAKE-256\", 32, 5, 256 },\n{ OSSL_LMS_TYPE_SHAKE_N32_H10, \"SHAKE-256\", 32, 10, 256 },\n{ OSSL_LMS_TYPE_SHAKE_N32_H15, \"SHAKE-256\", 32, 15, 256 },\n{ OSSL_LMS_TYPE_SHAKE_N32_H20, \"SHAKE-256\", 32, 20, 256 },\n{ OSSL_LMS_TYPE_SHAKE_N32_H25, \"SHAKE-256\", 32, 25, 256 },\n/* SHAKE-256/192 */\n{ OSSL_LMS_TYPE_SHAKE_N24_H5, \"SHAKE-256\", 24, 5, 192 },\n{ OSSL_LMS_TYPE_SHAKE_N24_H10, \"SHAKE-256\", 24, 10, 192 },\n{ OSSL_LMS_TYPE_SHAKE_N24_H15, \"SHAKE-256\", 24, 15, 192 },\n{ OSSL_LMS_TYPE_SHAKE_N24_H20, \"SHAKE-256\", 24, 20, 192 },\n{ OSSL_LMS_TYPE_SHAKE_N24_H25, \"SHAKE-256\", 24, 25, 192 },",
+      "fix": "/* Collision resistance is n/2 for hash-based signatures */\n{ OSSL_LMS_TYPE_SHAKE_N32_H5, \"SHAKE-256\", 32, 5, 128 },\n{ OSSL_LMS_TYPE_SHAKE_N32_H10, \"SHAKE-256\", 32, 10, 128 },\n{ OSSL_LMS_TYPE_SHAKE_N32_H15, \"SHAKE-256\", 32, 15, 128 },\n{ OSSL_LMS_TYPE_SHAKE_N32_H20, \"SHAKE-256\", 32, 20, 128 },\n{ OSSL_LMS_TYPE_SHAKE_N32_H25, \"SHAKE-256\", 32, 25, 128 },\n/* SHAKE-256/192 */\n{ OSSL_LMS_TYPE_SHAKE_N24_H5, \"SHAKE-256\", 24, 5, 96 },\n{ OSSL_LMS_TYPE_SHAKE_N24_H10, \"SHAKE-256\", 24, 10, 96 },\n{ OSSL_LMS_TYPE_SHAKE_N24_H15, \"SHAKE-256\", 24, 15, 96 },\n{ OSSL_LMS_TYPE_SHAKE_N24_H20, \"SHAKE-256\", 24, 20, 96 },\n{ OSSL_LMS_TYPE_SHAKE_N24_H25, \"SHAKE-256\", 24, 25, 96 },"
+    },
+    {
+      "file": "providers/implementations/encode_decode/lms_codecs.c",
+      "line": "87-115",
+      "severity": "low",
+      "title": "Missing NULL pointer check for pk parameter",
+      "reviewers": "CLAUDE",
+      "confidence": "likely",
+      "problem": "The function `ossl_lms_d2i_PUBKEY()` does not check if `pk` is NULL before passing it to `memcmp()` in `find_spkifmt()`. If a NULL pointer is passed, `memcmp()` will crash.",
+      "code": "LMS_KEY *\nossl_lms_d2i_PUBKEY(const uint8_t *pk, int pk_len, PROV_CTX *provctx)\n{\n    OSSL_LIB_CTX *libctx = PROV_LIBCTX_OF(provctx);\n    LMS_KEY *ret;\n    const LMS_SPKI_FMT *spkifmt;\n\n    if (pk_len <= 0)\n        return NULL;\n    spkifmt = find_spkifmt(pk, pk_len);",
+      "fix": "LMS_KEY *\nossl_lms_d2i_PUBKEY(const uint8_t *pk, int pk_len, PROV_CTX *provctx)\n{\n    OSSL_LIB_CTX *libctx = PROV_LIBCTX_OF(provctx);\n    LMS_KEY *ret;\n    const LMS_SPKI_FMT *spkifmt;\n\n    if (pk == NULL || pk_len <= HSS_LMS_SPKI_OVERHEAD)\n        return NULL;\n    spkifmt = find_spkifmt(pk, pk_len);"
+    },
+    {
+      "file": "crypto/encode_decode/decoder_pkey.c",
+      "line": "422-427",
+      "severity": "low",
+      "title": "Trace printf may dereference NULL description pointer",
+      "reviewers": "CODEX",
+      "confidence": "likely",
+      "problem": "`keymgmt->description` can be NULL (algorithm descriptions are optional in OpenSSL). Passing NULL to `%s` format specifier is undefined behavior and can crash on some libc implementations when decoder tracing is enabled.",
+      "code": "OSSL_TRACE_BEGIN(DECODER)\n{\n    BIO_printf(trc_out,\n        \"(Collecting KeyManager %s %s [id %d]:\\n\",\n        keymgmt->description, keymgmt->type_name, keymgmt->id);\n}",
+      "fix": "OSSL_TRACE_BEGIN(DECODER)\n{\n    const char *desc = keymgmt->description != NULL ? keymgmt->description : \"\";\n    BIO_printf(trc_out,\n        \"(Collecting KeyManager %s %s [id %d]:\\n\",\n        desc, keymgmt->type_name, keymgmt->id);\n}"
+    },
+    {
+      "file": "providers/implementations/signature/lms_signature.c",
+      "line": "128-142",
+      "severity": "low",
+      "title": "Commented out code suggests incomplete implementation",
+      "reviewers": "CLAUDE",
+      "confidence": "evaluate",
+      "problem": "Line 139 contains commented out code `/* lms_set_ctx_params(ctx, params); */` suggesting the `params` argument should be processed when `vkey == NULL && ctx->key != NULL`. Currently, the params are silently ignored, which may lead to unexpected behavior.",
+      "code": "static int lms_digest_verify_init(void *vctx, const char *mdname, void *vkey,\n    const OSSL_PARAM params[])\n{\n    PROV_LMS_CTX *ctx = (PROV_LMS_CTX *)vctx;\n\n    if (mdname != NULL && mdname[0] != '\\0') {\n        ERR_raise_data(ERR_LIB_PROV, PROV_R_INVALID_DIGEST,\n            \"Explicit digest not supported for LMS operations\");\n        return 0;\n    }\n    if (vkey == NULL && ctx->key != NULL)\n        return 1; /* lms_set_ctx_params(ctx, params); */\n\n    return lms_verify_msg_init(vctx, vkey, params);\n}",
+      "fix": "static int lms_digest_verify_init(void *vctx, const char *mdname, void *vkey,\n    const OSSL_PARAM params[])\n{\n    PROV_LMS_CTX *ctx = (PROV_LMS_CTX *)vctx;\n\n    if (mdname != NULL && mdname[0] != '\\0') {\n        ERR_raise_data(ERR_LIB_PROV, PROV_R_INVALID_DIGEST,\n            \"Explicit digest not supported for LMS operations\");\n        return 0;\n    }\n    if (vkey == NULL && ctx->key != NULL) {\n        /* Process params if provided - currently no params are supported */\n        if (params != NULL && OSSL_PARAM_locate_const(params, OSSL_SIGNATURE_PARAM_DIGEST) != NULL) {\n            ERR_raise_data(ERR_LIB_PROV, PROV_R_INVALID_DIGEST,\n                \"Explicit digest not supported for LMS operations\");\n            return 0;\n        }\n        return 1;\n    }\n\n    return lms_verify_msg_init(vctx, vkey, params);\n}"
+    }
+  ]
+}
