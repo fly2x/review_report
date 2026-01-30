@@ -1,0 +1,138 @@
+# Code Review: openHiTLS/openhitls#992
+**Reviewer**: GEMINI
+
+
+## Critical
+
+### HSS Index Calculation Logic Error leading to OTS Key Reuse
+`crypto/lms/src/hss_utils.c:317`
+```
+if (i == para->levels - 1) {
+            // Bottom level: leaf = globalIndex mod (2^height)
+            leafIndex[i] = (uint32_t)(globalIndex % maxLeaves);
+        } else {
+            // Higher levels: leaf = (globalIndex / sigsPerTree[i+1]) mod (2^height)
+            leafIndex[i] = (uint32_t)((globalIndex / sigsPerTree[i + 1]) % maxLeaves);
+        }
+```
+**Issue**: The calculation of `leafIndex[i]` uses `sigsPerTree[i + 1]` as the divisor. This is incorrect. `sigsPerTree[i]` represents the weight/stride of level `i`, while `sigsPerTree[i+1]` is the weight of level `i+1`. Using the smaller weight of the next level causes the leaf index at the current level (e.g., the top level) to change too rapidly (for every message instead of every subtree). This results in the same One-Time Signature (OTS) key at the top level being used to sign multiple different child tree roots (different messages), which is a catastrophic security failure allowing forgery.
+**Fix**:
+```
+// Leaf index at level i = (globalIndex / sigsPerTree[i]) % (2^height[i])
+        // Note: sigsPerTree[i] accounts for all levels below i.
+        leafIndex[i] = (uint32_t)((globalIndex / sigsPerTree[i]) % maxLeaves);
+```
+
+---
+
+### HSS Tree Index Calculation Logic Error
+`crypto/lms/src/hss_utils.c:305`
+```
+for (uint32_t i = 0; i < para->levels; i++) {
+        // Tree index at level i = globalIndex / sigsPerTree[i]
+        treeIndex[i] = globalIndex / sigsPerTree[i];
+```
+**Issue**: The calculation `treeIndex[i] = globalIndex / sigsPerTree[i]` is incorrect. `sigsPerTree[i]` is the capacity of the *subtrees* rooted at level `i` (number of bottom-level signatures per leaf at level `i`). Dividing by this value gives the cumulative index of the leaf at level `i`, not the index of the tree *containing* that leaf. For level `i`, the tree index should be determined by the capacity of the tree at level `i` (which is `sigsPerTree[i-1]` in the conceptual hierarchy, or `sigsPerTree[i] * 2^height[i]`). Using the wrong divisor means the derived tree seeds are incorrect and change too frequently, further compounding the OTS reuse issue.
+**Fix**:
+```
+uint64_t currentCapacity = 0;
+    // Calculate capacity of the top level tree (Level 0)
+    if (para->levels > 0) {
+         uint32_t h0 = para->levelPara[0].height;
+         currentCapacity = sigsPerTree[0] * (1ULL << h0);
+    }
+
+    for (uint32_t i = 0; i < para->levels; i++) {
+        // Capacity of the tree at level i
+        uint64_t treeCapacity; 
+        if (i == 0) {
+             treeCapacity = currentCapacity; // Should theoretically be infinite/total cap
+             treeIndex[i] = 0; // Root tree is always index 0
+        } else {
+             // Capacity of a tree at level i is sigsPerTree[i-1]
+             treeCapacity = sigsPerTree[i-1];
+             treeIndex[i] = globalIndex / treeCapacity;
+        }
+        
+        // Leaf calculation uses sigsPerTree[i] (signatures per leaf at level i)
+        uint32_t height = para->levelPara[i].height;
+        uint64_t maxLeaves = 1ULL << height;
+        leafIndex[i] = (uint32_t)((globalIndex / sigsPerTree[i]) % maxLeaves);
+    }
+```
+
+---
+
+
+## High
+
+### Unbounded Memory Allocation in LmOtsComputeQ
+`crypto/lms/src/lms_ots.c:105`
+```
+uint8_t *prefix = BSL_SAL_Malloc(LMS_MESG_PREFIX_LEN(n) + messageLen);
+    if (prefix == NULL) {
+        return CRYPT_MEM_ALLOC_FAIL;
+    }
+
+    (void)memcpy_s(prefix + LMS_MESG_I_OFFSET, LMS_I_LEN, I, LMS_I_LEN);
+    // ...
+    (void)memcpy_s(prefix + LMS_MESG_PREFIX_LEN(n), messageLen, message, messageLen);
+
+    LmsHash(Q, prefix, LMS_MESG_PREFIX_LEN(n) + messageLen);
+    BSL_SAL_FREE(prefix);
+```
+**Issue**: The function allocates memory based on `messageLen` which is provided by the caller. If a user passes a very large message (e.g., a large file mapped into memory), this triggers a large allocation. This can lead to Denial of Service (DoS) via memory exhaustion. Furthermore, buffering the entire message to hash it is inefficient; a streaming hash update should be used.
+**Fix**:
+```
+// Initialize Hash Context
+    void *ctx = NULL; // Assume EAL_MdCtxNew wrapper exists or use specific stack context
+    // EAL_MdInit(ctx, SHA256) ...
+    
+    // Hash Prefix
+    uint8_t prefixBuf[LMS_MESG_PREFIX_LEN(LMS_MAX_HASH)];
+    // ... Fill prefixBuf ...
+    // EAL_MdUpdate(ctx, prefixBuf, prefixLen);
+    
+    // Hash Message
+    // EAL_MdUpdate(ctx, message, messageLen);
+    
+    // Finalize
+    // EAL_MdFinal(ctx, Q);
+    
+    // Alternatively, if streaming API is not available, enforce a maximum message size
+    if (messageLen > HITLS_MAX_MESSAGE_SIZE) {
+        return CRYPT_INVALID_ARG;
+    }
+```
+
+---
+
+
+## Medium
+
+### Performance/DoS Risk in LmsSign
+`crypto/lms/src/lms_core.c:316`
+```
+int32_t LmsGenerateAuthPath(uint8_t *authPath, const LMS_Para *para,
+    const uint8_t *I, const uint8_t *seed, uint32_t q)
+{
+    // ...
+    int32_t ret = LmsComputeLeafNodes(tree, para, I, seed, numLeaves);
+    // ...
+}
+```
+**Issue**: `LmsSign` calls `LmsSignWriteSignature`, which calls `LmsGenerateAuthPath`. `LmsGenerateAuthPath` (via `LmsComputeLeafNodes`) regenerates the **entire Merkle Tree** (all leaves and internal nodes) for every single signature. For larger tree parameters (e.g., H=20, 1M leaves), this involves millions of hash operations per signature, making the signing operation extremely slow (seconds to minutes) and resource-intensive. This renders the implementation unusable for high-performance applications and susceptible to DoS.
+**Fix**:
+```
+/*
+ * Optimizing the tree traversal (e.g., using the fractal tree representation or caching) 
+ * is required for H > 15. 
+ * For now, at least add a warning or restriction on height for this implementation.
+ */
+// In LmsParaInit or LmsKeyGen check:
+if (para->height > 15) {
+    // Return error or warning that performance will be degraded
+}
+```
+
+---

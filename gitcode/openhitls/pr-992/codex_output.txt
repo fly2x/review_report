@@ -1,0 +1,160 @@
+===ISSUE===
+FILE: crypto/lms/src/hss_utils.c
+LINE: 117-224
+SEVERITY: high
+TITLE: HSS param compression allows unsupported levels leading to OOB read on decompress
+PROBLEM: The compressed parameter format only has 8 bytes (max 3 levels), but HssCompressParamSet accepts levels up to 8 and silently truncates. HssDecompressParamSet then trusts `levels` and reads `compressed[...+1]`, which goes out of bounds when levels ≥ 4 (index 8). This is an out-of-bounds read and also produces keys that can’t be safely reloaded.
+CODE:
+```
+if (para->levels < HSS_MIN_LEVELS || para->levels > HSS_MAX_LEVELS) {
+    return CRYPT_HSS_INVALID_LEVEL;
+}
+
+memset(compressed, 0, HSS_COMPRESSED_PARAMS_LEN);
+compressed[0] = (uint8_t)para->levels;
+
+for (uint32_t i = 0; i < para->levels && i < HSS_MAX_COMPRESSED_LEVELS; i++) {
+    ...
+}
+
+uint32_t levels = compressed[0];
+if (levels < HSS_MIN_LEVELS || levels > HSS_MAX_LEVELS) {
+    return CRYPT_HSS_INVALID_LEVEL;
+}
+
+for (uint32_t i = 0; i < levels; i++) {
+    uint8_t lmsComp = compressed[HSS_COMPRESSED_LEVEL_FIELD_SIZE + i * HSS_COMPRESSED_PARAM_PAIR_SIZE];
+    uint8_t otsComp = compressed[HSS_COMPRESSED_LEVEL_FIELD_SIZE + i * HSS_COMPRESSED_PARAM_PAIR_SIZE + 1];
+    ...
+}
+```
+FIX:
+```
+if (para->levels < HSS_MIN_LEVELS || para->levels > HSS_MAX_LEVELS ||
+    para->levels > HSS_MAX_COMPRESSED_LEVELS) {
+    return CRYPT_HSS_INVALID_LEVEL;
+}
+
+memset(compressed, 0, HSS_COMPRESSED_PARAMS_LEN);
+compressed[0] = (uint8_t)para->levels;
+
+for (uint32_t i = 0; i < para->levels; i++) {
+    ...
+}
+
+uint32_t levels = compressed[0];
+if (levels < HSS_MIN_LEVELS || levels > HSS_MAX_LEVELS ||
+    levels > HSS_MAX_COMPRESSED_LEVELS) {
+    return CRYPT_HSS_INVALID_LEVEL;
+}
+
+for (uint32_t i = 0; i < levels; i++) {
+    ...
+}
+```
+===END===
+
+===ISSUE===
+FILE: crypto/lms/src/hss_api.c
+LINE: 362-395
+SEVERITY: medium
+TITLE: HSS public key load never initializes derived parameters
+PROBLEM: CRYPT_HSS_SetPubKey only stores `levels`, `lmsType[0]`, and `otsType[0]` but never calls HssParaInit. As a result `levelPara[*].sigLen` stays zero and HssParseSignature/Verify parse signatures incorrectly (verification always fails for a freshly loaded public key).
+CODE:
+```
+ctx->para->levels = levels;
+ctx->para->lmsType[0] = lmsType;
+ctx->para->otsType[0] = otsType;
+
+return CRYPT_SUCCESS;
+```
+FIX:
+```
+ctx->para->levels = levels;
+ctx->para->lmsType[0] = lmsType;
+ctx->para->otsType[0] = otsType;
+
+for (uint32_t i = 0; i < levels; i++) {
+    if (ctx->para->lmsType[i] == 0 || ctx->para->otsType[i] == 0) {
+        return CRYPT_HSS_INVALID_PARAM;
+    }
+}
+
+int32_t ret = HssParaInit(ctx->para, levels, ctx->para->lmsType, ctx->para->otsType);
+if (ret != CRYPT_SUCCESS) {
+    return ret;
+}
+```
+===END===
+
+===ISSUE===
+FILE: crypto/lms/src/hss_core.c
+LINE: 361-395
+SEVERITY: low
+TITLE: HSS signature parsing ignores trailing bytes
+PROBLEM: HssParseSignature only checks `bottomSigLen > remaining` and then sets `bottomSig`, which means extra trailing bytes are silently ignored. This makes signature parsing non-strict and allows malleable signatures with junk suffixes to pass structure validation.
+CODE:
+```
+parsed->bottomSigLen = para->levelPara[bottomLevel].sigLen;
+
+if (parsed->bottomSigLen > remaining) {
+    return CRYPT_HSS_SIGNATURE_PARSE_FAIL;
+}
+
+parsed->bottomSig = sigPtr;
+return CRYPT_SUCCESS;
+```
+FIX:
+```
+parsed->bottomSigLen = para->levelPara[bottomLevel].sigLen;
+
+if (parsed->bottomSigLen != remaining) {
+    return CRYPT_HSS_SIGNATURE_PARSE_FAIL;
+}
+
+parsed->bottomSig = sigPtr;
+return CRYPT_SUCCESS;
+```
+===END===
+
+===ISSUE===
+FILE: crypto/lms/src/lms_api.c
+LINE: 124-152
+SEVERITY: low
+TITLE: LMS context comparison treats missing keys as equal
+PROBLEM: CRYPT_LMS_Cmp compares keys only when both sides are non-NULL. If one context has a public/private key and the other doesn’t, it returns success, incorrectly reporting equality.
+CODE:
+```
+/* Compare public keys */
+if (ctx1->publicKey != NULL && ctx2->publicKey != NULL) {
+    if (memcmp(ctx1->publicKey, ctx2->publicKey, ctx1->para->pubKeyLen) != 0) {
+        return CRYPT_LMS_CMP_FALSE;
+    }
+}
+
+/* Compare private keys */
+if (ctx1->privateKey != NULL && ctx2->privateKey != NULL) {
+    if (memcmp(ctx1->privateKey, ctx2->privateKey, ctx1->para->prvKeyLen) != 0) {
+        return CRYPT_LMS_CMP_FALSE;
+    }
+}
+```
+FIX:
+```
+if ((ctx1->publicKey == NULL) != (ctx2->publicKey == NULL)) {
+    return CRYPT_LMS_CMP_FALSE;
+}
+if (ctx1->publicKey != NULL &&
+    memcmp(ctx1->publicKey, ctx2->publicKey, ctx1->para->pubKeyLen) != 0) {
+    return CRYPT_LMS_CMP_FALSE;
+}
+
+if ((ctx1->privateKey == NULL) != (ctx2->privateKey == NULL)) {
+    return CRYPT_LMS_CMP_FALSE;
+}
+if (ctx1->privateKey != NULL &&
+    memcmp(ctx1->privateKey, ctx2->privateKey, ctx1->para->prvKeyLen) != 0) {
+    return CRYPT_LMS_CMP_FALSE;
+}
+```
+===END===

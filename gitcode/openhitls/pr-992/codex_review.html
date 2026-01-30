@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Code Review: openHiTLS/openhitls#992 - CODEX</title>
+    <style>
+        :root { --critical: #dc2626; --high: #ea580c; --medium: #ca8a04; --low: #65a30d; }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: system-ui, sans-serif; background: #f8fafc; color: #1e293b; padding: 2rem; line-height: 1.6; }
+        .container { max-width: 900px; margin: 0 auto; }
+        h1 { font-size: 1.5rem; margin-bottom: 0.5rem; }
+        .subtitle { color: #64748b; margin-bottom: 2rem; }
+        .section { margin-bottom: 2rem; }
+        .section-title { font-size: 1.1rem; font-weight: 600; padding: 0.5rem 1rem; border-radius: 0.5rem 0.5rem 0 0; color: white; }
+        .section-title.critical { background: var(--critical); }
+        .section-title.high { background: var(--high); }
+        .section-title.medium { background: var(--medium); }
+        .section-title.low { background: var(--low); }
+        .issue { background: white; border: 1px solid #e2e8f0; border-top: none; padding: 1rem; }
+        .issue:last-child { border-radius: 0 0 0.5rem 0.5rem; }
+        .issue-title { font-weight: 600; margin-bottom: 0.25rem; }
+        .issue-location { font-family: monospace; font-size: 0.875rem; color: #64748b; margin-bottom: 0.75rem; }
+        .issue-source { font-size: 0.75rem; color: #94a3b8; margin-top: 0.5rem; }
+        pre { background: #1e293b; color: #e2e8f0; padding: 0.75rem; border-radius: 0.375rem; overflow-x: auto; font-size: 0.875rem; margin: 0.5rem 0; }
+        .problem { margin: 0.75rem 0; }
+        .fix-label { font-weight: 600; margin-top: 0.75rem; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Code Review: openHiTLS/openhitls#992 - CODEX</h1>
+        <div class="subtitle"></div>
+<div class="section"><div class="section-title high">High</div>
+<div class="issue">
+                <div class="issue-title">HSS param compression allows unsupported levels leading to OOB read on decompress</div>
+                <div class="issue-location">crypto/lms/src/hss_utils.c:117-224</div>
+                <pre>if (para-&gt;levels &lt; HSS_MIN_LEVELS || para-&gt;levels &gt; HSS_MAX_LEVELS) {
+    return CRYPT_HSS_INVALID_LEVEL;
+}
+
+memset(compressed, 0, HSS_COMPRESSED_PARAMS_LEN);
+compressed[0] = (uint8_t)para-&gt;levels;
+
+for (uint32_t i = 0; i &lt; para-&gt;levels &amp;&amp; i &lt; HSS_MAX_COMPRESSED_LEVELS; i++) {
+    ...
+}
+
+uint32_t levels = compressed[0];
+if (levels &lt; HSS_MIN_LEVELS || levels &gt; HSS_MAX_LEVELS) {
+    return CRYPT_HSS_INVALID_LEVEL;
+}
+
+for (uint32_t i = 0; i &lt; levels; i++) {
+    uint8_t lmsComp = compressed[HSS_COMPRESSED_LEVEL_FIELD_SIZE + i * HSS_COMPRESSED_PARAM_PAIR_SIZE];
+    uint8_t otsComp = compressed[HSS_COMPRESSED_LEVEL_FIELD_SIZE + i * HSS_COMPRESSED_PARAM_PAIR_SIZE + 1];
+    ...
+}</pre>
+                <div class="problem"><strong>Issue:</strong> The compressed parameter format only has 8 bytes (max 3 levels), but HssCompressParamSet accepts levels up to 8 and silently truncates. HssDecompressParamSet then trusts `levels` and reads `compressed[...+1]`, which goes out of bounds when levels ≥ 4 (index 8). This is an out-of-bounds read and also produces keys that can’t be safely reloaded.</div>
+                <div class="fix-label">Fix:</div><pre>if (para-&gt;levels &lt; HSS_MIN_LEVELS || para-&gt;levels &gt; HSS_MAX_LEVELS ||
+    para-&gt;levels &gt; HSS_MAX_COMPRESSED_LEVELS) {
+    return CRYPT_HSS_INVALID_LEVEL;
+}
+
+memset(compressed, 0, HSS_COMPRESSED_PARAMS_LEN);
+compressed[0] = (uint8_t)para-&gt;levels;
+
+for (uint32_t i = 0; i &lt; para-&gt;levels; i++) {
+    ...
+}
+
+uint32_t levels = compressed[0];
+if (levels &lt; HSS_MIN_LEVELS || levels &gt; HSS_MAX_LEVELS ||
+    levels &gt; HSS_MAX_COMPRESSED_LEVELS) {
+    return CRYPT_HSS_INVALID_LEVEL;
+}
+
+for (uint32_t i = 0; i &lt; levels; i++) {
+    ...
+}</pre>
+                <div class="issue-source">Reviewer: codex</div>
+            </div>
+</div>
+<div class="section"><div class="section-title medium">Medium</div>
+<div class="issue">
+                <div class="issue-title">HSS public key load never initializes derived parameters</div>
+                <div class="issue-location">crypto/lms/src/hss_api.c:362-395</div>
+                <pre>ctx-&gt;para-&gt;levels = levels;
+ctx-&gt;para-&gt;lmsType[0] = lmsType;
+ctx-&gt;para-&gt;otsType[0] = otsType;
+
+return CRYPT_SUCCESS;</pre>
+                <div class="problem"><strong>Issue:</strong> CRYPT_HSS_SetPubKey only stores `levels`, `lmsType[0]`, and `otsType[0]` but never calls HssParaInit. As a result `levelPara[*].sigLen` stays zero and HssParseSignature/Verify parse signatures incorrectly (verification always fails for a freshly loaded public key).</div>
+                <div class="fix-label">Fix:</div><pre>ctx-&gt;para-&gt;levels = levels;
+ctx-&gt;para-&gt;lmsType[0] = lmsType;
+ctx-&gt;para-&gt;otsType[0] = otsType;
+
+for (uint32_t i = 0; i &lt; levels; i++) {
+    if (ctx-&gt;para-&gt;lmsType[i] == 0 || ctx-&gt;para-&gt;otsType[i] == 0) {
+        return CRYPT_HSS_INVALID_PARAM;
+    }
+}
+
+int32_t ret = HssParaInit(ctx-&gt;para, levels, ctx-&gt;para-&gt;lmsType, ctx-&gt;para-&gt;otsType);
+if (ret != CRYPT_SUCCESS) {
+    return ret;
+}</pre>
+                <div class="issue-source">Reviewer: codex</div>
+            </div>
+</div>
+<div class="section"><div class="section-title low">Low</div>
+<div class="issue">
+                <div class="issue-title">HSS signature parsing ignores trailing bytes</div>
+                <div class="issue-location">crypto/lms/src/hss_core.c:361-395</div>
+                <pre>parsed-&gt;bottomSigLen = para-&gt;levelPara[bottomLevel].sigLen;
+
+if (parsed-&gt;bottomSigLen &gt; remaining) {
+    return CRYPT_HSS_SIGNATURE_PARSE_FAIL;
+}
+
+parsed-&gt;bottomSig = sigPtr;
+return CRYPT_SUCCESS;</pre>
+                <div class="problem"><strong>Issue:</strong> HssParseSignature only checks `bottomSigLen > remaining` and then sets `bottomSig`, which means extra trailing bytes are silently ignored. This makes signature parsing non-strict and allows malleable signatures with junk suffixes to pass structure validation.</div>
+                <div class="fix-label">Fix:</div><pre>parsed-&gt;bottomSigLen = para-&gt;levelPara[bottomLevel].sigLen;
+
+if (parsed-&gt;bottomSigLen != remaining) {
+    return CRYPT_HSS_SIGNATURE_PARSE_FAIL;
+}
+
+parsed-&gt;bottomSig = sigPtr;
+return CRYPT_SUCCESS;</pre>
+                <div class="issue-source">Reviewer: codex</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">LMS context comparison treats missing keys as equal</div>
+                <div class="issue-location">crypto/lms/src/lms_api.c:124-152</div>
+                <pre>/* Compare public keys */
+if (ctx1-&gt;publicKey != NULL &amp;&amp; ctx2-&gt;publicKey != NULL) {
+    if (memcmp(ctx1-&gt;publicKey, ctx2-&gt;publicKey, ctx1-&gt;para-&gt;pubKeyLen) != 0) {
+        return CRYPT_LMS_CMP_FALSE;
+    }
+}
+
+/* Compare private keys */
+if (ctx1-&gt;privateKey != NULL &amp;&amp; ctx2-&gt;privateKey != NULL) {
+    if (memcmp(ctx1-&gt;privateKey, ctx2-&gt;privateKey, ctx1-&gt;para-&gt;prvKeyLen) != 0) {
+        return CRYPT_LMS_CMP_FALSE;
+    }
+}</pre>
+                <div class="problem"><strong>Issue:</strong> CRYPT_LMS_Cmp compares keys only when both sides are non-NULL. If one context has a public/private key and the other doesn’t, it returns success, incorrectly reporting equality.</div>
+                <div class="fix-label">Fix:</div><pre>if ((ctx1-&gt;publicKey == NULL) != (ctx2-&gt;publicKey == NULL)) {
+    return CRYPT_LMS_CMP_FALSE;
+}
+if (ctx1-&gt;publicKey != NULL &amp;&amp;
+    memcmp(ctx1-&gt;publicKey, ctx2-&gt;publicKey, ctx1-&gt;para-&gt;pubKeyLen) != 0) {
+    return CRYPT_LMS_CMP_FALSE;
+}
+
+if ((ctx1-&gt;privateKey == NULL) != (ctx2-&gt;privateKey == NULL)) {
+    return CRYPT_LMS_CMP_FALSE;
+}
+if (ctx1-&gt;privateKey != NULL &amp;&amp;
+    memcmp(ctx1-&gt;privateKey, ctx2-&gt;privateKey, ctx1-&gt;para-&gt;prvKeyLen) != 0) {
+    return CRYPT_LMS_CMP_FALSE;
+}</pre>
+                <div class="issue-source">Reviewer: codex</div>
+            </div>
+</div>
+</div></body></html>
