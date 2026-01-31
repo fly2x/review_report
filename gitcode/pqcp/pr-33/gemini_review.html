@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Code Review: openhitls/pqcp#33 - GEMINI</title>
+    <style>
+        :root { --critical: #dc2626; --high: #ea580c; --medium: #ca8a04; --low: #65a30d; }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: system-ui, sans-serif; background: #f8fafc; color: #1e293b; padding: 2rem; line-height: 1.6; }
+        .container { max-width: 900px; margin: 0 auto; }
+        h1 { font-size: 1.5rem; margin-bottom: 0.5rem; }
+        .subtitle { color: #64748b; margin-bottom: 2rem; }
+        .section { margin-bottom: 2rem; }
+        .section-title { font-size: 1.1rem; font-weight: 600; padding: 0.5rem 1rem; border-radius: 0.5rem 0.5rem 0 0; color: white; }
+        .section-title.critical { background: var(--critical); }
+        .section-title.high { background: var(--high); }
+        .section-title.medium { background: var(--medium); }
+        .section-title.low { background: var(--low); }
+        .issue { background: white; border: 1px solid #e2e8f0; border-top: none; padding: 1rem; }
+        .issue:last-child { border-radius: 0 0 0.5rem 0.5rem; }
+        .issue-title { font-weight: 600; margin-bottom: 0.25rem; }
+        .issue-location { font-family: monospace; font-size: 0.875rem; color: #64748b; margin-bottom: 0.75rem; }
+        .issue-source { font-size: 0.75rem; color: #94a3b8; margin-top: 0.5rem; }
+        pre { background: #1e293b; color: #e2e8f0; padding: 0.75rem; border-radius: 0.375rem; overflow-x: auto; font-size: 0.875rem; margin: 0.5rem 0; }
+        .problem { margin: 0.75rem 0; }
+        .fix-label { font-weight: 600; margin-top: 0.75rem; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Code Review: openhitls/pqcp#33 - GEMINI</h1>
+        <div class="subtitle"></div>
+<div class="section"><div class="section-title critical">Critical</div>
+<div class="issue">
+                <div class="issue-title">Incorrect buffer pointer arithmetic and initialization</div>
+                <div class="issue-location">src/composite_sign/src/crypt_composite_sign.c:389</div>
+                <pre>BSL_Buffer pqcPrv = {prv-&gt;data, ctx-&gt;info-&gt;pqcPrvkeyLen};
+    BSL_Buffer tradPrv = {prv-&gt;data, + ctx-&gt;info-&gt;pqcPrvkeyLen, prv-&gt;len - ctx-&gt;info-&gt;pqcPrvkeyLen};
+    RETURN_RET_IF_ERR(CRYPT_CompositeSetPqcPrvKey(ctx, &amp;pqcPrv), ret);</pre>
+                <div class="problem"><strong>Issue:</strong> The initialization of `tradPrv` uses the comma operator incorrectly within the brace initializer, or attempts to initialize 3 fields when `BSL_Buffer` likely has 2. Critically, `tradPrv.data` is initialized to `prv->data` (the start of the buffer) instead of the offset pointer. This causes the traditional private key to be set using the PQC private key data.</div>
+                <div class="fix-label">Fix:</div><pre>BSL_Buffer pqcPrv = {prv-&gt;data, ctx-&gt;info-&gt;pqcPrvkeyLen};
+    BSL_Buffer tradPrv = {prv-&gt;data + ctx-&gt;info-&gt;pqcPrvkeyLen, prv-&gt;len - ctx-&gt;info-&gt;pqcPrvkeyLen};
+    RETURN_RET_IF_ERR(CRYPT_CompositeSetPqcPrvKey(ctx, &amp;pqcPrv), ret);</pre>
+                <div class="issue-source">Reviewer: gemini</div>
+            </div>
+</div>
+<div class="section"><div class="section-title low">Low</div>
+<div class="issue">
+                <div class="issue-title">Missing break statement in switch case</div>
+                <div class="issue-location">src/provider/pqcp_pkey.c:46-49</div>
+                <pre>case CRYPT_PKEY_COMPOSITE_SIGN:
+            pkeyCtx = CRYPT_COMPOSITE_NewCtx();
+        default:
+            break;</pre>
+                <div class="problem"><strong>Issue:</strong> The `CRYPT_PKEY_COMPOSITE_SIGN` case falls through to the `default` case. While the `default` case contains a `break`, relying on this fallthrough is fragile and considered bad practice.</div>
+                <div class="fix-label">Fix:</div><pre>case CRYPT_PKEY_COMPOSITE_SIGN:
+            pkeyCtx = CRYPT_COMPOSITE_NewCtx();
+            break;
+        default:
+            break;</pre>
+                <div class="issue-source">Reviewer: gemini</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">Duplicate const qualifier</div>
+                <div class="issue-location">src/provider/pqcp_pkey.c:147</div>
+                <pre>const const CRYPT_EAL_Func g_pqcpKeyMgmtCompositeSign[] = {</pre>
+                <div class="problem"><strong>Issue:</strong> The variable `g_pqcpKeyMgmtCompositeSign` is declared with `const const`. This is redundant.</div>
+                <div class="fix-label">Fix:</div><pre>const CRYPT_EAL_Func g_pqcpKeyMgmtCompositeSign[] = {</pre>
+                <div class="issue-source">Reviewer: gemini</div>
+            </div>
+</div>
+</div></body></html>

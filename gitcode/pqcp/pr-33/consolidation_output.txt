@@ -1,0 +1,291 @@
+Now I have verified all the issues. Let me output them in the required format:
+
+===ISSUE===
+FILE: src/composite_sign/src/crypt_composite_sign.c
+LINE: 387
+SEVERITY: critical
+TITLE: Incorrect buffer pointer causes traditional private key to use PQC key data
+REVIEWERS: GEMINI, CODEX
+CONFIDENCE: trusted
+PROBLEM: The tradPrv buffer is incorrectly initialized with `prv->data` instead of `prv->data + ctx->info->pqcPrvkeyLen`. The comma operator in the brace initializer `{prv->data, + ctx->info->pqcPrvkeyLen, prv->len - ctx->info->pqcPrvkeyLen}` evaluates to just the last value, and the data pointer is set to the start of the buffer instead of the offset. This causes the traditional private key to be set using PQC private key data, corrupting key imports.
+CODE:
+```
+BSL_Buffer pqcPrv = {prv->data, ctx->info->pqcPrvkeyLen};
+BSL_Buffer tradPrv = {prv->data, + ctx->info->pqcPrvkeyLen, prv->len - ctx->info->pqcPrvkeyLen};
+```
+FIX:
+```
+BSL_Buffer pqcPrv = {prv->data, ctx->info->pqcPrvkeyLen};
+BSL_Buffer tradPrv = {prv->data + ctx->info->pqcPrvkeyLen, prv->len - ctx->info->pqcPrvkeyLen};
+```
+===END===
+
+===ISSUE===
+FILE: src/provider/pqcp_pkey.c
+LINE: 145
+SEVERITY: high
+TITLE: Duplicate const qualifier is invalid C syntax
+REVIEWERS: CLAUDE, CODEX, GEMINI
+CONFIDENCE: trusted
+PROBLEM: The declaration uses `const const` which is not valid C syntax and will cause a compilation error.
+CODE:
+```
+const const CRYPT_EAL_Func g_pqcpKeyMgmtCompositeSign[] = {
+```
+FIX:
+```
+const CRYPT_EAL_Func g_pqcpKeyMgmtCompositeSign[] = {
+```
+===END===
+
+===ISSUE===
+FILE: src/composite_sign/src/crypt_composite_sign.c
+LINE: 44-46
+SEVERITY: high
+TITLE: Missing break statement causes fallthrough in switch case
+REVIEWERS: CLAUDE, GEMINI
+CONFIDENCE: trusted
+PROBLEM: The CRYPT_PKEY_COMPOSITE_SIGN case is missing a break statement, causing fallthrough to the default case. This means pkeyCtx will be set to NULL even though CRYPT_COMPOSITE_NewCtx() was called, because the default case doesn't set pkeyCtx.
+CODE:
+```
+case CRYPT_PKEY_COMPOSITE_SIGN:
+    pkeyCtx = CRYPT_COMPOSITE_NewCtx();
+default:
+    break;
+```
+FIX:
+```
+case CRYPT_PKEY_COMPOSITE_SIGN:
+    pkeyCtx = CRYPT_COMPOSITE_NewCtx();
+    break;
+default:
+    break;
+```
+===END===
+
+===ISSUE===
+FILE: src/composite_sign/src/crypt_composite_sign.c
+LINE: 506
+SEVERITY: high
+TITLE: Wrong memcpy_s size parameter uses digestLen instead of destination buffer size
+REVIEWERS: CLAUDE
+CONFIDENCE: trusted
+PROBLEM: The memcpy_s call uses digestLen as the size parameter instead of the actual destination buffer size. The memcpy_s function expects the destination buffer size as the second parameter, not the source length.
+CODE:
+```
+(void)memcpy_s(ptr, digestLen, digest, digestLen);
+```
+FIX:
+```
+(void)memcpy_s(ptr, msg->len - (prefixLen + labelLen + 1 + ctx->ctxLen), digest, digestLen);
+```
+===END===
+
+===ISSUE===
+FILE: src/composite_sign/src/crypt_composite_sign.c
+LINE: 127
+SEVERITY: high
+TITLE: CRYPT_COMPOSITE_DupCtx does not check if ctx->info is NULL before dereferencing
+REVIEWERS: CLAUDE
+CONFIDENCE: trusted
+PROBLEM: The function assigns ctx->info to newCtx->info without checking if ctx->info is NULL. If a context is duplicated before setting algorithm info, the duplicated context will have NULL info, leading to potential crashes when used.
+CODE:
+```
+newCtx->info = ctx->info;
+if (ctx->pqcMethod != NULL && ctx->tradMethod != NULL) {
+```
+FIX:
+```
+if (ctx->info == NULL) {
+    BSL_ERR_PUSH_ERROR(CRYPT_COMPOSITE_KEYINFO_NOT_SET);
+    return NULL;
+}
+newCtx->info = ctx->info;
+if (ctx->pqcMethod != NULL && ctx->tradMethod != NULL) {
+```
+===END===
+
+===ISSUE===
+FILE: src/composite_sign/src/crypt_composite_sign.c
+LINE: 414-435
+SEVERITY: high
+TITLE: GetParamValue return value not checked before dereferencing causing potential NULL dereference
+REVIEWERS: CLAUDE, CODEX
+CONFIDENCE: trusted
+PROBLEM: In CRYPT_COMPOSITE_GetPrvKeyEx and CRYPT_COMPOSITE_GetPubKeyEx, the return value of GetParamValue is not checked. If the parameter is not found (returns NULL), paramPrv/paramPub is dereferenced, causing a crash.
+CODE:
+```
+BSL_Param *paramPrv = GetParamValue(para, CRYPT_PARAM_COMPOSITE_PRVKEY, &prv.data, &(prv.len));
+int32_t ret = CRYPT_COMPOSITE_GetPrvKey(ctx, &prv);
+if (ret != CRYPT_SUCCESS) {
+    return ret;
+}
+paramPrv->useLen = prv.len;
+```
+FIX:
+```
+BSL_Param *paramPrv = GetParamValue(para, CRYPT_PARAM_COMPOSITE_PRVKEY, &prv.data, &(prv.len));
+if (paramPrv == NULL) {
+    BSL_ERR_PUSH_ERROR(CRYPT_INVALID_ARG);
+    return CRYPT_INVALID_ARG;
+}
+int32_t ret = CRYPT_COMPOSITE_GetPrvKey(ctx, &prv);
+if (ret != CRYPT_SUCCESS) {
+    return ret;
+}
+paramPrv->useLen = prv.len;
+```
+===END===
+
+===ISSUE===
+FILE: src/composite_sign/src/crypt_composite_sign.c
+LINE: 385
+SEVERITY: medium
+TITLE: Composite key length validation allows truncated traditional keys
+REVIEWERS: CODEX
+CONFIDENCE: trusted
+PROBLEM: The length checks only ensure the buffer is larger than the PQC part (using `<=` comparison instead of exact length match), so a too-short TRAD component can be accepted, resulting in malformed keys and undefined behavior in downstream algorithms.
+CODE:
+```
+RETURN_RET_IF(prv->len <= ctx->info->pqcPrvkeyLen, CRYPT_COMPOSITE_KEYLEN_ERROR);
+```
+FIX:
+```
+RETURN_RET_IF(prv->len != ctx->info->compPrvKeyLen, CRYPT_COMPOSITE_KEYLEN_ERROR);
+```
+===END===
+
+===ISSUE===
+FILE: src/composite_sign/src/crypt_composite_sign.c
+LINE: 224
+SEVERITY: medium
+TITLE: CRYPT_CTRL_SET_CTX_INFO does not validate val before BSL_SAL_Dump
+REVIEWERS: CODEX
+CONFIDENCE: trusted
+PROBLEM: The val parameter is not validated before being passed to BSL_SAL_Dump. If the caller passes len > 0 with val == NULL, BSL_SAL_Dump will dereference NULL and crash.
+CODE:
+```
+if (len > COMPOSITE_MAX_CTX_BYTES) {
+    BSL_ERR_PUSH_ERROR(CRYPT_COMPOSITE_KEYLEN_ERROR);
+    return CRYPT_COMPOSITE_KEYLEN_ERROR;
+}
+ctx->ctxInfo = BSL_SAL_Dump((uint8_t *)val, len);
+```
+FIX:
+```
+if (len > COMPOSITE_MAX_CTX_BYTES) {
+    BSL_ERR_PUSH_ERROR(CRYPT_COMPOSITE_KEYLEN_ERROR);
+    return CRYPT_COMPOSITE_KEYLEN_ERROR;
+}
+if (val == NULL && len > 0) {
+    BSL_ERR_PUSH_ERROR(CRYPT_NULL_INPUT);
+    return CRYPT_NULL_INPUT;
+}
+ctx->ctxInfo = BSL_SAL_Dump((uint8_t *)val, len);
+```
+===END===
+
+===ISSUE===
+FILE: src/composite_sign/src/crypt_composite_sign.c
+LINE: 446
+SEVERITY: medium
+TITLE: GetConstParamValue return value ignored in SetPrvKeyEx/SetPubKeyEx
+REVIEWERS: CLAUDE
+CONFIDENCE: trusted
+PROBLEM: The return value of GetConstParamValue is cast to void and ignored. If the parameter is not found, prv.data and prv.len remain uninitialized (zero), which will cause CRYPT_COMPOSITE_SetPrvKey to fail with a misleading error.
+CODE:
+```
+CRYPT_CompositePrv prv = {0};
+(void)GetConstParamValue(para, CRYPT_PARAM_COMPOSITE_PRVKEY, &prv.data, &prv.len);
+return CRYPT_COMPOSITE_SetPrvKey(ctx, &prv);
+```
+FIX:
+```
+CRYPT_CompositePrv prv = {0};
+if (GetConstParamValue(para, CRYPT_PARAM_COMPOSITE_PRVKEY, &prv.data, &prv.len) == NULL) {
+    BSL_ERR_PUSH_ERROR(CRYPT_INVALID_ARG);
+    return CRYPT_INVALID_ARG;
+}
+return CRYPT_COMPOSITE_SetPrvKey(ctx, &prv);
+```
+===END===
+
+===ISSUE===
+FILE: src/composite_sign/src/crypt_composite_sign.c
+LINE: 54-58
+SEVERITY: medium
+TITLE: Duplicate algorithm labels for MLDSA65 and MLDSA87 composite algorithms
+REVIEWERS: CLAUDE, CODEX
+CONFIDENCE: trusted
+PROBLEM: All three entries in g_composite_info have the same label "COMPSIG-MLDSA44-SM2". The labels for MLDSA65 and MLDSA87 should match their algorithm IDs. The domain-separation label in the signed message is incorrect for those variants, which can break interoperability and produce non-spec signatures.
+CODE:
+```
+{CRYPT_COMPOSITE_MLDSA44_SM2, "COMPSIG-MLDSA44-SM2", ...},
+{CRYPT_COMPOSITE_MLDSA65_SM2, "COMPSIG-MLDSA44-SM2", ...},
+{CRYPT_COMPOSITE_MLDSA87_SM2, "COMPSIG-MLDSA44-SM2", ...},
+```
+FIX:
+```
+{CRYPT_COMPOSITE_MLDSA44_SM2, "COMPSIG-MLDSA44-SM2", ...},
+{CRYPT_COMPOSITE_MLDSA65_SM2, "COMPSIG-MLDSA65-SM2", ...},
+{CRYPT_COMPOSITE_MLDSA87_SM2, "COMPSIG-MLDSA87-SM2", ...},
+```
+===END===
+
+===ISSUE===
+FILE: src/composite_sign/src/crypt_composite_sign_encdec.c
+LINE: 42-47
+SEVERITY: low
+TITLE: Missing null check after malloc before use in CRYPT_CompositeGetMldsaPrvKey
+REVIEWERS: CLAUDE
+CONFIDENCE: trusted
+PROBLEM: In CRYPT_CompositeGetMldsaPrvKey, the return value of the ctrl call is not checked before using the result in encode->dataLen. If the ctrl call fails, the allocated memory leaks.
+CODE:
+```
+uint8_t *prv = (uint8_t *)BSL_SAL_Malloc(prvLen);
+RETURN_RET_IF(prv == NULL, CRYPT_MEM_ALLOC_FAIL);
+GOTO_ERR_IF(ctx->pqcMethod->ctrl(ctx->pqcCtx, CRYPT_CTRL_GET_MLDSA_SEED, prv, prvLen), ret);
+encode->data = prv;
+encode->dataLen = prvLen;
+```
+FIX:
+```
+uint8_t *prv = (uint8_t *)BSL_SAL_Malloc(prvLen);
+RETURN_RET_IF(prv == NULL, CRYPT_MEM_ALLOC_FAIL);
+ret = ctx->pqcMethod->ctrl(ctx->pqcCtx, CRYPT_CTRL_GET_MLDSA_SEED, prv, prvLen);
+if (ret != CRYPT_SUCCESS) {
+    BSL_SAL_Free(prv);
+    return ret;
+}
+encode->data = prv;
+encode->dataLen = prvLen;
+```
+===END===
+
+===ISSUE===
+FILE: src/composite_sign/src/crypt_composite_sign.c
+LINE: 407
+SEVERITY: low
+TITLE: CRYPT_COMPOSITE_GetPrvKeyEx does not validate ctx parameter
+REVIEWERS: CLAUDE
+CONFIDENCE: likely
+PROBLEM: The function only checks if para is NULL but doesn't validate ctx before calling CRYPT_COMPOSITE_GetPrvKey. This means error messages may be misleading when ctx is NULL.
+CODE:
+```
+int32_t CRYPT_COMPOSITE_GetPrvKeyEx(const CRYPT_CompositeCtx *ctx, BSL_Param *para)
+{
+    if (para == NULL) {
+        BSL_ERR_PUSH_ERROR(CRYPT_NULL_INPUT);
+        return CRYPT_NULL_INPUT;
+    }
+```
+FIX:
+```
+int32_t CRYPT_COMPOSITE_GetPrvKeyEx(const CRYPT_CompositeCtx *ctx, BSL_Param *para)
+{
+    if (para == NULL || ctx == NULL) {
+        BSL_ERR_PUSH_ERROR(CRYPT_NULL_INPUT);
+        return CRYPT_NULL_INPUT;
+    }
+```
+===END===

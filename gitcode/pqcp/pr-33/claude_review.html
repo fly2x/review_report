@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Code Review: openhitls/pqcp#33 - CLAUDE</title>
+    <style>
+        :root { --critical: #dc2626; --high: #ea580c; --medium: #ca8a04; --low: #65a30d; }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: system-ui, sans-serif; background: #f8fafc; color: #1e293b; padding: 2rem; line-height: 1.6; }
+        .container { max-width: 900px; margin: 0 auto; }
+        h1 { font-size: 1.5rem; margin-bottom: 0.5rem; }
+        .subtitle { color: #64748b; margin-bottom: 2rem; }
+        .section { margin-bottom: 2rem; }
+        .section-title { font-size: 1.1rem; font-weight: 600; padding: 0.5rem 1rem; border-radius: 0.5rem 0.5rem 0 0; color: white; }
+        .section-title.critical { background: var(--critical); }
+        .section-title.high { background: var(--high); }
+        .section-title.medium { background: var(--medium); }
+        .section-title.low { background: var(--low); }
+        .issue { background: white; border: 1px solid #e2e8f0; border-top: none; padding: 1rem; }
+        .issue:last-child { border-radius: 0 0 0.5rem 0.5rem; }
+        .issue-title { font-weight: 600; margin-bottom: 0.25rem; }
+        .issue-location { font-family: monospace; font-size: 0.875rem; color: #64748b; margin-bottom: 0.75rem; }
+        .issue-source { font-size: 0.75rem; color: #94a3b8; margin-top: 0.5rem; }
+        pre { background: #1e293b; color: #e2e8f0; padding: 0.75rem; border-radius: 0.375rem; overflow-x: auto; font-size: 0.875rem; margin: 0.5rem 0; }
+        .problem { margin: 0.75rem 0; }
+        .fix-label { font-weight: 600; margin-top: 0.75rem; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Code Review: openhitls/pqcp#33 - CLAUDE</h1>
+        <div class="subtitle"></div>
+<div class="section"><div class="section-title high">High</div>
+<div class="issue">
+                <div class="issue-title">Missing break statement in switch case leads to fallthrough</div>
+                <div class="issue-location">src/provider/pqcp_pkey.c:44-46</div>
+                <pre>case CRYPT_PKEY_COMPOSITE_SIGN:
+            pkeyCtx = CRYPT_COMPOSITE_NewCtx();
+        default:
+            break;</pre>
+                <div class="problem"><strong>Issue:</strong> In CRYPT_PQCP_PkeyMgmtNewCtx(), the case for CRYPT_PKEY_COMPOSITE_SIGN is missing a break statement. This causes a fallthrough to the default case, which doesn't set pkeyCtx, leaving it as NULL for the COMPOSITE_SIGN algorithm.</div>
+                <div class="fix-label">Fix:</div><pre>case CRYPT_PKEY_COMPOSITE_SIGN:
+            pkeyCtx = CRYPT_COMPOSITE_NewCtx();
+            break;
+        default:
+            break;</pre>
+                <div class="issue-source">Reviewer: claude</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">CRYPT_COMPOSITE_DupCtx does not check if ctx->info is NULL before dereferencing</div>
+                <div class="issue-location">src/composite_sign/src/crypt_composite_sign.c:116-143</div>
+                <pre>CRYPT_CompositeCtx *CRYPT_COMPOSITE_DupCtx(CRYPT_CompositeCtx *ctx)
+{
+    if (ctx == NULL) {
+        BSL_ERR_PUSH_ERROR(CRYPT_NULL_INPUT);
+        return NULL;
+    }
+    CRYPT_CompositeCtx *newCtx = CRYPT_COMPOSITE_NewCtx();
+    if (newCtx == NULL) {
+        BSL_ERR_PUSH_ERROR(CRYPT_MEM_ALLOC_FAIL);
+        return NULL;
+    }
+    newCtx-&gt;info = ctx-&gt;info;  // No NULL check on ctx-&gt;info
+    if (ctx-&gt;pqcMethod != NULL &amp;&amp; ctx-&gt;tradMethod != NULL) {</pre>
+                <div class="problem"><strong>Issue:</strong> The function assigns ctx->info to newCtx->info without checking if ctx->info is NULL. If a context is duplicated before setting algorithm info, the duplicated context will have NULL info, leading to potential crashes when used.</div>
+                <div class="fix-label">Fix:</div><pre>CRYPT_CompositeCtx *CRYPT_COMPOSITE_DupCtx(CRYPT_CompositeCtx *ctx)
+{
+    if (ctx == NULL) {
+        BSL_ERR_PUSH_ERROR(CRYPT_NULL_INPUT);
+        return NULL;
+    }
+    if (ctx-&gt;info == NULL) {
+        BSL_ERR_PUSH_ERROR(CRYPT_COMPOSITE_KEYINFO_NOT_SET);
+        return NULL;
+    }
+    CRYPT_CompositeCtx *newCtx = CRYPT_COMPOSITE_NewCtx();
+    if (newCtx == NULL) {
+        BSL_ERR_PUSH_ERROR(CRYPT_MEM_ALLOC_FAIL);
+        return NULL;
+    }
+    newCtx-&gt;info = ctx-&gt;info;</pre>
+                <div class="issue-source">Reviewer: claude</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">Wrong memcpy size parameter in CompositeMsgEncode</div>
+                <div class="issue-location">src/composite_sign/src/crypt_composite_sign.c:506</div>
+                <pre>(void)memcpy_s(ptr, digestLen, digest, digestLen);</pre>
+                <div class="problem"><strong>Issue:</strong> The last memcpy_s call uses digestLen as the size parameter instead of the actual destination buffer size. This is incorrect because memcpy_s expects the destination buffer size, not the source length.</div>
+                <div class="fix-label">Fix:</div><pre>(void)memcpy_s(ptr, msg-&gt;len - (prefixLen + labelLen + 1 + ctx-&gt;ctxLen), digest, digestLen);</pre>
+                <div class="issue-source">Reviewer: claude</div>
+            </div>
+</div>
+<div class="section"><div class="section-title medium">Medium</div>
+<div class="issue">
+                <div class="issue-title">Duplicate algorithm labels in g_composite_info array</div>
+                <div class="issue-location">src/composite_sign/src/crypt_composite_sign.c:50-59</div>
+                <pre>static const COMPOSITE_ALG_INFO g_composite_info[] = {
+    {CRYPT_COMPOSITE_MLDSA44_SM2, "COMPSIG-MLDSA44-SM2", CRYPT_PKEY_ML_DSA, CRYPT_MLDSA_TYPE_MLDSA_44,
+        CRYPT_PKEY_SM2, 0, CRYPT_MD_SM3, CRYPT_MD_SM3, 0, 1377, 64, 1312, 32, 2420,
+    },
+    {CRYPT_COMPOSITE_MLDSA65_SM2, "COMPSIG-MLDSA44-SM2", CRYPT_PKEY_ML_DSA, CRYPT_MLDSA_TYPE_MLDSA_65,
+        CRYPT_PKEY_SM2, 0, CRYPT_MD_SM3, CRYPT_MD_SM3, 0, 2017, 64, 1952, 32, 3309,
+    },
+    {CRYPT_COMPOSITE_MLDSA87_SM2, "COMPSIG-MLDSA44-SM2", CRYPT_PKEY_ML_DSA, CRYPT_MLDSA_TYPE_MLDSA_87,
+        CRYPT_PKEY_SM2, 0, CRYPT_MD_SM3, CRYPT_MD_SM3, 0, 2657, 64, 2592, 32, 4627,
+    }
+};</pre>
+                <div class="problem"><strong>Issue:</strong> All three entries in g_composite_info have the same label "COMPSIG-MLDSA44-SM2". The labels should be unique and match their algorithm IDs (MLDSA65, MLDSA87).</div>
+                <div class="fix-label">Fix:</div><pre>static const COMPOSITE_ALG_INFO g_composite_info[] = {
+    {CRYPT_COMPOSITE_MLDSA44_SM2, "COMPSIG-MLDSA44-SM2", CRYPT_PKEY_ML_DSA, CRYPT_MLDSA_TYPE_MLDSA_44,
+        CRYPT_PKEY_SM2, 0, CRYPT_MD_SM3, CRYPT_MD_SM3, 0, 1377, 64, 1312, 32, 2420,
+    },
+    {CRYPT_COMPOSITE_MLDSA65_SM2, "COMPSIG-MLDSA65-SM2", CRYPT_PKEY_ML_DSA, CRYPT_MLDSA_TYPE_MLDSA_65,
+        CRYPT_PKEY_SM2, 0, CRYPT_MD_SM3, CRYPT_MD_SM3, 0, 2017, 64, 1952, 32, 3309,
+    },
+    {CRYPT_COMPOSITE_MLDSA87_SM2, "COMPSIG-MLDSA87-SM2", CRYPT_PKEY_ML_DSA, CRYPT_MLDSA_TYPE_MLDSA_87,
+        CRYPT_PKEY_SM2, 0, CRYPT_MD_SM3, CRYPT_MD_SM3, 0, 2657, 64, 2592, 32, 4627,
+    }
+};</pre>
+                <div class="issue-source">Reviewer: claude</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">GetConstParamValue return value ignored in CRYPT_COMPOSITE_SetPrvKeyEx</div>
+                <div class="issue-location">src/composite_sign/src/crypt_composite_sign.c:446</div>
+                <pre>CRYPT_CompositePrv prv = {0};
+    (void)GetConstParamValue(para, CRYPT_PARAM_COMPOSITE_PRVKEY, &amp;prv.data, &amp;prv.len);
+    return CRYPT_COMPOSITE_SetPrvKey(ctx, &amp;prv);</pre>
+                <div class="problem"><strong>Issue:</strong> The return value of GetConstParamValue is cast to void and ignored. If the parameter is not found, prv.data and prv.len remain uninitialized (zero), which will cause CRYPT_COMPOSITE_SetPrvKey to fail with a misleading error.</div>
+                <div class="fix-label">Fix:</div><pre>CRYPT_CompositePrv prv = {0};
+    if (GetConstParamValue(para, CRYPT_PARAM_COMPOSITE_PRVKEY, &amp;prv.data, &amp;prv.len) == NULL) {
+        BSL_ERR_PUSH_ERROR(CRYPT_INVALID_ARG);
+        return CRYPT_INVALID_ARG;
+    }
+    return CRYPT_COMPOSITE_SetPrvKey(ctx, &amp;prv);</pre>
+                <div class="issue-source">Reviewer: claude</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">GetConstParamValue return value ignored in CRYPT_COMPOSITE_SetPubKeyEx</div>
+                <div class="issue-location">src/composite_sign/src/crypt_composite_sign.c:457</div>
+                <pre>CRYPT_CompositePub pub = {0};
+    (void)GetConstParamValue(para, CRYPT_PARAM_COMPOSITE_PUBKEY, &amp;pub.data, &amp;pub.len);
+    return CRYPT_COMPOSITE_SetPubKey(ctx, &amp;pub);</pre>
+                <div class="problem"><strong>Issue:</strong> Same issue as SetPrvKeyEx - the return value is ignored, leading to potential uninitialized data being passed to SetPubKey.</div>
+                <div class="fix-label">Fix:</div><pre>CRYPT_CompositePub pub = {0};
+    if (GetConstParamValue(para, CRYPT_PARAM_COMPOSITE_PUBKEY, &amp;pub.data, &amp;pub.len) == NULL) {
+        BSL_ERR_PUSH_ERROR(CRYPT_INVALID_ARG);
+        return CRYPT_INVALID_ARG;
+    }
+    return CRYPT_COMPOSITE_SetPubKey(ctx, &amp;pub);</pre>
+                <div class="issue-source">Reviewer: claude</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">GetParamValue return value not checked in Ex functions</div>
+                <div class="issue-location">src/composite_sign/src/crypt_composite_sign.c:414</div>
+                <pre>BSL_Param *paramPrv = GetParamValue(para, CRYPT_PARAM_COMPOSITE_PRVKEY, &amp;prv.data, &amp;(prv.len));
+    int32_t ret = CRYPT_COMPOSITE_GetPrvKey(ctx, &amp;prv);</pre>
+                <div class="problem"><strong>Issue:</strong> In GetPrvKeyEx and GetPubKeyEx, the return value of GetParamValue is not checked. If the parameter is not found, the behavior is undefined.</div>
+                <div class="fix-label">Fix:</div><pre>BSL_Param *paramPrv = GetParamValue(para, CRYPT_PARAM_COMPOSITE_PRVKEY, &amp;prv.data, &amp;(prv.len));
+    if (paramPrv == NULL) {
+        BSL_ERR_PUSH_ERROR(CRYPT_INVALID_ARG);
+        return CRYPT_INVALID_ARG;
+    }
+    int32_t ret = CRYPT_COMPOSITE_GetPrvKey(ctx, &amp;prv);</pre>
+                <div class="issue-source">Reviewer: claude</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">Duplicate const qualifier is non-standard</div>
+                <div class="issue-location">src/provider/pqcp_pkey.c:145</div>
+                <pre>const const CRYPT_EAL_Func g_pqcpKeyMgmtCompositeSign[] = {</pre>
+                <div class="problem"><strong>Issue:</strong> The declaration uses "const const" which is not valid C. The extra const qualifier should be removed.</div>
+                <div class="fix-label">Fix:</div><pre>const CRYPT_EAL_Func g_pqcpKeyMgmtCompositeSign[] = {</pre>
+                <div class="issue-source">Reviewer: claude</div>
+            </div>
+</div>
+<div class="section"><div class="section-title low">Low</div>
+<div class="issue">
+                <div class="issue-title">Missing null check after malloc before use</div>
+                <div class="issue-location">src/composite_sign/src/crypt_composite_sign_encdec.c:44-47</div>
+                <pre>uint8_t *prv = (uint8_t *)BSL_SAL_Malloc(prvLen);
+    RETURN_RET_IF(prv == NULL, CRYPT_MEM_ALLOC_FAIL);
+    GOTO_ERR_IF(ctx-&gt;pqcMethod-&gt;ctrl(ctx-&gt;pqcCtx, CRYPT_CTRL_GET_MLDSA_SEED, prv, prvLen), ret);
+    encode-&gt;data = prv;
+    encode-&gt;dataLen = prvLen;</pre>
+                <div class="problem"><strong>Issue:</strong> In CRYPT_CompositeGetMldsaPrvKey, the return value of the ctrl call is not checked before using the result in encode->dataLen. If the ctrl call fails, the allocated memory leaks.</div>
+                <div class="fix-label">Fix:</div><pre>uint8_t *prv = (uint8_t *)BSL_SAL_Malloc(prvLen);
+    RETURN_RET_IF(prv == NULL, CRYPT_MEM_ALLOC_FAIL);
+    ret = ctx-&gt;pqcMethod-&gt;ctrl(ctx-&gt;pqcCtx, CRYPT_CTRL_GET_MLDSA_SEED, prv, prvLen);
+    if (ret != CRYPT_SUCCESS) {
+        BSL_SAL_Free(prv);
+        return ret;
+    }
+    encode-&gt;data = prv;
+    encode-&gt;dataLen = prvLen;</pre>
+                <div class="issue-source">Reviewer: claude</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">CRYPT_COMPOSITE_GetPrvKeyEx does not validate ctx or ctx->info</div>
+                <div class="issue-location">src/composite_sign/src/crypt_composite_sign.c:407-421</div>
+                <pre>int32_t CRYPT_COMPOSITE_GetPrvKeyEx(const CRYPT_CompositeCtx *ctx, BSL_Param *para)
+{
+    if (para == NULL) {
+        BSL_ERR_PUSH_ERROR(CRYPT_NULL_INPUT);
+        return CRYPT_NULL_INPUT;
+    }
+    CRYPT_CompositePrv prv = {0};
+    BSL_Param *paramPrv = GetParamValue(para, CRYPT_PARAM_COMPOSITE_PRVKEY, &amp;prv.data, &amp;(prv.len));
+    int32_t ret = CRYPT_COMPOSITE_GetPrvKey(ctx, &amp;prv);</pre>
+                <div class="problem"><strong>Issue:</strong> The function only checks if para is NULL but doesn't validate ctx or ctx->info before calling CRYPT_COMPOSITE_GetPrvKey. This means error messages may be misleading.</div>
+                <div class="fix-label">Fix:</div><pre>int32_t CRYPT_COMPOSITE_GetPrvKeyEx(const CRYPT_CompositeCtx *ctx, BSL_Param *para)
+{
+    if (para == NULL || ctx == NULL) {
+        BSL_ERR_PUSH_ERROR(CRYPT_NULL_INPUT);
+        return CRYPT_NULL_INPUT;
+    }
+    CRYPT_CompositePrv prv = {0};
+    BSL_Param *paramPrv = GetParamValue(para, CRYPT_PARAM_COMPOSITE_PRVKEY, &amp;prv.data, &amp;(prv.len));
+    int32_t ret = CRYPT_COMPOSITE_GetPrvKey(ctx, &amp;prv);</pre>
+                <div class="issue-source">Reviewer: claude</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">Missing NULL checks for pqcMethod and tradMethod before calling ctrl</div>
+                <div class="issue-location">src/composite_sign/src/crypt_composite_sign.c:278-279</div>
+                <pre>case CRYPT_CTRL_HYBRID_GET_PQC_PUBKEY_LEN:
+            CHECK_UINT32_LEN_AND_INFO(ctx, len);
+            return ctx-&gt;pqcMethod-&gt;ctrl(ctx-&gt;pqcCtx, CRYPT_CTRL_GET_PUBKEY_LEN, val, len);</pre>
+                <div class="problem"><strong>Issue:</strong> In CRYPT_COMPOSITE_Ctrl, the cases for CRYPT_CTRL_HYBRID_GET_* call ctrl on pqcMethod/tradMethod without checking if the method pointers are NULL first.</div>
+                <div class="fix-label">Fix:</div><pre>case CRYPT_CTRL_HYBRID_GET_PQC_PUBKEY_LEN:
+            CHECK_UINT32_LEN_AND_INFO(ctx, len);
+            if (ctx-&gt;pqcMethod == NULL || ctx-&gt;pqcCtx == NULL) {
+                BSL_ERR_PUSH_ERROR(CRYPT_COMPOSITE_KEYINFO_NOT_SET);
+                return CRYPT_COMPOSITE_KEYINFO_NOT_SET;
+            }
+            return ctx-&gt;pqcMethod-&gt;ctrl(ctx-&gt;pqcCtx, CRYPT_CTRL_GET_PUBKEY_LEN, val, len);</pre>
+                <div class="issue-source">Reviewer: claude</div>
+            </div>
+</div>
+</div></body></html>

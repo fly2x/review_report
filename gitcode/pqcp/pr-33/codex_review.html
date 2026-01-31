@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Code Review: openhitls/pqcp#33 - CODEX</title>
+    <style>
+        :root { --critical: #dc2626; --high: #ea580c; --medium: #ca8a04; --low: #65a30d; }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: system-ui, sans-serif; background: #f8fafc; color: #1e293b; padding: 2rem; line-height: 1.6; }
+        .container { max-width: 900px; margin: 0 auto; }
+        h1 { font-size: 1.5rem; margin-bottom: 0.5rem; }
+        .subtitle { color: #64748b; margin-bottom: 2rem; }
+        .section { margin-bottom: 2rem; }
+        .section-title { font-size: 1.1rem; font-weight: 600; padding: 0.5rem 1rem; border-radius: 0.5rem 0.5rem 0 0; color: white; }
+        .section-title.critical { background: var(--critical); }
+        .section-title.high { background: var(--high); }
+        .section-title.medium { background: var(--medium); }
+        .section-title.low { background: var(--low); }
+        .issue { background: white; border: 1px solid #e2e8f0; border-top: none; padding: 1rem; }
+        .issue:last-child { border-radius: 0 0 0.5rem 0.5rem; }
+        .issue-title { font-weight: 600; margin-bottom: 0.25rem; }
+        .issue-location { font-family: monospace; font-size: 0.875rem; color: #64748b; margin-bottom: 0.75rem; }
+        .issue-source { font-size: 0.75rem; color: #94a3b8; margin-top: 0.5rem; }
+        pre { background: #1e293b; color: #e2e8f0; padding: 0.75rem; border-radius: 0.375rem; overflow-x: auto; font-size: 0.875rem; margin: 0.5rem 0; }
+        .problem { margin: 0.75rem 0; }
+        .fix-label { font-weight: 600; margin-top: 0.75rem; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Code Review: openhitls/pqcp#33 - CODEX</h1>
+        <div class="subtitle"></div>
+<div class="section"><div class="section-title high">High</div>
+<div class="issue">
+                <div class="issue-title">Duplicate const qualifier breaks build</div>
+                <div class="issue-location">src/provider/pqcp_pkey.c:145</div>
+                <pre>const const CRYPT_EAL_Func g_pqcpKeyMgmtCompositeSign[] = {</pre>
+                <div class="problem"><strong>Issue:</strong> The declaration uses `const const`, which is invalid C and will not compile.</div>
+                <div class="fix-label">Fix:</div><pre>const CRYPT_EAL_Func g_pqcpKeyMgmtCompositeSign[] = {</pre>
+                <div class="issue-source">Reviewer: codex</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">Traditional private key slice uses wrong buffer pointer</div>
+                <div class="issue-location">src/composite_sign/src/crypt_composite_sign.c:386-388</div>
+                <pre>BSL_Buffer pqcPrv = {prv-&gt;data, ctx-&gt;info-&gt;pqcPrvkeyLen};
+BSL_Buffer tradPrv = {prv-&gt;data, + ctx-&gt;info-&gt;pqcPrvkeyLen, prv-&gt;len - ctx-&gt;info-&gt;pqcPrvkeyLen};</pre>
+                <div class="problem"><strong>Issue:</strong> The SM2 private key buffer is initialized from the start of the composite key (and with an extra initializer), so the PQC seed is reused as the TRAD key. This corrupts key imports and can cause invalid keys or failures.</div>
+                <div class="fix-label">Fix:</div><pre>BSL_Buffer pqcPrv = {prv-&gt;data, ctx-&gt;info-&gt;pqcPrvkeyLen};
+BSL_Buffer tradPrv = {prv-&gt;data + ctx-&gt;info-&gt;pqcPrvkeyLen,
+                      prv-&gt;len - ctx-&gt;info-&gt;pqcPrvkeyLen};</pre>
+                <div class="issue-source">Reviewer: codex</div>
+            </div>
+</div>
+<div class="section"><div class="section-title medium">Medium</div>
+<div class="issue">
+                <div class="issue-title">Composite key setters accept truncated keys</div>
+                <div class="issue-location">src/composite_sign/src/crypt_composite_sign.c:385-399</div>
+                <pre>RETURN_RET_IF(prv-&gt;len &lt;= ctx-&gt;info-&gt;pqcPrvkeyLen, CRYPT_COMPOSITE_KEYLEN_ERROR);
+...
+RETURN_RET_IF(pub-&gt;len &lt;= ctx-&gt;info-&gt;pqcPubkeyLen, CRYPT_COMPOSITE_KEYLEN_ERROR);</pre>
+                <div class="problem"><strong>Issue:</strong> The length checks only ensure the buffer is larger than the PQC part, so a too-short TRAD component can be accepted, resulting in malformed keys and undefined behavior in downstream algorithms.</div>
+                <div class="fix-label">Fix:</div><pre>RETURN_RET_IF(prv-&gt;len != ctx-&gt;info-&gt;compPrvKeyLen, CRYPT_COMPOSITE_KEYLEN_ERROR);
+...
+RETURN_RET_IF(pub-&gt;len != ctx-&gt;info-&gt;compPubKeyLen, CRYPT_COMPOSITE_KEYLEN_ERROR);</pre>
+                <div class="issue-source">Reviewer: codex</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">CRYPT_CTRL_SET_CTX_INFO allows NULL input with non-zero length</div>
+                <div class="issue-location">src/composite_sign/src/crypt_composite_sign.c:214-225</div>
+                <pre>if (len &gt; COMPOSITE_MAX_CTX_BYTES) {
+    BSL_ERR_PUSH_ERROR(CRYPT_COMPOSITE_KEYLEN_ERROR);
+    return CRYPT_COMPOSITE_KEYLEN_ERROR;
+}
+...
+ctx-&gt;ctxInfo = BSL_SAL_Dump((uint8_t *)val, len);</pre>
+                <div class="problem"><strong>Issue:</strong> `val` is not validated before being copied. If the caller passes `len > 0` with `val == NULL`, `BSL_SAL_Dump` will dereference NULL and crash.</div>
+                <div class="fix-label">Fix:</div><pre>if (len &gt; COMPOSITE_MAX_CTX_BYTES) {
+    BSL_ERR_PUSH_ERROR(CRYPT_COMPOSITE_KEYLEN_ERROR);
+    return CRYPT_COMPOSITE_KEYLEN_ERROR;
+}
+if (val == NULL &amp;&amp; len &gt; 0) {
+    BSL_ERR_PUSH_ERROR(CRYPT_NULL_INPUT);
+    return CRYPT_NULL_INPUT;
+}
+ctx-&gt;ctxInfo = BSL_SAL_Dump((uint8_t *)val, len);</pre>
+                <div class="issue-source">Reviewer: codex</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">Missing NULL checks for GetParamValue results in Get*KeyEx</div>
+                <div class="issue-location">src/composite_sign/src/crypt_composite_sign.c:414-435</div>
+                <pre>BSL_Param *paramPrv = GetParamValue(para, CRYPT_PARAM_COMPOSITE_PRVKEY, &amp;prv.data, &amp;(prv.len));
+int32_t ret = CRYPT_COMPOSITE_GetPrvKey(ctx, &amp;prv);
+if (ret != CRYPT_SUCCESS) {
+    return ret;
+}
+paramPrv-&gt;useLen = prv.len;
+
+BSL_Param *paramPub = GetParamValue(para, CRYPT_PARAM_COMPOSITE_PUBKEY, &amp;pub.data, &amp;(pub.len));
+int32_t ret = CRYPT_COMPOSITE_GetPubKey(ctx, &amp;pub);
+if (ret != CRYPT_SUCCESS) {
+    return ret;
+}
+paramPub-&gt;useLen = pub.len;</pre>
+                <div class="problem"><strong>Issue:</strong> If the requested param is absent, `GetParamValue` can return NULL and `paramPrv/paramPub` are dereferenced, causing a crash instead of returning an error.</div>
+                <div class="fix-label">Fix:</div><pre>BSL_Param *paramPrv = GetParamValue(para, CRYPT_PARAM_COMPOSITE_PRVKEY, &amp;prv.data, &amp;(prv.len));
+if (paramPrv == NULL) {
+    BSL_ERR_PUSH_ERROR(CRYPT_INVALID_ARG);
+    return CRYPT_INVALID_ARG;
+}
+int32_t ret = CRYPT_COMPOSITE_GetPrvKey(ctx, &amp;prv);
+if (ret != CRYPT_SUCCESS) {
+    return ret;
+}
+paramPrv-&gt;useLen = prv.len;
+
+BSL_Param *paramPub = GetParamValue(para, CRYPT_PARAM_COMPOSITE_PUBKEY, &amp;pub.data, &amp;(pub.len));
+if (paramPub == NULL) {
+    BSL_ERR_PUSH_ERROR(CRYPT_INVALID_ARG);
+    return CRYPT_INVALID_ARG;
+}
+int32_t ret = CRYPT_COMPOSITE_GetPubKey(ctx, &amp;pub);
+if (ret != CRYPT_SUCCESS) {
+    return ret;
+}
+paramPub-&gt;useLen = pub.len;</pre>
+                <div class="issue-source">Reviewer: codex</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">Composite algorithm labels mismatched for MLDSA65/87</div>
+                <div class="issue-location">src/composite_sign/src/crypt_composite_sign.c:54-58</div>
+                <pre>{CRYPT_COMPOSITE_MLDSA65_SM2, "COMPSIG-MLDSA44-SM2", CRYPT_PKEY_ML_DSA, CRYPT_MLDSA_TYPE_MLDSA_65,
+    CRYPT_PKEY_SM2, 0, CRYPT_MD_SM3, CRYPT_MD_SM3, 0, 2017, 64, 1952, 32, 3309,
+},
+{CRYPT_COMPOSITE_MLDSA87_SM2, "COMPSIG-MLDSA44-SM2", CRYPT_PKEY_ML_DSA, CRYPT_MLDSA_TYPE_MLDSA_87,
+    CRYPT_PKEY_SM2, 0, CRYPT_MD_SM3, CRYPT_MD_SM3, 0, 2657, 64, 2592, 32, 4627,
+},</pre>
+                <div class="problem"><strong>Issue:</strong> The MLDSA65 and MLDSA87 entries use the MLDSA44 label, so the domain-separation label in the signed message is incorrect for those variants. This can break interoperability and produce non-spec signatures.</div>
+                <div class="fix-label">Fix:</div><pre>{CRYPT_COMPOSITE_MLDSA65_SM2, "COMPSIG-MLDSA65-SM2", CRYPT_PKEY_ML_DSA, CRYPT_MLDSA_TYPE_MLDSA_65,
+    CRYPT_PKEY_SM2, 0, CRYPT_MD_SM3, CRYPT_MD_SM3, 0, 2017, 64, 1952, 32, 3309,
+},
+{CRYPT_COMPOSITE_MLDSA87_SM2, "COMPSIG-MLDSA87-SM2", CRYPT_PKEY_ML_DSA, CRYPT_MLDSA_TYPE_MLDSA_87,
+    CRYPT_PKEY_SM2, 0, CRYPT_MD_SM3, CRYPT_MD_SM3, 0, 2657, 64, 2592, 32, 4627,
+},</pre>
+                <div class="issue-source">Reviewer: codex</div>
+            </div>
+</div>
+</div></body></html>

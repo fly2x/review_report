@@ -1,0 +1,274 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Final Report: openhitls/pqcp#33</title>
+    <style>
+        :root { --critical: #dc2626; --high: #ea580c; --medium: #ca8a04; --low: #65a30d;
+                 --trusted: #059669; --likely: #0284c7; --evaluate: #7c3aed; }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: system-ui, sans-serif; background: #f8fafc; color: #1e293b; padding: 2rem; line-height: 1.6; }
+        .container { max-width: 900px; margin: 0 auto; }
+        h1 { font-size: 1.75rem; margin-bottom: 0.5rem; }
+        .subtitle { color: #64748b; margin-bottom: 1rem; }
+        .stats { display: flex; gap: 1rem; margin-bottom: 2rem; flex-wrap: wrap; }
+        .stat { background: white; border: 1px solid #e2e8f0; border-radius: 0.5rem; padding: 1rem; min-width: 100px; text-align: center; }
+        .stat-value { font-size: 1.5rem; font-weight: 700; }
+        .stat-label { font-size: 0.875rem; color: #64748b; }
+        .stat.critical .stat-value { color: var(--critical); }
+        .stat.high .stat-value { color: var(--high); }
+        .stat.medium .stat-value { color: var(--medium); }
+        .stat.low .stat-value { color: var(--low); }
+        .reviewers { background: #e0e7ff; color: #3730a3; padding: 0.5rem 1rem; border-radius: 0.5rem; margin-bottom: 2rem; }
+        .section { margin-bottom: 2rem; }
+        .section-title { font-size: 1.1rem; font-weight: 600; padding: 0.5rem 1rem; border-radius: 0.5rem 0.5rem 0 0; color: white; }
+        .section-title.critical { background: var(--critical); }
+        .section-title.high { background: var(--high); }
+        .section-title.medium { background: var(--medium); }
+        .section-title.low { background: var(--low); }
+        .issue { background: white; border: 1px solid #e2e8f0; border-top: none; padding: 1rem; }
+        .issue:last-child { border-radius: 0 0 0.5rem 0.5rem; }
+        .issue-title { font-weight: 600; margin-bottom: 0.25rem; }
+        .issue-location { font-family: monospace; font-size: 0.875rem; color: #64748b; margin-bottom: 0.5rem; }
+        .issue-meta { font-size: 0.75rem; margin-bottom: 0.75rem; display: flex; gap: 0.75rem; align-items: center; }
+        .issue-meta .reviewers { background: #f1f5f9; color: #475569; padding: 0.25rem 0.5rem; border-radius: 0.25rem; margin: 0; }
+        .confidence-badge { padding: 0.25rem 0.5rem; border-radius: 0.25rem; font-weight: 500; }
+        .confidence-badge.trusted { background: #d1fae5; color: #065f46; }
+        .confidence-badge.likely { background: #dbeafe; color: #1e40af; }
+        .confidence-badge.evaluate { background: #ede9fe; color: #5b21b6; }
+        pre { background: #1e293b; color: #e2e8f0; padding: 0.75rem; border-radius: 0.375rem; overflow-x: auto; font-size: 0.875rem; margin: 0.5rem 0; }
+        .problem { margin: 0.75rem 0; }
+        .fix-label { font-weight: 600; margin-top: 0.75rem; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Final Code Review Report</h1>
+        <div class="subtitle">openhitls/pqcp - PR #33</div>
+        <p style="margin-bottom: 1rem;"></p>
+
+        <div class="stats">
+            <div class="stat"><div class="stat-value">12</div><div class="stat-label">Total</div></div>
+            <div class="stat critical"><div class="stat-value">1</div><div class="stat-label">Critical</div></div>
+            <div class="stat high"><div class="stat-value">5</div><div class="stat-label">High</div></div>
+            <div class="stat medium"><div class="stat-value">4</div><div class="stat-label">Medium</div></div>
+            <div class="stat low"><div class="stat-value">2</div><div class="stat-label">Low</div></div>
+        </div>
+
+        <div class="reviewers">Reviewers: claude, gemini, codex</div>
+<div class="section"><div class="section-title critical">Critical</div>
+<div class="issue">
+                <div class="issue-title">Incorrect buffer pointer causes traditional private key to use PQC key data</div>
+                <div class="issue-location">src/composite_sign/src/crypt_composite_sign.c:387</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: GEMINI, CODEX</span>
+                    <span class="confidence-badge trusted">置信度: 可信</span>
+                </div>
+                <pre>BSL_Buffer pqcPrv = {prv-&gt;data, ctx-&gt;info-&gt;pqcPrvkeyLen};
+BSL_Buffer tradPrv = {prv-&gt;data, + ctx-&gt;info-&gt;pqcPrvkeyLen, prv-&gt;len - ctx-&gt;info-&gt;pqcPrvkeyLen};</pre>
+                <div class="problem"><strong>Issue:</strong> The tradPrv buffer is incorrectly initialized with `prv->data` instead of `prv->data + ctx->info->pqcPrvkeyLen`. The comma operator in the brace initializer `{prv->data, + ctx->info->pqcPrvkeyLen, prv->len - ctx->info->pqcPrvkeyLen}` evaluates to just the last value, and the data pointer is set to the start of the buffer instead of the offset. This causes the traditional private key to be set using PQC private key data, corrupting key imports.</div>
+                <div class="fix-label">Fix:</div><pre>BSL_Buffer pqcPrv = {prv-&gt;data, ctx-&gt;info-&gt;pqcPrvkeyLen};
+BSL_Buffer tradPrv = {prv-&gt;data + ctx-&gt;info-&gt;pqcPrvkeyLen, prv-&gt;len - ctx-&gt;info-&gt;pqcPrvkeyLen};</pre>
+            </div>
+</div>
+<div class="section"><div class="section-title high">High</div>
+<div class="issue">
+                <div class="issue-title">Duplicate const qualifier is invalid C syntax</div>
+                <div class="issue-location">src/provider/pqcp_pkey.c:145</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CLAUDE, CODEX, GEMINI</span>
+                    <span class="confidence-badge trusted">置信度: 可信</span>
+                </div>
+                <pre>const const CRYPT_EAL_Func g_pqcpKeyMgmtCompositeSign[] = {</pre>
+                <div class="problem"><strong>Issue:</strong> The declaration uses `const const` which is not valid C syntax and will cause a compilation error.</div>
+                <div class="fix-label">Fix:</div><pre>const CRYPT_EAL_Func g_pqcpKeyMgmtCompositeSign[] = {</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">Missing break statement causes fallthrough in switch case</div>
+                <div class="issue-location">src/composite_sign/src/crypt_composite_sign.c:44-46</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CLAUDE, GEMINI</span>
+                    <span class="confidence-badge trusted">置信度: 可信</span>
+                </div>
+                <pre>case CRYPT_PKEY_COMPOSITE_SIGN:
+    pkeyCtx = CRYPT_COMPOSITE_NewCtx();
+default:
+    break;</pre>
+                <div class="problem"><strong>Issue:</strong> The CRYPT_PKEY_COMPOSITE_SIGN case is missing a break statement, causing fallthrough to the default case. This means pkeyCtx will be set to NULL even though CRYPT_COMPOSITE_NewCtx() was called, because the default case doesn't set pkeyCtx.</div>
+                <div class="fix-label">Fix:</div><pre>case CRYPT_PKEY_COMPOSITE_SIGN:
+    pkeyCtx = CRYPT_COMPOSITE_NewCtx();
+    break;
+default:
+    break;</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">Wrong memcpy_s size parameter uses digestLen instead of destination buffer size</div>
+                <div class="issue-location">src/composite_sign/src/crypt_composite_sign.c:506</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CLAUDE</span>
+                    <span class="confidence-badge trusted">置信度: 可信</span>
+                </div>
+                <pre>(void)memcpy_s(ptr, digestLen, digest, digestLen);</pre>
+                <div class="problem"><strong>Issue:</strong> The memcpy_s call uses digestLen as the size parameter instead of the actual destination buffer size. The memcpy_s function expects the destination buffer size as the second parameter, not the source length.</div>
+                <div class="fix-label">Fix:</div><pre>(void)memcpy_s(ptr, msg-&gt;len - (prefixLen + labelLen + 1 + ctx-&gt;ctxLen), digest, digestLen);</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">CRYPT_COMPOSITE_DupCtx does not check if ctx->info is NULL before dereferencing</div>
+                <div class="issue-location">src/composite_sign/src/crypt_composite_sign.c:127</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CLAUDE</span>
+                    <span class="confidence-badge trusted">置信度: 可信</span>
+                </div>
+                <pre>newCtx-&gt;info = ctx-&gt;info;
+if (ctx-&gt;pqcMethod != NULL &amp;&amp; ctx-&gt;tradMethod != NULL) {</pre>
+                <div class="problem"><strong>Issue:</strong> The function assigns ctx->info to newCtx->info without checking if ctx->info is NULL. If a context is duplicated before setting algorithm info, the duplicated context will have NULL info, leading to potential crashes when used.</div>
+                <div class="fix-label">Fix:</div><pre>if (ctx-&gt;info == NULL) {
+    BSL_ERR_PUSH_ERROR(CRYPT_COMPOSITE_KEYINFO_NOT_SET);
+    return NULL;
+}
+newCtx-&gt;info = ctx-&gt;info;
+if (ctx-&gt;pqcMethod != NULL &amp;&amp; ctx-&gt;tradMethod != NULL) {</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">GetParamValue return value not checked before dereferencing causing potential NULL dereference</div>
+                <div class="issue-location">src/composite_sign/src/crypt_composite_sign.c:414-435</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CLAUDE, CODEX</span>
+                    <span class="confidence-badge trusted">置信度: 可信</span>
+                </div>
+                <pre>BSL_Param *paramPrv = GetParamValue(para, CRYPT_PARAM_COMPOSITE_PRVKEY, &amp;prv.data, &amp;(prv.len));
+int32_t ret = CRYPT_COMPOSITE_GetPrvKey(ctx, &amp;prv);
+if (ret != CRYPT_SUCCESS) {
+    return ret;
+}
+paramPrv-&gt;useLen = prv.len;</pre>
+                <div class="problem"><strong>Issue:</strong> In CRYPT_COMPOSITE_GetPrvKeyEx and CRYPT_COMPOSITE_GetPubKeyEx, the return value of GetParamValue is not checked. If the parameter is not found (returns NULL), paramPrv/paramPub is dereferenced, causing a crash.</div>
+                <div class="fix-label">Fix:</div><pre>BSL_Param *paramPrv = GetParamValue(para, CRYPT_PARAM_COMPOSITE_PRVKEY, &amp;prv.data, &amp;(prv.len));
+if (paramPrv == NULL) {
+    BSL_ERR_PUSH_ERROR(CRYPT_INVALID_ARG);
+    return CRYPT_INVALID_ARG;
+}
+int32_t ret = CRYPT_COMPOSITE_GetPrvKey(ctx, &amp;prv);
+if (ret != CRYPT_SUCCESS) {
+    return ret;
+}
+paramPrv-&gt;useLen = prv.len;</pre>
+            </div>
+</div>
+<div class="section"><div class="section-title medium">Medium</div>
+<div class="issue">
+                <div class="issue-title">Composite key length validation allows truncated traditional keys</div>
+                <div class="issue-location">src/composite_sign/src/crypt_composite_sign.c:385</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CODEX</span>
+                    <span class="confidence-badge trusted">置信度: 可信</span>
+                </div>
+                <pre>RETURN_RET_IF(prv-&gt;len &lt;= ctx-&gt;info-&gt;pqcPrvkeyLen, CRYPT_COMPOSITE_KEYLEN_ERROR);</pre>
+                <div class="problem"><strong>Issue:</strong> The length checks only ensure the buffer is larger than the PQC part (using `<=` comparison instead of exact length match), so a too-short TRAD component can be accepted, resulting in malformed keys and undefined behavior in downstream algorithms.</div>
+                <div class="fix-label">Fix:</div><pre>RETURN_RET_IF(prv-&gt;len != ctx-&gt;info-&gt;compPrvKeyLen, CRYPT_COMPOSITE_KEYLEN_ERROR);</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">CRYPT_CTRL_SET_CTX_INFO does not validate val before BSL_SAL_Dump</div>
+                <div class="issue-location">src/composite_sign/src/crypt_composite_sign.c:224</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CODEX</span>
+                    <span class="confidence-badge trusted">置信度: 可信</span>
+                </div>
+                <pre>if (len &gt; COMPOSITE_MAX_CTX_BYTES) {
+    BSL_ERR_PUSH_ERROR(CRYPT_COMPOSITE_KEYLEN_ERROR);
+    return CRYPT_COMPOSITE_KEYLEN_ERROR;
+}
+ctx-&gt;ctxInfo = BSL_SAL_Dump((uint8_t *)val, len);</pre>
+                <div class="problem"><strong>Issue:</strong> The val parameter is not validated before being passed to BSL_SAL_Dump. If the caller passes len > 0 with val == NULL, BSL_SAL_Dump will dereference NULL and crash.</div>
+                <div class="fix-label">Fix:</div><pre>if (len &gt; COMPOSITE_MAX_CTX_BYTES) {
+    BSL_ERR_PUSH_ERROR(CRYPT_COMPOSITE_KEYLEN_ERROR);
+    return CRYPT_COMPOSITE_KEYLEN_ERROR;
+}
+if (val == NULL &amp;&amp; len &gt; 0) {
+    BSL_ERR_PUSH_ERROR(CRYPT_NULL_INPUT);
+    return CRYPT_NULL_INPUT;
+}
+ctx-&gt;ctxInfo = BSL_SAL_Dump((uint8_t *)val, len);</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">GetConstParamValue return value ignored in SetPrvKeyEx/SetPubKeyEx</div>
+                <div class="issue-location">src/composite_sign/src/crypt_composite_sign.c:446</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CLAUDE</span>
+                    <span class="confidence-badge trusted">置信度: 可信</span>
+                </div>
+                <pre>CRYPT_CompositePrv prv = {0};
+(void)GetConstParamValue(para, CRYPT_PARAM_COMPOSITE_PRVKEY, &amp;prv.data, &amp;prv.len);
+return CRYPT_COMPOSITE_SetPrvKey(ctx, &amp;prv);</pre>
+                <div class="problem"><strong>Issue:</strong> The return value of GetConstParamValue is cast to void and ignored. If the parameter is not found, prv.data and prv.len remain uninitialized (zero), which will cause CRYPT_COMPOSITE_SetPrvKey to fail with a misleading error.</div>
+                <div class="fix-label">Fix:</div><pre>CRYPT_CompositePrv prv = {0};
+if (GetConstParamValue(para, CRYPT_PARAM_COMPOSITE_PRVKEY, &amp;prv.data, &amp;prv.len) == NULL) {
+    BSL_ERR_PUSH_ERROR(CRYPT_INVALID_ARG);
+    return CRYPT_INVALID_ARG;
+}
+return CRYPT_COMPOSITE_SetPrvKey(ctx, &amp;prv);</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">Duplicate algorithm labels for MLDSA65 and MLDSA87 composite algorithms</div>
+                <div class="issue-location">src/composite_sign/src/crypt_composite_sign.c:54-58</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CLAUDE, CODEX</span>
+                    <span class="confidence-badge trusted">置信度: 可信</span>
+                </div>
+                <pre>{CRYPT_COMPOSITE_MLDSA44_SM2, "COMPSIG-MLDSA44-SM2", ...},
+{CRYPT_COMPOSITE_MLDSA65_SM2, "COMPSIG-MLDSA44-SM2", ...},
+{CRYPT_COMPOSITE_MLDSA87_SM2, "COMPSIG-MLDSA44-SM2", ...},</pre>
+                <div class="problem"><strong>Issue:</strong> All three entries in g_composite_info have the same label "COMPSIG-MLDSA44-SM2". The labels for MLDSA65 and MLDSA87 should match their algorithm IDs. The domain-separation label in the signed message is incorrect for those variants, which can break interoperability and produce non-spec signatures.</div>
+                <div class="fix-label">Fix:</div><pre>{CRYPT_COMPOSITE_MLDSA44_SM2, "COMPSIG-MLDSA44-SM2", ...},
+{CRYPT_COMPOSITE_MLDSA65_SM2, "COMPSIG-MLDSA65-SM2", ...},
+{CRYPT_COMPOSITE_MLDSA87_SM2, "COMPSIG-MLDSA87-SM2", ...},</pre>
+            </div>
+</div>
+<div class="section"><div class="section-title low">Low</div>
+<div class="issue">
+                <div class="issue-title">Missing null check after malloc before use in CRYPT_CompositeGetMldsaPrvKey</div>
+                <div class="issue-location">src/composite_sign/src/crypt_composite_sign_encdec.c:42-47</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CLAUDE</span>
+                    <span class="confidence-badge trusted">置信度: 可信</span>
+                </div>
+                <pre>uint8_t *prv = (uint8_t *)BSL_SAL_Malloc(prvLen);
+RETURN_RET_IF(prv == NULL, CRYPT_MEM_ALLOC_FAIL);
+GOTO_ERR_IF(ctx-&gt;pqcMethod-&gt;ctrl(ctx-&gt;pqcCtx, CRYPT_CTRL_GET_MLDSA_SEED, prv, prvLen), ret);
+encode-&gt;data = prv;
+encode-&gt;dataLen = prvLen;</pre>
+                <div class="problem"><strong>Issue:</strong> In CRYPT_CompositeGetMldsaPrvKey, the return value of the ctrl call is not checked before using the result in encode->dataLen. If the ctrl call fails, the allocated memory leaks.</div>
+                <div class="fix-label">Fix:</div><pre>uint8_t *prv = (uint8_t *)BSL_SAL_Malloc(prvLen);
+RETURN_RET_IF(prv == NULL, CRYPT_MEM_ALLOC_FAIL);
+ret = ctx-&gt;pqcMethod-&gt;ctrl(ctx-&gt;pqcCtx, CRYPT_CTRL_GET_MLDSA_SEED, prv, prvLen);
+if (ret != CRYPT_SUCCESS) {
+    BSL_SAL_Free(prv);
+    return ret;
+}
+encode-&gt;data = prv;
+encode-&gt;dataLen = prvLen;</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">CRYPT_COMPOSITE_GetPrvKeyEx does not validate ctx parameter</div>
+                <div class="issue-location">src/composite_sign/src/crypt_composite_sign.c:407</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CLAUDE</span>
+                    <span class="confidence-badge likely">置信度: 较可信</span>
+                </div>
+                <pre>int32_t CRYPT_COMPOSITE_GetPrvKeyEx(const CRYPT_CompositeCtx *ctx, BSL_Param *para)
+{
+    if (para == NULL) {
+        BSL_ERR_PUSH_ERROR(CRYPT_NULL_INPUT);
+        return CRYPT_NULL_INPUT;
+    }</pre>
+                <div class="problem"><strong>Issue:</strong> The function only checks if para is NULL but doesn't validate ctx before calling CRYPT_COMPOSITE_GetPrvKey. This means error messages may be misleading when ctx is NULL.</div>
+                <div class="fix-label">Fix:</div><pre>int32_t CRYPT_COMPOSITE_GetPrvKeyEx(const CRYPT_CompositeCtx *ctx, BSL_Param *para)
+{
+    if (para == NULL || ctx == NULL) {
+        BSL_ERR_PUSH_ERROR(CRYPT_NULL_INPUT);
+        return CRYPT_NULL_INPUT;
+    }</pre>
+            </div>
+</div>
+</div></body></html>

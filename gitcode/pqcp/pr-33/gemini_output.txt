@@ -1,0 +1,69 @@
+I will start by checking the current git status and available branches to confirm the environment state, and then proceed to generate the diff statistics as requested.
+I will read the changes in `include/pqcp_provider.h` and `include/pqcp_types.h` to understand the new types and definitions introduced.
+I will read the changes in `src/provider/pqcp_provider.c` and `src/provider/pqcp_provider_impl.h` to check the algorithm registration.
+I will read `src/provider/pqcp_pkey.c` to examine the implementation of `g_pqcpKeyMgmtCompositeSign` and `g_pqcpCompositeSign`.
+I will read `src/composite_sign/include/crypt_composite_sign.h` and `src/composite_sign/src/crypt_composite_sign.c` to examine the implementation of `composite_sign`.
+I will read `src/composite_sign/src/crypt_composite_sign_encdec.c` and `include/bsl_params.h` (if accessible, otherwise I'll infer) to verify `BSL_Buffer` definition and helper function implementations. I'll also check `include/crypt_types.h` if `BSL_Buffer` is there.
+I will read `src/composite_sign/src/crypt_composite_sign_encdec.c` to examine the helper functions and infer the `BSL_Buffer` structure.
+I will read `include/pqcp_err.h` to check for new error definitions and their usage.
+I will read `src/polarlac/src/polarlac.c` to examine the changes made.
+I will read `src/composite_sign/src/crypt_composite_sign_local.h` to check for macro definitions and hidden state.
+I will read `test/demo/composite_sign_demo.c` to verify usage patterns.
+===ISSUE===
+FILE: src/composite_sign/src/crypt_composite_sign.c
+LINE: 389
+SEVERITY: critical
+TITLE: Incorrect buffer pointer arithmetic and initialization
+PROBLEM: The initialization of `tradPrv` uses the comma operator incorrectly within the brace initializer, or attempts to initialize 3 fields when `BSL_Buffer` likely has 2. Critically, `tradPrv.data` is initialized to `prv->data` (the start of the buffer) instead of the offset pointer. This causes the traditional private key to be set using the PQC private key data.
+CODE:
+```c
+    BSL_Buffer pqcPrv = {prv->data, ctx->info->pqcPrvkeyLen};
+    BSL_Buffer tradPrv = {prv->data, + ctx->info->pqcPrvkeyLen, prv->len - ctx->info->pqcPrvkeyLen};
+    RETURN_RET_IF_ERR(CRYPT_CompositeSetPqcPrvKey(ctx, &pqcPrv), ret);
+```
+FIX:
+```c
+    BSL_Buffer pqcPrv = {prv->data, ctx->info->pqcPrvkeyLen};
+    BSL_Buffer tradPrv = {prv->data + ctx->info->pqcPrvkeyLen, prv->len - ctx->info->pqcPrvkeyLen};
+    RETURN_RET_IF_ERR(CRYPT_CompositeSetPqcPrvKey(ctx, &pqcPrv), ret);
+```
+===END===
+
+===ISSUE===
+FILE: src/provider/pqcp_pkey.c
+LINE: 46-49
+SEVERITY: low
+TITLE: Missing break statement in switch case
+PROBLEM: The `CRYPT_PKEY_COMPOSITE_SIGN` case falls through to the `default` case. While the `default` case contains a `break`, relying on this fallthrough is fragile and considered bad practice.
+CODE:
+```c
+        case CRYPT_PKEY_COMPOSITE_SIGN:
+            pkeyCtx = CRYPT_COMPOSITE_NewCtx();
+        default:
+            break;
+```
+FIX:
+```c
+        case CRYPT_PKEY_COMPOSITE_SIGN:
+            pkeyCtx = CRYPT_COMPOSITE_NewCtx();
+            break;
+        default:
+            break;
+```
+===END===
+
+===ISSUE===
+FILE: src/provider/pqcp_pkey.c
+LINE: 147
+SEVERITY: low
+TITLE: Duplicate const qualifier
+PROBLEM: The variable `g_pqcpKeyMgmtCompositeSign` is declared with `const const`. This is redundant.
+CODE:
+```c
+const const CRYPT_EAL_Func g_pqcpKeyMgmtCompositeSign[] = {
+```
+FIX:
+```c
+const CRYPT_EAL_Func g_pqcpKeyMgmtCompositeSign[] = {
+```
+===END===

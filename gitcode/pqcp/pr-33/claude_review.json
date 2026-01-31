@@ -1,0 +1,112 @@
+[
+  {
+    "source": "claude",
+    "file": "src/provider/pqcp_pkey.c",
+    "line": "44-46",
+    "severity": "high",
+    "title": "Missing break statement in switch case leads to fallthrough",
+    "problem": "In CRYPT_PQCP_PkeyMgmtNewCtx(), the case for CRYPT_PKEY_COMPOSITE_SIGN is missing a break statement. This causes a fallthrough to the default case, which doesn't set pkeyCtx, leaving it as NULL for the COMPOSITE_SIGN algorithm.",
+    "code": "case CRYPT_PKEY_COMPOSITE_SIGN:\n            pkeyCtx = CRYPT_COMPOSITE_NewCtx();\n        default:\n            break;",
+    "fix": "case CRYPT_PKEY_COMPOSITE_SIGN:\n            pkeyCtx = CRYPT_COMPOSITE_NewCtx();\n            break;\n        default:\n            break;"
+  },
+  {
+    "source": "claude",
+    "file": "src/composite_sign/src/crypt_composite_sign.c",
+    "line": "116-143",
+    "severity": "high",
+    "title": "CRYPT_COMPOSITE_DupCtx does not check if ctx->info is NULL before dereferencing",
+    "problem": "The function assigns ctx->info to newCtx->info without checking if ctx->info is NULL. If a context is duplicated before setting algorithm info, the duplicated context will have NULL info, leading to potential crashes when used.",
+    "code": "CRYPT_CompositeCtx *CRYPT_COMPOSITE_DupCtx(CRYPT_CompositeCtx *ctx)\n{\n    if (ctx == NULL) {\n        BSL_ERR_PUSH_ERROR(CRYPT_NULL_INPUT);\n        return NULL;\n    }\n    CRYPT_CompositeCtx *newCtx = CRYPT_COMPOSITE_NewCtx();\n    if (newCtx == NULL) {\n        BSL_ERR_PUSH_ERROR(CRYPT_MEM_ALLOC_FAIL);\n        return NULL;\n    }\n    newCtx->info = ctx->info;  // No NULL check on ctx->info\n    if (ctx->pqcMethod != NULL && ctx->tradMethod != NULL) {",
+    "fix": "CRYPT_CompositeCtx *CRYPT_COMPOSITE_DupCtx(CRYPT_CompositeCtx *ctx)\n{\n    if (ctx == NULL) {\n        BSL_ERR_PUSH_ERROR(CRYPT_NULL_INPUT);\n        return NULL;\n    }\n    if (ctx->info == NULL) {\n        BSL_ERR_PUSH_ERROR(CRYPT_COMPOSITE_KEYINFO_NOT_SET);\n        return NULL;\n    }\n    CRYPT_CompositeCtx *newCtx = CRYPT_COMPOSITE_NewCtx();\n    if (newCtx == NULL) {\n        BSL_ERR_PUSH_ERROR(CRYPT_MEM_ALLOC_FAIL);\n        return NULL;\n    }\n    newCtx->info = ctx->info;"
+  },
+  {
+    "source": "claude",
+    "file": "src/composite_sign/src/crypt_composite_sign.c",
+    "line": "506",
+    "severity": "high",
+    "title": "Wrong memcpy size parameter in CompositeMsgEncode",
+    "problem": "The last memcpy_s call uses digestLen as the size parameter instead of the actual destination buffer size. This is incorrect because memcpy_s expects the destination buffer size, not the source length.",
+    "code": "(void)memcpy_s(ptr, digestLen, digest, digestLen);",
+    "fix": "(void)memcpy_s(ptr, msg->len - (prefixLen + labelLen + 1 + ctx->ctxLen), digest, digestLen);"
+  },
+  {
+    "source": "claude",
+    "file": "src/composite_sign/src/crypt_composite_sign.c",
+    "line": "50-59",
+    "severity": "medium",
+    "title": "Duplicate algorithm labels in g_composite_info array",
+    "problem": "All three entries in g_composite_info have the same label \"COMPSIG-MLDSA44-SM2\". The labels should be unique and match their algorithm IDs (MLDSA65, MLDSA87).",
+    "code": "static const COMPOSITE_ALG_INFO g_composite_info[] = {\n    {CRYPT_COMPOSITE_MLDSA44_SM2, \"COMPSIG-MLDSA44-SM2\", CRYPT_PKEY_ML_DSA, CRYPT_MLDSA_TYPE_MLDSA_44,\n        CRYPT_PKEY_SM2, 0, CRYPT_MD_SM3, CRYPT_MD_SM3, 0, 1377, 64, 1312, 32, 2420,\n    },\n    {CRYPT_COMPOSITE_MLDSA65_SM2, \"COMPSIG-MLDSA44-SM2\", CRYPT_PKEY_ML_DSA, CRYPT_MLDSA_TYPE_MLDSA_65,\n        CRYPT_PKEY_SM2, 0, CRYPT_MD_SM3, CRYPT_MD_SM3, 0, 2017, 64, 1952, 32, 3309,\n    },\n    {CRYPT_COMPOSITE_MLDSA87_SM2, \"COMPSIG-MLDSA44-SM2\", CRYPT_PKEY_ML_DSA, CRYPT_MLDSA_TYPE_MLDSA_87,\n        CRYPT_PKEY_SM2, 0, CRYPT_MD_SM3, CRYPT_MD_SM3, 0, 2657, 64, 2592, 32, 4627,\n    }\n};",
+    "fix": "static const COMPOSITE_ALG_INFO g_composite_info[] = {\n    {CRYPT_COMPOSITE_MLDSA44_SM2, \"COMPSIG-MLDSA44-SM2\", CRYPT_PKEY_ML_DSA, CRYPT_MLDSA_TYPE_MLDSA_44,\n        CRYPT_PKEY_SM2, 0, CRYPT_MD_SM3, CRYPT_MD_SM3, 0, 1377, 64, 1312, 32, 2420,\n    },\n    {CRYPT_COMPOSITE_MLDSA65_SM2, \"COMPSIG-MLDSA65-SM2\", CRYPT_PKEY_ML_DSA, CRYPT_MLDSA_TYPE_MLDSA_65,\n        CRYPT_PKEY_SM2, 0, CRYPT_MD_SM3, CRYPT_MD_SM3, 0, 2017, 64, 1952, 32, 3309,\n    },\n    {CRYPT_COMPOSITE_MLDSA87_SM2, \"COMPSIG-MLDSA87-SM2\", CRYPT_PKEY_ML_DSA, CRYPT_MLDSA_TYPE_MLDSA_87,\n        CRYPT_PKEY_SM2, 0, CRYPT_MD_SM3, CRYPT_MD_SM3, 0, 2657, 64, 2592, 32, 4627,\n    }\n};"
+  },
+  {
+    "source": "claude",
+    "file": "src/composite_sign/src/crypt_composite_sign.c",
+    "line": "446",
+    "severity": "medium",
+    "title": "GetConstParamValue return value ignored in CRYPT_COMPOSITE_SetPrvKeyEx",
+    "problem": "The return value of GetConstParamValue is cast to void and ignored. If the parameter is not found, prv.data and prv.len remain uninitialized (zero), which will cause CRYPT_COMPOSITE_SetPrvKey to fail with a misleading error.",
+    "code": "CRYPT_CompositePrv prv = {0};\n    (void)GetConstParamValue(para, CRYPT_PARAM_COMPOSITE_PRVKEY, &prv.data, &prv.len);\n    return CRYPT_COMPOSITE_SetPrvKey(ctx, &prv);",
+    "fix": "CRYPT_CompositePrv prv = {0};\n    if (GetConstParamValue(para, CRYPT_PARAM_COMPOSITE_PRVKEY, &prv.data, &prv.len) == NULL) {\n        BSL_ERR_PUSH_ERROR(CRYPT_INVALID_ARG);\n        return CRYPT_INVALID_ARG;\n    }\n    return CRYPT_COMPOSITE_SetPrvKey(ctx, &prv);"
+  },
+  {
+    "source": "claude",
+    "file": "src/composite_sign/src/crypt_composite_sign.c",
+    "line": "457",
+    "severity": "medium",
+    "title": "GetConstParamValue return value ignored in CRYPT_COMPOSITE_SetPubKeyEx",
+    "problem": "Same issue as SetPrvKeyEx - the return value is ignored, leading to potential uninitialized data being passed to SetPubKey.",
+    "code": "CRYPT_CompositePub pub = {0};\n    (void)GetConstParamValue(para, CRYPT_PARAM_COMPOSITE_PUBKEY, &pub.data, &pub.len);\n    return CRYPT_COMPOSITE_SetPubKey(ctx, &pub);",
+    "fix": "CRYPT_CompositePub pub = {0};\n    if (GetConstParamValue(para, CRYPT_PARAM_COMPOSITE_PUBKEY, &pub.data, &pub.len) == NULL) {\n        BSL_ERR_PUSH_ERROR(CRYPT_INVALID_ARG);\n        return CRYPT_INVALID_ARG;\n    }\n    return CRYPT_COMPOSITE_SetPubKey(ctx, &pub);"
+  },
+  {
+    "source": "claude",
+    "file": "src/composite_sign/src/crypt_composite_sign.c",
+    "line": "414",
+    "severity": "medium",
+    "title": "GetParamValue return value not checked in Ex functions",
+    "problem": "In GetPrvKeyEx and GetPubKeyEx, the return value of GetParamValue is not checked. If the parameter is not found, the behavior is undefined.",
+    "code": "BSL_Param *paramPrv = GetParamValue(para, CRYPT_PARAM_COMPOSITE_PRVKEY, &prv.data, &(prv.len));\n    int32_t ret = CRYPT_COMPOSITE_GetPrvKey(ctx, &prv);",
+    "fix": "BSL_Param *paramPrv = GetParamValue(para, CRYPT_PARAM_COMPOSITE_PRVKEY, &prv.data, &(prv.len));\n    if (paramPrv == NULL) {\n        BSL_ERR_PUSH_ERROR(CRYPT_INVALID_ARG);\n        return CRYPT_INVALID_ARG;\n    }\n    int32_t ret = CRYPT_COMPOSITE_GetPrvKey(ctx, &prv);"
+  },
+  {
+    "source": "claude",
+    "file": "src/provider/pqcp_pkey.c",
+    "line": "145",
+    "severity": "medium",
+    "title": "Duplicate const qualifier is non-standard",
+    "problem": "The declaration uses \"const const\" which is not valid C. The extra const qualifier should be removed.",
+    "code": "const const CRYPT_EAL_Func g_pqcpKeyMgmtCompositeSign[] = {",
+    "fix": "const CRYPT_EAL_Func g_pqcpKeyMgmtCompositeSign[] = {"
+  },
+  {
+    "source": "claude",
+    "file": "src/composite_sign/src/crypt_composite_sign_encdec.c",
+    "line": "44-47",
+    "severity": "low",
+    "title": "Missing null check after malloc before use",
+    "problem": "In CRYPT_CompositeGetMldsaPrvKey, the return value of the ctrl call is not checked before using the result in encode->dataLen. If the ctrl call fails, the allocated memory leaks.",
+    "code": "uint8_t *prv = (uint8_t *)BSL_SAL_Malloc(prvLen);\n    RETURN_RET_IF(prv == NULL, CRYPT_MEM_ALLOC_FAIL);\n    GOTO_ERR_IF(ctx->pqcMethod->ctrl(ctx->pqcCtx, CRYPT_CTRL_GET_MLDSA_SEED, prv, prvLen), ret);\n    encode->data = prv;\n    encode->dataLen = prvLen;",
+    "fix": "uint8_t *prv = (uint8_t *)BSL_SAL_Malloc(prvLen);\n    RETURN_RET_IF(prv == NULL, CRYPT_MEM_ALLOC_FAIL);\n    ret = ctx->pqcMethod->ctrl(ctx->pqcCtx, CRYPT_CTRL_GET_MLDSA_SEED, prv, prvLen);\n    if (ret != CRYPT_SUCCESS) {\n        BSL_SAL_Free(prv);\n        return ret;\n    }\n    encode->data = prv;\n    encode->dataLen = prvLen;"
+  },
+  {
+    "source": "claude",
+    "file": "src/composite_sign/src/crypt_composite_sign.c",
+    "line": "407-421",
+    "severity": "low",
+    "title": "CRYPT_COMPOSITE_GetPrvKeyEx does not validate ctx or ctx->info",
+    "problem": "The function only checks if para is NULL but doesn't validate ctx or ctx->info before calling CRYPT_COMPOSITE_GetPrvKey. This means error messages may be misleading.",
+    "code": "int32_t CRYPT_COMPOSITE_GetPrvKeyEx(const CRYPT_CompositeCtx *ctx, BSL_Param *para)\n{\n    if (para == NULL) {\n        BSL_ERR_PUSH_ERROR(CRYPT_NULL_INPUT);\n        return CRYPT_NULL_INPUT;\n    }\n    CRYPT_CompositePrv prv = {0};\n    BSL_Param *paramPrv = GetParamValue(para, CRYPT_PARAM_COMPOSITE_PRVKEY, &prv.data, &(prv.len));\n    int32_t ret = CRYPT_COMPOSITE_GetPrvKey(ctx, &prv);",
+    "fix": "int32_t CRYPT_COMPOSITE_GetPrvKeyEx(const CRYPT_CompositeCtx *ctx, BSL_Param *para)\n{\n    if (para == NULL || ctx == NULL) {\n        BSL_ERR_PUSH_ERROR(CRYPT_NULL_INPUT);\n        return CRYPT_NULL_INPUT;\n    }\n    CRYPT_CompositePrv prv = {0};\n    BSL_Param *paramPrv = GetParamValue(para, CRYPT_PARAM_COMPOSITE_PRVKEY, &prv.data, &(prv.len));\n    int32_t ret = CRYPT_COMPOSITE_GetPrvKey(ctx, &prv);"
+  },
+  {
+    "source": "claude",
+    "file": "src/composite_sign/src/crypt_composite_sign.c",
+    "line": "278-279",
+    "severity": "low",
+    "title": "Missing NULL checks for pqcMethod and tradMethod before calling ctrl",
+    "problem": "In CRYPT_COMPOSITE_Ctrl, the cases for CRYPT_CTRL_HYBRID_GET_* call ctrl on pqcMethod/tradMethod without checking if the method pointers are NULL first.",
+    "code": "case CRYPT_CTRL_HYBRID_GET_PQC_PUBKEY_LEN:\n            CHECK_UINT32_LEN_AND_INFO(ctx, len);\n            return ctx->pqcMethod->ctrl(ctx->pqcCtx, CRYPT_CTRL_GET_PUBKEY_LEN, val, len);",
+    "fix": "case CRYPT_CTRL_HYBRID_GET_PQC_PUBKEY_LEN:\n            CHECK_UINT32_LEN_AND_INFO(ctx, len);\n            if (ctx->pqcMethod == NULL || ctx->pqcCtx == NULL) {\n                BSL_ERR_PUSH_ERROR(CRYPT_COMPOSITE_KEYINFO_NOT_SET);\n                return CRYPT_COMPOSITE_KEYINFO_NOT_SET;\n            }\n            return ctx->pqcMethod->ctrl(ctx->pqcCtx, CRYPT_CTRL_GET_PUBKEY_LEN, val, len);"
+  }
+]

@@ -1,0 +1,62 @@
+[
+  {
+    "source": "codex",
+    "file": "src/provider/pqcp_pkey.c",
+    "line": "145",
+    "severity": "high",
+    "title": "Duplicate const qualifier breaks build",
+    "problem": "The declaration uses `const const`, which is invalid C and will not compile.",
+    "code": "const const CRYPT_EAL_Func g_pqcpKeyMgmtCompositeSign[] = {",
+    "fix": "const CRYPT_EAL_Func g_pqcpKeyMgmtCompositeSign[] = {"
+  },
+  {
+    "source": "codex",
+    "file": "src/composite_sign/src/crypt_composite_sign.c",
+    "line": "386-388",
+    "severity": "high",
+    "title": "Traditional private key slice uses wrong buffer pointer",
+    "problem": "The SM2 private key buffer is initialized from the start of the composite key (and with an extra initializer), so the PQC seed is reused as the TRAD key. This corrupts key imports and can cause invalid keys or failures.",
+    "code": "BSL_Buffer pqcPrv = {prv->data, ctx->info->pqcPrvkeyLen};\nBSL_Buffer tradPrv = {prv->data, + ctx->info->pqcPrvkeyLen, prv->len - ctx->info->pqcPrvkeyLen};",
+    "fix": "BSL_Buffer pqcPrv = {prv->data, ctx->info->pqcPrvkeyLen};\nBSL_Buffer tradPrv = {prv->data + ctx->info->pqcPrvkeyLen,\n                      prv->len - ctx->info->pqcPrvkeyLen};"
+  },
+  {
+    "source": "codex",
+    "file": "src/composite_sign/src/crypt_composite_sign.c",
+    "line": "385-399",
+    "severity": "medium",
+    "title": "Composite key setters accept truncated keys",
+    "problem": "The length checks only ensure the buffer is larger than the PQC part, so a too-short TRAD component can be accepted, resulting in malformed keys and undefined behavior in downstream algorithms.",
+    "code": "RETURN_RET_IF(prv->len <= ctx->info->pqcPrvkeyLen, CRYPT_COMPOSITE_KEYLEN_ERROR);\n...\nRETURN_RET_IF(pub->len <= ctx->info->pqcPubkeyLen, CRYPT_COMPOSITE_KEYLEN_ERROR);",
+    "fix": "RETURN_RET_IF(prv->len != ctx->info->compPrvKeyLen, CRYPT_COMPOSITE_KEYLEN_ERROR);\n...\nRETURN_RET_IF(pub->len != ctx->info->compPubKeyLen, CRYPT_COMPOSITE_KEYLEN_ERROR);"
+  },
+  {
+    "source": "codex",
+    "file": "src/composite_sign/src/crypt_composite_sign.c",
+    "line": "214-225",
+    "severity": "medium",
+    "title": "CRYPT_CTRL_SET_CTX_INFO allows NULL input with non-zero length",
+    "problem": "`val` is not validated before being copied. If the caller passes `len > 0` with `val == NULL`, `BSL_SAL_Dump` will dereference NULL and crash.",
+    "code": "if (len > COMPOSITE_MAX_CTX_BYTES) {\n    BSL_ERR_PUSH_ERROR(CRYPT_COMPOSITE_KEYLEN_ERROR);\n    return CRYPT_COMPOSITE_KEYLEN_ERROR;\n}\n...\nctx->ctxInfo = BSL_SAL_Dump((uint8_t *)val, len);",
+    "fix": "if (len > COMPOSITE_MAX_CTX_BYTES) {\n    BSL_ERR_PUSH_ERROR(CRYPT_COMPOSITE_KEYLEN_ERROR);\n    return CRYPT_COMPOSITE_KEYLEN_ERROR;\n}\nif (val == NULL && len > 0) {\n    BSL_ERR_PUSH_ERROR(CRYPT_NULL_INPUT);\n    return CRYPT_NULL_INPUT;\n}\nctx->ctxInfo = BSL_SAL_Dump((uint8_t *)val, len);"
+  },
+  {
+    "source": "codex",
+    "file": "src/composite_sign/src/crypt_composite_sign.c",
+    "line": "414-435",
+    "severity": "medium",
+    "title": "Missing NULL checks for GetParamValue results in Get*KeyEx",
+    "problem": "If the requested param is absent, `GetParamValue` can return NULL and `paramPrv/paramPub` are dereferenced, causing a crash instead of returning an error.",
+    "code": "BSL_Param *paramPrv = GetParamValue(para, CRYPT_PARAM_COMPOSITE_PRVKEY, &prv.data, &(prv.len));\nint32_t ret = CRYPT_COMPOSITE_GetPrvKey(ctx, &prv);\nif (ret != CRYPT_SUCCESS) {\n    return ret;\n}\nparamPrv->useLen = prv.len;\n\nBSL_Param *paramPub = GetParamValue(para, CRYPT_PARAM_COMPOSITE_PUBKEY, &pub.data, &(pub.len));\nint32_t ret = CRYPT_COMPOSITE_GetPubKey(ctx, &pub);\nif (ret != CRYPT_SUCCESS) {\n    return ret;\n}\nparamPub->useLen = pub.len;",
+    "fix": "BSL_Param *paramPrv = GetParamValue(para, CRYPT_PARAM_COMPOSITE_PRVKEY, &prv.data, &(prv.len));\nif (paramPrv == NULL) {\n    BSL_ERR_PUSH_ERROR(CRYPT_INVALID_ARG);\n    return CRYPT_INVALID_ARG;\n}\nint32_t ret = CRYPT_COMPOSITE_GetPrvKey(ctx, &prv);\nif (ret != CRYPT_SUCCESS) {\n    return ret;\n}\nparamPrv->useLen = prv.len;\n\nBSL_Param *paramPub = GetParamValue(para, CRYPT_PARAM_COMPOSITE_PUBKEY, &pub.data, &(pub.len));\nif (paramPub == NULL) {\n    BSL_ERR_PUSH_ERROR(CRYPT_INVALID_ARG);\n    return CRYPT_INVALID_ARG;\n}\nint32_t ret = CRYPT_COMPOSITE_GetPubKey(ctx, &pub);\nif (ret != CRYPT_SUCCESS) {\n    return ret;\n}\nparamPub->useLen = pub.len;"
+  },
+  {
+    "source": "codex",
+    "file": "src/composite_sign/src/crypt_composite_sign.c",
+    "line": "54-58",
+    "severity": "medium",
+    "title": "Composite algorithm labels mismatched for MLDSA65/87",
+    "problem": "The MLDSA65 and MLDSA87 entries use the MLDSA44 label, so the domain-separation label in the signed message is incorrect for those variants. This can break interoperability and produce non-spec signatures.",
+    "code": "{CRYPT_COMPOSITE_MLDSA65_SM2, \"COMPSIG-MLDSA44-SM2\", CRYPT_PKEY_ML_DSA, CRYPT_MLDSA_TYPE_MLDSA_65,\n    CRYPT_PKEY_SM2, 0, CRYPT_MD_SM3, CRYPT_MD_SM3, 0, 2017, 64, 1952, 32, 3309,\n},\n{CRYPT_COMPOSITE_MLDSA87_SM2, \"COMPSIG-MLDSA44-SM2\", CRYPT_PKEY_ML_DSA, CRYPT_MLDSA_TYPE_MLDSA_87,\n    CRYPT_PKEY_SM2, 0, CRYPT_MD_SM3, CRYPT_MD_SM3, 0, 2657, 64, 2592, 32, 4627,\n},",
+    "fix": "{CRYPT_COMPOSITE_MLDSA65_SM2, \"COMPSIG-MLDSA65-SM2\", CRYPT_PKEY_ML_DSA, CRYPT_MLDSA_TYPE_MLDSA_65,\n    CRYPT_PKEY_SM2, 0, CRYPT_MD_SM3, CRYPT_MD_SM3, 0, 2017, 64, 1952, 32, 3309,\n},\n{CRYPT_COMPOSITE_MLDSA87_SM2, \"COMPSIG-MLDSA87-SM2\", CRYPT_PKEY_ML_DSA, CRYPT_MLDSA_TYPE_MLDSA_87,\n    CRYPT_PKEY_SM2, 0, CRYPT_MD_SM3, CRYPT_MD_SM3, 0, 2657, 64, 2592, 32, 4627,\n},"
+  }
+]
