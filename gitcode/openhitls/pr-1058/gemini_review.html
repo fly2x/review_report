@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Code Review: openhitls/openhitls#1058 - GEMINI</title>
+    <style>
+        :root { --critical: #dc2626; --high: #ea580c; --medium: #ca8a04; --low: #65a30d; }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: system-ui, sans-serif; background: #f8fafc; color: #1e293b; padding: 2rem; line-height: 1.6; }
+        .container { max-width: 900px; margin: 0 auto; }
+        h1 { font-size: 1.5rem; margin-bottom: 0.5rem; }
+        .subtitle { color: #64748b; margin-bottom: 2rem; }
+        .section { margin-bottom: 2rem; }
+        .section-title { font-size: 1.1rem; font-weight: 600; padding: 0.5rem 1rem; border-radius: 0.5rem 0.5rem 0 0; color: white; }
+        .section-title.critical { background: var(--critical); }
+        .section-title.high { background: var(--high); }
+        .section-title.medium { background: var(--medium); }
+        .section-title.low { background: var(--low); }
+        .issue { background: white; border: 1px solid #e2e8f0; border-top: none; padding: 1rem; }
+        .issue:last-child { border-radius: 0 0 0.5rem 0.5rem; }
+        .issue-title { font-weight: 600; margin-bottom: 0.25rem; }
+        .issue-location { font-family: monospace; font-size: 0.875rem; color: #64748b; margin-bottom: 0.75rem; }
+        .issue-source { font-size: 0.75rem; color: #94a3b8; margin-top: 0.5rem; }
+        pre { background: #1e293b; color: #e2e8f0; padding: 0.75rem; border-radius: 0.375rem; overflow-x: auto; font-size: 0.875rem; margin: 0.5rem 0; }
+        .problem { margin: 0.75rem 0; }
+        .fix-label { font-weight: 600; margin-top: 0.75rem; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Code Review: openhitls/openhitls#1058 - GEMINI</h1>
+        <div class="subtitle"></div>
+<div class="section"><div class="section-title low">Low</div>
+<div class="issue">
+                <div class="issue-title">Mixed delimiters in feature list</div>
+                <div class="issue-location">README.md:14</div>
+                <pre>- Authentication: Support Privacy Pass、HOTP、TOTP、SPAKE2+.</pre>
+                <div class="problem"><strong>Issue:</strong> The line uses a Chinese-style enumeration comma (、) instead of an English comma (,).</div>
+                <div class="fix-label">Fix:</div><pre>- Authentication: Support Privacy Pass, HOTP, TOTP, SPAKE2+.</pre>
+                <div class="issue-source">Reviewer: gemini</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">Inconsistent capitalization</div>
+                <div class="issue-location">README.md:19</div>
+                <pre>- random: DRBG, DRBG-GM</pre>
+                <div class="problem"><strong>Issue:</strong> The item "random" starts with a lowercase letter, while other items in the list start with uppercase (e.g., "Symmetric algorithms", "Post-quantum algorithms").</div>
+                <div class="fix-label">Fix:</div><pre>- Random: DRBG, DRBG-GM</pre>
+                <div class="issue-source">Reviewer: gemini</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">Non-standard architecture name in header</div>
+                <div class="issue-location">README.md:125</div>
+                <pre>* x8664 Optimize the full build:</pre>
+                <div class="problem"><strong>Issue:</strong> The text "x8664" is used in the description header, but "x86_64" is the standard notation.</div>
+                <div class="fix-label">Fix:</div><pre>* x86_64 Optimize the full build:</pre>
+                <div class="issue-source">Reviewer: gemini</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">Typo (Extra space)</div>
+                <div class="issue-location">README-zh.md:10</div>
+                <pre>openHiTLS为密码算法提供最佳性能优化。当前已支持5个组件和算法特性可按需配置，已经通 过ISO19790认证，支持ARM、x86架构CPU上的算法性能优化，更多架构和特性待规划。</pre>
+                <div class="problem"><strong>Issue:</strong> There is an extra space in the Chinese word "通过" (written as "通 过").</div>
+                <div class="fix-label">Fix:</div><pre>openHiTLS为密码算法提供最佳性能优化。当前已支持5个组件和算法特性可按需配置，已经通过ISO19790认证，支持ARM、x86架构CPU上的算法性能优化，更多架构和特性待规划。</pre>
+                <div class="issue-source">Reviewer: gemini</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">Inconsistent punctuation in list</div>
+                <div class="issue-location">README-zh.md:23-27</div>
+                <pre>- 随机数：DRBG，GM-DRBG
+   - 密钥派生：HKDF，SCRYPT，PBKDF2
+   - 哈希算法：SHA系列，MD5，SM3
+   - 消息认证码：HMAC，CMAC
+   - 其他：HPKE</pre>
+                <div class="problem"><strong>Issue:</strong> The list items starting from line 23 lack the closing semicolon (；), which is present in the preceding items (lines 17, 19, 21).</div>
+                <div class="fix-label">Fix:</div><pre>- 随机数：DRBG，GM-DRBG；
+   - 密钥派生：HKDF，SCRYPT，PBKDF2；
+   - 哈希算法：SHA系列，MD5，SM3；
+   - 消息认证码：HMAC，CMAC；
+   - 其他：HPKE</pre>
+                <div class="issue-source">Reviewer: gemini</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">Non-standard architecture name</div>
+                <div class="issue-location">README-zh.md:39</div>
+                <pre>- 基于ARMv8、ARMv7、x8664 CPU算法性能优化；</pre>
+                <div class="problem"><strong>Issue:</strong> The text uses "x8664" which is a non-standard abbreviation for "x86_64" in this context.</div>
+                <div class="fix-label">Fix:</div><pre>- 基于ARMv8、ARMv7、x86_64 CPU算法性能优化；</pre>
+                <div class="issue-source">Reviewer: gemini</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">Typo in PKI acronym</div>
+                <div class="issue-location">docs/zh/1_发行声明.md:57</div>
+                <pre>* 证书和PKIL: req，x509，pkcs7，pkcs12，crl ...</pre>
+                <div class="problem"><strong>Issue:</strong> The text says "PKIL" instead of "PKI".</div>
+                <div class="fix-label">Fix:</div><pre>* 证书和PKI: req，x509，pkcs7，pkcs12，crl ...</pre>
+                <div class="issue-source">Reviewer: gemini</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">Deletion of Change History</div>
+                <div class="issue-location">docs/en/6_Appendix/2_Change History.md:1-5</div>
+                <pre>(File deleted)</pre>
+                <div class="problem"><strong>Issue:</strong> The change history file is being deleted. While the new "Release Notes" covers the current version, historical data (v0.1.0 alpha1) is lost.</div>
+                <div class="fix-label">Fix:</div><pre>(Consider keeping the file or merging historical versions into Release Notes)</pre>
+                <div class="issue-source">Reviewer: gemini</div>
+            </div>
+</div>
+</div></body></html>

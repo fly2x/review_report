@@ -1,0 +1,161 @@
+Now I have a complete picture of the issues. Let me output them in the required format:
+
+===ISSUE===
+FILE: README-zh.md
+LINE: 20
+SEVERITY: medium
+TITLE: Typo in algorithm name "Pailler" should be "Paillier"
+PROBLEM: The asymmetric algorithm name is misspelled as "Pailler" instead of the correct spelling "Paillier"
+CODE:
+```
+   - 传统非对称算法：RSA，RSA-Bind，DSA，ECDSA，ECDH，DH，SM2，SM9，Pailler，ElGamal；
+```
+FIX:
+```
+   - 传统非对称算法：RSA，RSA-Bind，DSA，ECDSA，ECDH，DH，SM2，SM9，Paillier，ElGamal；
+```
+===END===
+
+===ISSUE===
+FILE: docs/zh/1_发行声明.md
+LINE: 35
+SEVERITY: medium
+TITLE: Typo in algorithm name "Pailler" should be "Paillier"
+PROBLEM: The asymmetric algorithm name is misspelled as "Pailler" instead of the correct spelling "Paillier"
+CODE:
+```
+* Pailler算法支持同态运算
+```
+FIX:
+```
+* Paillier算法支持同态运算
+```
+===END===
+
+===ISSUE===
+FILE: README.md
+LINE: 16
+SEVERITY: low
+TITLE: Incorrect term "Privacy Pass" uses Chinese punctuation
+PROBLEM: The English README uses Chinese enumeration mark (、) instead of English comma in "Privacy Pass、HOTP、TOTP、SPAKE2+"
+CODE:
+```
+   - Authentication: Support Privacy Pass、HOTP、TOTP、SPAKE2+.
+```
+FIX:
+```
+   - Authentication: Support Privacy Pass, HOTP, TOTP, SPAKE2+.
+```
+===END===
+
+===ISSUE===
+FILE: README-zh.md
+LINE: 16
+SEVERITY: low
+TITLE: Mixed Chinese and English punctuation in protocol list
+PROBLEM: The Chinese README uses English comma instead of Chinese enumeration mark (、) consistently
+CODE:
+```
+   - 认证：支持 Privacy Pass、HOTP、TOTP、SPAKE2+等认证协议；
+```
+FIX:
+```
+   - 认证：支持 Privacy Pass、HOTP、TOTP、SPAKE2+ 等认证协议；
+```
+===END===
+
+===ISSUE===
+FILE: README.md
+LINE: 45
+SEVERITY: medium
+TITLE: Incorrect term "publicly token" - should be "Privacy Pass token"
+PROBLEM: The component description says "publicly token authentication" but should say "Privacy Pass token authentication" based on RFC 9578
+CODE:
+```
+- Auth authentication component provides authentication functions. Currently, it provides publicly token authentication, TOTP/HOTP, SPAKE2+.
+```
+FIX:
+```
+- Auth authentication component provides authentication functions. Currently, it provides Privacy Pass token authentication, TOTP/HOTP, SPAKE2+.
+```
+===END===
+
+===ISSUE===
+FILE: README-zh.md
+LINE: 45
+SEVERITY: medium
+TITLE: Incorrect term "publicly token" - should be "Privacy Pass token"
+PROBLEM: The component description says "publicly token认证功能" but should say "Privacy Pass token认证功能"
+CODE:
+```
+- Auth认证组件提供了认证功能，当前提供publicly token认证功能，TOTP/HOTP，SPAKE2+等协议；
+```
+FIX:
+```
+- Auth认证组件提供了认证功能，当前提供Privacy Pass token认证功能，TOTP/HOTP，SPAKE2+等协议；
+```
+===END===
+
+===ISSUE===
+FILE: docs/zh/1_发行声明.md
+LINE: 56
+SEVERITY: medium
+TITLE: Typo "PKIL" should be "PKI"
+PROBLEM: The command line section has a typo "PKIL" instead of "PKI"
+CODE:
+```
+ * 证书和PKIL: req，x509，pkcs7，pkcs12，crl ...
+```
+FIX:
+```
+ * 证书和PKI: req，x509，pkcs7，pkcs12，crl ...
+```
+===END===
+
+===ISSUE===
+FILE: README-zh.md
+LINE: 28
+SEVERITY: low
+TITLE: Missing semicolon at end of list item
+PROBLEM: The traditional certificate capabilities line is missing a semicolon at the end, inconsistent with other items
+CODE:
+```
+   - 传统证书能力：支持X509解析验证，CRL解析验证，CSR请求生成，部分/全部证书链生成验证
+```
+FIX:
+```
+   - 传统证书能力：支持X509解析验证，CRL解析验证，CSR请求生成，部分/全部证书链生成验证；
+```
+===END===
+
+===ISSUE===
+FILE: docs/en/2_Key Features.md
+LINE: 28
+SEVERITY: low
+TITLE: HPKE listed twice in algorithm categories
+PROBLEM: HPKE (Hybrid Public Key Encryption) appears both in "Traditional Asymmetric Algorithms" and "Others" sections
+CODE:
+```
+#### Traditional Asymmetric Algorithms
+- RSA, RSA-Bind, DSA, ECDSA, ECDH, DH, SM2, SM9, Paillier, ElGamal, HPKE
+...
+#### Others
+- DRBG, GM-DRBG
+- HKDF, SCRYPT, PBKDF2
+- SHA1, SHA2, SHA3, SHA256-MB, MD5, SM3
+- HMAC, CMAC
+- HPKE
+```
+FIX:
+```
+#### Traditional Asymmetric Algorithms
+- RSA, RSA-Bind, DSA, ECDSA, ECDH, DH, SM2, SM9, Paillier, ElGamal
+...
+#### Others
+- DRBG, GM-DRBG
+- HKDF, SCRYPT, PBKDF2
+- SHA1, SHA2, SHA3, SHA256-MB, MD5, SM3
+- HMAC, CMAC
+- HPKE
+```
+===END===

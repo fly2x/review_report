@@ -1,0 +1,136 @@
+I will start by listing the changed files and their statistics to confirm the scope of the PR, and then I will examine the diffs for each file to identify any issues.
+I will read the differences for `README.md` and `README-zh.md` to check for any inconsistencies or errors in the main documentation.
+I will read `configure.py` to verify the valid `asm_type` values, confirming whether `x8664` is a valid option or a typo.
+I will read `config/json/feature.json` to verify the valid values for `asm_type`, specifically checking if `x8664` is supported.
+I will read the English documentation files `docs/en/1_Release Notes.md`, `docs/en/2_Key Features.md`, and `docs/en/6_Appendix/2_Change History.md` to identify any issues or inconsistencies.
+I will examine the Chinese documentation files `docs/zh/1_发行声明.md`, `docs/zh/2_关键特性.md`, and `docs/zh/6_附录/2_修订记录.md` to identify any issues, while also verifying if the Chinese "Change History" file was deleted like its English counterpart.
+I will verify the inconsistencies and typos found in `README.md`, `README-zh.md`, and `docs/zh/1_发行声明.md`, including mixed delimiters, inconsistent capitalization, missing punctuation, and the deletion of the "Change History" files. Then, I will generate the issue report.
+
+===ISSUE===
+FILE: README.md
+LINE: 14
+SEVERITY: low
+TITLE: Mixed delimiters in feature list
+PROBLEM: The line uses a Chinese-style enumeration comma (、) instead of an English comma (,).
+CODE:
+```
+- Authentication: Support Privacy Pass、HOTP、TOTP、SPAKE2+.
+```
+FIX:
+```
+- Authentication: Support Privacy Pass, HOTP, TOTP, SPAKE2+.
+```
+===END===
+===ISSUE===
+FILE: README.md
+LINE: 19
+SEVERITY: low
+TITLE: Inconsistent capitalization
+PROBLEM: The item "random" starts with a lowercase letter, while other items in the list start with uppercase (e.g., "Symmetric algorithms", "Post-quantum algorithms").
+CODE:
+```
+   - random: DRBG, DRBG-GM
+```
+FIX:
+```
+   - Random: DRBG, DRBG-GM
+```
+===END===
+===ISSUE===
+FILE: README.md
+LINE: 125
+SEVERITY: low
+TITLE: Non-standard architecture name in header
+PROBLEM: The text "x8664" is used in the description header, but "x86_64" is the standard notation.
+CODE:
+```
+* x8664 Optimize the full build:
+```
+FIX:
+```
+* x86_64 Optimize the full build:
+```
+===END===
+===ISSUE===
+FILE: README-zh.md
+LINE: 10
+SEVERITY: low
+TITLE: Typo (Extra space)
+PROBLEM: There is an extra space in the Chinese word "通过" (written as "通 过").
+CODE:
+```
+openHiTLS为密码算法提供最佳性能优化。当前已支持5个组件和算法特性可按需配置，已经通 过ISO19790认证，支持ARM、x86架构CPU上的算法性能优化，更多架构和特性待规划。
+```
+FIX:
+```
+openHiTLS为密码算法提供最佳性能优化。当前已支持5个组件和算法特性可按需配置，已经通过ISO19790认证，支持ARM、x86架构CPU上的算法性能优化，更多架构和特性待规划。
+```
+===END===
+===ISSUE===
+FILE: README-zh.md
+LINE: 23-27
+SEVERITY: low
+TITLE: Inconsistent punctuation in list
+PROBLEM: The list items starting from line 23 lack the closing semicolon (；), which is present in the preceding items (lines 17, 19, 21).
+CODE:
+```
+   - 随机数：DRBG，GM-DRBG
+   - 密钥派生：HKDF，SCRYPT，PBKDF2
+   - 哈希算法：SHA系列，MD5，SM3
+   - 消息认证码：HMAC，CMAC
+   - 其他：HPKE
+```
+FIX:
+```
+   - 随机数：DRBG，GM-DRBG；
+   - 密钥派生：HKDF，SCRYPT，PBKDF2；
+   - 哈希算法：SHA系列，MD5，SM3；
+   - 消息认证码：HMAC，CMAC；
+   - 其他：HPKE
+```
+===END===
+===ISSUE===
+FILE: README-zh.md
+LINE: 39
+SEVERITY: low
+TITLE: Non-standard architecture name
+PROBLEM: The text uses "x8664" which is a non-standard abbreviation for "x86_64" in this context.
+CODE:
+```
+- 基于ARMv8、ARMv7、x8664 CPU算法性能优化；
+```
+FIX:
+```
+- 基于ARMv8、ARMv7、x86_64 CPU算法性能优化；
+```
+===END===
+===ISSUE===
+FILE: docs/zh/1_发行声明.md
+LINE: 57
+SEVERITY: low
+TITLE: Typo in PKI acronym
+PROBLEM: The text says "PKIL" instead of "PKI".
+CODE:
+```
+ * 证书和PKIL: req，x509，pkcs7，pkcs12，crl ...
+```
+FIX:
+```
+ * 证书和PKI: req，x509，pkcs7，pkcs12，crl ...
+```
+===END===
+===ISSUE===
+FILE: docs/en/6_Appendix/2_Change History.md
+LINE: 1-5
+SEVERITY: low
+TITLE: Deletion of Change History
+PROBLEM: The change history file is being deleted. While the new "Release Notes" covers the current version, historical data (v0.1.0 alpha1) is lost.
+CODE:
+```
+(File deleted)
+```
+FIX:
+```
+(Consider keeping the file or merging historical versions into Release Notes)
+```
+===END===

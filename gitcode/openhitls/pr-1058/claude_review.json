@@ -1,0 +1,92 @@
+[
+  {
+    "source": "claude",
+    "file": "README-zh.md",
+    "line": "20",
+    "severity": "medium",
+    "title": "Typo in algorithm name \"Pailler\" should be \"Paillier\"",
+    "problem": "The asymmetric algorithm name is misspelled as \"Pailler\" instead of the correct spelling \"Paillier\"",
+    "code": "- 传统非对称算法：RSA，RSA-Bind，DSA，ECDSA，ECDH，DH，SM2，SM9，Pailler，ElGamal；",
+    "fix": "- 传统非对称算法：RSA，RSA-Bind，DSA，ECDSA，ECDH，DH，SM2，SM9，Paillier，ElGamal；"
+  },
+  {
+    "source": "claude",
+    "file": "docs/zh/1_发行声明.md",
+    "line": "35",
+    "severity": "medium",
+    "title": "Typo in algorithm name \"Pailler\" should be \"Paillier\"",
+    "problem": "The asymmetric algorithm name is misspelled as \"Pailler\" instead of the correct spelling \"Paillier\"",
+    "code": "* Pailler算法支持同态运算",
+    "fix": "* Paillier算法支持同态运算"
+  },
+  {
+    "source": "claude",
+    "file": "README.md",
+    "line": "45",
+    "severity": "medium",
+    "title": "Incorrect term \"publicly token\" - should be \"Privacy Pass token\"",
+    "problem": "The component description says \"publicly token authentication\" but should say \"Privacy Pass token authentication\" based on RFC 9578",
+    "code": "- Auth authentication component provides authentication functions. Currently, it provides publicly token authentication, TOTP/HOTP, SPAKE2+.",
+    "fix": "- Auth authentication component provides authentication functions. Currently, it provides Privacy Pass token authentication, TOTP/HOTP, SPAKE2+."
+  },
+  {
+    "source": "claude",
+    "file": "README-zh.md",
+    "line": "45",
+    "severity": "medium",
+    "title": "Incorrect term \"publicly token\" - should be \"Privacy Pass token\"",
+    "problem": "The component description says \"publicly token认证功能\" but should say \"Privacy Pass token认证功能\"",
+    "code": "- Auth认证组件提供了认证功能，当前提供publicly token认证功能，TOTP/HOTP，SPAKE2+等协议；",
+    "fix": "- Auth认证组件提供了认证功能，当前提供Privacy Pass token认证功能，TOTP/HOTP，SPAKE2+等协议；"
+  },
+  {
+    "source": "claude",
+    "file": "docs/zh/1_发行声明.md",
+    "line": "56",
+    "severity": "medium",
+    "title": "Typo \"PKIL\" should be \"PKI\"",
+    "problem": "The command line section has a typo \"PKIL\" instead of \"PKI\"",
+    "code": "* 证书和PKIL: req，x509，pkcs7，pkcs12，crl ...",
+    "fix": "* 证书和PKI: req，x509，pkcs7，pkcs12，crl ..."
+  },
+  {
+    "source": "claude",
+    "file": "README.md",
+    "line": "16",
+    "severity": "low",
+    "title": "Incorrect term \"Privacy Pass\" uses Chinese punctuation",
+    "problem": "The English README uses Chinese enumeration mark (、) instead of English comma in \"Privacy Pass、HOTP、TOTP、SPAKE2+\"",
+    "code": "- Authentication: Support Privacy Pass、HOTP、TOTP、SPAKE2+.",
+    "fix": "- Authentication: Support Privacy Pass, HOTP, TOTP, SPAKE2+."
+  },
+  {
+    "source": "claude",
+    "file": "README-zh.md",
+    "line": "16",
+    "severity": "low",
+    "title": "Mixed Chinese and English punctuation in protocol list",
+    "problem": "The Chinese README uses English comma instead of Chinese enumeration mark (、) consistently",
+    "code": "- 认证：支持 Privacy Pass、HOTP、TOTP、SPAKE2+等认证协议；",
+    "fix": "- 认证：支持 Privacy Pass、HOTP、TOTP、SPAKE2+ 等认证协议；"
+  },
+  {
+    "source": "claude",
+    "file": "README-zh.md",
+    "line": "28",
+    "severity": "low",
+    "title": "Missing semicolon at end of list item",
+    "problem": "The traditional certificate capabilities line is missing a semicolon at the end, inconsistent with other items",
+    "code": "- 传统证书能力：支持X509解析验证，CRL解析验证，CSR请求生成，部分/全部证书链生成验证",
+    "fix": "- 传统证书能力：支持X509解析验证，CRL解析验证，CSR请求生成，部分/全部证书链生成验证；"
+  },
+  {
+    "source": "claude",
+    "file": "docs/en/2_Key Features.md",
+    "line": "28",
+    "severity": "low",
+    "title": "HPKE listed twice in algorithm categories",
+    "problem": "HPKE (Hybrid Public Key Encryption) appears both in \"Traditional Asymmetric Algorithms\" and \"Others\" sections",
+    "code": "#### Traditional Asymmetric Algorithms\n- RSA, RSA-Bind, DSA, ECDSA, ECDH, DH, SM2, SM9, Paillier, ElGamal, HPKE\n...\n#### Others\n- DRBG, GM-DRBG\n- HKDF, SCRYPT, PBKDF2\n- SHA1, SHA2, SHA3, SHA256-MB, MD5, SM3\n- HMAC, CMAC\n- HPKE",
+    "fix": "#### Traditional Asymmetric Algorithms\n- RSA, RSA-Bind, DSA, ECDSA, ECDH, DH, SM2, SM9, Paillier, ElGamal\n...\n#### Others\n- DRBG, GM-DRBG\n- HKDF, SCRYPT, PBKDF2\n- SHA1, SHA2, SHA3, SHA256-MB, MD5, SM3\n- HMAC, CMAC\n- HPKE"
+  }
+]

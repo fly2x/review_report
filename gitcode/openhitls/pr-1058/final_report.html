@@ -1,0 +1,262 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Final Report: openhitls/openhitls#1058</title>
+    <style>
+        :root { --critical: #dc2626; --high: #ea580c; --medium: #ca8a04; --low: #65a30d;
+                 --trusted: #059669; --likely: #0284c7; --evaluate: #7c3aed; }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: system-ui, sans-serif; background: #f8fafc; color: #1e293b; padding: 2rem; line-height: 1.6; }
+        .container { max-width: 900px; margin: 0 auto; }
+        h1 { font-size: 1.75rem; margin-bottom: 0.5rem; }
+        .subtitle { color: #64748b; margin-bottom: 1rem; }
+        .stats { display: flex; gap: 1rem; margin-bottom: 2rem; flex-wrap: wrap; }
+        .stat { background: white; border: 1px solid #e2e8f0; border-radius: 0.5rem; padding: 1rem; min-width: 100px; text-align: center; }
+        .stat-value { font-size: 1.5rem; font-weight: 700; }
+        .stat-label { font-size: 0.875rem; color: #64748b; }
+        .stat.critical .stat-value { color: var(--critical); }
+        .stat.high .stat-value { color: var(--high); }
+        .stat.medium .stat-value { color: var(--medium); }
+        .stat.low .stat-value { color: var(--low); }
+        .reviewers { background: #e0e7ff; color: #3730a3; padding: 0.5rem 1rem; border-radius: 0.5rem; margin-bottom: 2rem; }
+        .section { margin-bottom: 2rem; }
+        .section-title { font-size: 1.1rem; font-weight: 600; padding: 0.5rem 1rem; border-radius: 0.5rem 0.5rem 0 0; color: white; }
+        .section-title.critical { background: var(--critical); }
+        .section-title.high { background: var(--high); }
+        .section-title.medium { background: var(--medium); }
+        .section-title.low { background: var(--low); }
+        .issue { background: white; border: 1px solid #e2e8f0; border-top: none; padding: 1rem; }
+        .issue:last-child { border-radius: 0 0 0.5rem 0.5rem; }
+        .issue-title { font-weight: 600; margin-bottom: 0.25rem; }
+        .issue-location { font-family: monospace; font-size: 0.875rem; color: #64748b; margin-bottom: 0.5rem; }
+        .issue-meta { font-size: 0.75rem; margin-bottom: 0.75rem; display: flex; gap: 0.75rem; align-items: center; }
+        .issue-meta .reviewers { background: #f1f5f9; color: #475569; padding: 0.25rem 0.5rem; border-radius: 0.25rem; margin: 0; }
+        .confidence-badge { padding: 0.25rem 0.5rem; border-radius: 0.25rem; font-weight: 500; }
+        .confidence-badge.trusted { background: #d1fae5; color: #065f46; }
+        .confidence-badge.likely { background: #dbeafe; color: #1e40af; }
+        .confidence-badge.evaluate { background: #ede9fe; color: #5b21b6; }
+        pre { background: #1e293b; color: #e2e8f0; padding: 0.75rem; border-radius: 0.375rem; overflow-x: auto; font-size: 0.875rem; margin: 0.5rem 0; }
+        .problem { margin: 0.75rem 0; }
+        .fix-label { font-weight: 600; margin-top: 0.75rem; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Final Code Review Report</h1>
+        <div class="subtitle">openhitls/openhitls - PR #1058</div>
+        <p style="margin-bottom: 1rem;"></p>
+
+        <div class="stats">
+            <div class="stat"><div class="stat-value">16</div><div class="stat-label">Total</div></div>
+            <div class="stat critical"><div class="stat-value">0</div><div class="stat-label">Critical</div></div>
+            <div class="stat high"><div class="stat-value">0</div><div class="stat-label">High</div></div>
+            <div class="stat medium"><div class="stat-value">7</div><div class="stat-label">Medium</div></div>
+            <div class="stat low"><div class="stat-value">9</div><div class="stat-label">Low</div></div>
+        </div>
+
+        <div class="reviewers">Reviewers: claude, gemini, codex</div>
+<div class="section"><div class="section-title medium">Medium</div>
+<div class="issue">
+                <div class="issue-title">Typo "Pailler" should be "Paillier"</div>
+                <div class="issue-location">README-zh.md:20</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CLAUDE, CODEX</span>
+                    <span class="confidence-badge trusted">置信度: 可信</span>
+                </div>
+                <pre>- 传统非对称算法：RSA，RSA-Bind，DSA，ECDSA，ECDH，DH，SM2，SM9，Pailler，ElGamal；</pre>
+                <div class="problem"><strong>Issue:</strong> The asymmetric algorithm name is misspelled as "Pailler" instead of the correct spelling "Paillier"</div>
+                <div class="fix-label">Fix:</div><pre>- 传统非对称算法：RSA，RSA-Bind，DSA，ECDSA，ECDH，DH，SM2，SM9，Paillier，ElGamal；</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">Typo "Pailler" should be "Paillier"</div>
+                <div class="issue-location">docs/zh/1_发行声明.md:35</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CLAUDE, CODEX</span>
+                    <span class="confidence-badge trusted">置信度: 可信</span>
+                </div>
+                <pre>* Pailler算法支持同态运算</pre>
+                <div class="problem"><strong>Issue:</strong> The asymmetric algorithm name is misspelled as "Pailler" instead of the correct spelling "Paillier"</div>
+                <div class="fix-label">Fix:</div><pre>* Paillier算法支持同态运算</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">Incorrect term "publicly token" should be "Privacy Pass token"</div>
+                <div class="issue-location">README.md:16</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CLAUDE, CODEX</span>
+                    <span class="confidence-badge trusted">置信度: 可信</span>
+                </div>
+                <pre>- Authentication: Support Privacy Pass、HOTP、TOTP、SPAKE2+.</pre>
+                <div class="problem"><strong>Issue:</strong> The component description says "publicly token authentication" but should say "Privacy Pass token authentication" based on RFC 9578</div>
+                <div class="fix-label">Fix:</div><pre>- Authentication: Support Privacy Pass, HOTP, TOTP, SPAKE2+.</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">Typo "PKIL" should be "PKI"</div>
+                <div class="issue-location">docs/zh/1_发行声明.md:56</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CLAUDE, GEMINI, CODEX</span>
+                    <span class="confidence-badge trusted">置信度: 可信</span>
+                </div>
+                <pre>* 证书和PKIL: req，x509，pkcs7，pkcs12，crl ...</pre>
+                <div class="problem"><strong>Issue:</strong> The command line section has a typo "PKIL" instead of "PKI"</div>
+                <div class="fix-label">Fix:</div><pre>* 证书和PKI: req，x509，pkcs7，pkcs12，crl ...</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">Incorrect term "publicly token" in Chinese</div>
+                <div class="issue-location">README-zh.md:45</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CLAUDE, CODEX</span>
+                    <span class="confidence-badge trusted">置信度: 可信</span>
+                </div>
+                <pre>- Auth认证组件提供了认证功能，当前提供publicly token认证功能，TOTP/HOTP，SPAKE2+等协议；</pre>
+                <div class="problem"><strong>Issue:</strong> The component description says "publicly token认证功能" but should say "Privacy Pass token认证功能"</div>
+                <div class="fix-label">Fix:</div><pre>- Auth认证组件提供了认证功能，当前提供Privacy Pass token认证功能，TOTP/HOTP，SPAKE2+等协议；</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">Misleading ISO19790 certification claim</div>
+                <div class="issue-location">README.md:8</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CODEX</span>
+                    <span class="confidence-badge evaluate">置信度: 需评估</span>
+                </div>
+                <pre>Currently, 5 components and cryptographic algorithms are configured, ISO19790 certified, and the performance optimization of ShangMi cryptographic algorithms on ARM, x86 is ready.</pre>
+                <div class="problem"><strong>Issue:</strong> The README states "ISO19790 certified" which reads like a formal certification claim but the repository only documents an ISO19790 provider feature. This could be misleading without evidence of actual certification.</div>
+                <div class="fix-label">Fix:</div><pre>Currently, 5 components and cryptographic algorithms are configured, ISO19790 provider support is available, and the performance optimization of ShangMi cryptographic algorithms on ARM, x86 is ready.</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">Misleading ISO19790 certification claim in Chinese</div>
+                <div class="issue-location">README-zh.md:8</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CODEX</span>
+                    <span class="confidence-badge evaluate">置信度: 需评估</span>
+                </div>
+                <pre>openHiTLS为密码算法提供最佳性能优化。当前已支持5个组件和算法特性可按需配置，已经通过ISO19790认证，支持ARM、x86架构CPU上的算法性能优化，更多架构和特性待规划。</pre>
+                <div class="problem"><strong>Issue:</strong> "已经通过ISO19790认证" reads like a formal certification claim but the repository only documents an ISO19790 provider feature</div>
+                <div class="fix-label">Fix:</div><pre>openHiTLS为密码算法提供最佳性能优化。当前已支持5个组件和算法特性可按需配置，已提供ISO19790 Provider支持，支持ARM、x86架构CPU上的算法性能优化，更多架构和特性待规划。</pre>
+            </div>
+</div>
+<div class="section"><div class="section-title low">Low</div>
+<div class="issue">
+                <div class="issue-title">Mixed Chinese and English punctuation</div>
+                <div class="issue-location">README-zh.md:16</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CLAUDE, GEMINI</span>
+                    <span class="confidence-badge trusted">置信度: 可信</span>
+                </div>
+                <pre>- 认证：支持 Privacy Pass、HOTP、TOTP、SPAKE2+等认证协议；</pre>
+                <div class="problem"><strong>Issue:</strong> The Chinese README uses English comma instead of Chinese enumeration mark (、) and is missing space before 等认证协议</div>
+                <div class="fix-label">Fix:</div><pre>- 认证：支持 Privacy Pass、HOTP、TOTP、SPAKE2+ 等认证协议；</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">Mixed Chinese and English punctuation in English document</div>
+                <div class="issue-location">README.md:16</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CLAUDE, GEMINI</span>
+                    <span class="confidence-badge trusted">置信度: 可信</span>
+                </div>
+                <pre>- Authentication: Support Privacy Pass、HOTP、TOTP、SPAKE2+.</pre>
+                <div class="problem"><strong>Issue:</strong> The English README uses Chinese enumeration mark (、) instead of English comma (,)</div>
+                <div class="fix-label">Fix:</div><pre>- Authentication: Support Privacy Pass, HOTP, TOTP, SPAKE2+.</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">Inconsistent capitalization of "random"</div>
+                <div class="issue-location">README.md:21</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: GEMINI</span>
+                    <span class="confidence-badge likely">置信度: 较可信</span>
+                </div>
+                <pre>- random: DRBG, DRBG-GM</pre>
+                <div class="problem"><strong>Issue:</strong> The item "random" starts with a lowercase letter, while other items in the list start with uppercase</div>
+                <div class="fix-label">Fix:</div><pre>- Random: DRBG, DRBG-GM</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">Non-standard architecture name "x8664"</div>
+                <div class="issue-location">README.md:124</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: GEMINI</span>
+                    <span class="confidence-badge likely">置信度: 较可信</span>
+                </div>
+                <pre>* x8664 Optimize the full build:</pre>
+                <div class="problem"><strong>Issue:</strong> The text "x8664" is used in the description header, but "x86_64" is the standard notation</div>
+                <div class="fix-label">Fix:</div><pre>* x86_64 Optimize the full build:</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">Extra space in Chinese text</div>
+                <div class="issue-location">README-zh.md:8</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: GEMINI</span>
+                    <span class="confidence-badge likely">置信度: 较可信</span>
+                </div>
+                <pre>openHiTLS为密码算法提供最佳性能优化。当前已支持5个组件和算法特性可按需配置，已经通过ISO19790认证，支持ARM、x86架构CPU上的算法性能优化，更多架构和特性待规划。</pre>
+                <div class="problem"><strong>Issue:</strong> There is an extra space in the Chinese word "通过" (written as "通 过")</div>
+                <div class="fix-label">Fix:</div><pre>openHiTLS为密码算法提供最佳性能优化。当前已支持5个组件和算法特性可按需配置，已经通过ISO19790认证，支持ARM、x86架构CPU上的算法性能优化，更多架构和特性待规划。</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">Inconsistent punctuation in algorithm list</div>
+                <div class="issue-location">README-zh.md:21-24</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CLAUDE, GEMINI</span>
+                    <span class="confidence-badge trusted">置信度: 可信</span>
+                </div>
+                <pre>- 随机数：DRBG，GM-DRBG
+- 密钥派生：HKDF，SCRYPT，PBKDF2
+- 哈希算法：SHA系列，MD5，SM3
+- 消息认证码：HMAC，CMAC</pre>
+                <div class="problem"><strong>Issue:</strong> The list items starting from line 21 lack the closing semicolon (；), which is present in the preceding items</div>
+                <div class="fix-label">Fix:</div><pre>- 随机数：DRBG，GM-DRBG；
+- 密钥派生：HKDF，SCRYPT，PBKDF2；
+- 哈希算法：SHA系列，MD5，SM3；
+- 消息认证码：HMAC，CMAC；</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">Non-standard architecture name "x8664"</div>
+                <div class="issue-location">README-zh.md:35</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: GEMINI</span>
+                    <span class="confidence-badge likely">置信度: 较可信</span>
+                </div>
+                <pre>- 基于ARMv8、ARMv7、x8664 CPU算法性能优化；</pre>
+                <div class="problem"><strong>Issue:</strong> The text uses "x8664" which is a non-standard abbreviation for "x86_64"</div>
+                <div class="fix-label">Fix:</div><pre>- 基于ARMv8、ARMv7、x86_64 CPU算法性能优化；</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">Inconsistent abbreviation "Buff" vs "Buffer"</div>
+                <div class="issue-location">docs/zh/1_发行声明.md:40</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CODEX</span>
+                    <span class="confidence-badge likely">置信度: 较可信</span>
+                </div>
+                <pre>* 支持从Buff加载证书</pre>
+                <div class="problem"><strong>Issue:</strong> "Buff" is an inconsistent abbreviation compared to "Buffer" used elsewhere in the documentation</div>
+                <div class="fix-label">Fix:</div><pre>* 支持从Buffer加载证书</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">HPKE listed twice in algorithm categories</div>
+                <div class="issue-location">docs/en/2_Key Features.md:28</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CLAUDE</span>
+                    <span class="confidence-badge likely">置信度: 较可信</span>
+                </div>
+                <pre>#### Traditional Asymmetric Algorithms
+- RSA, RSA-Bind, DSA, ECDSA, ECDH, DH, SM2, SM9, Paillier, ElGamal, HPKE
+...
+#### Others
+- DRBG, GM-DRBG
+- HKDF, SCRYPT, PBKDF2
+- SHA1, SHA2, SHA3, SHA256-MB, MD5, SM3
+- HMAC, CMAC
+- HPKE</pre>
+                <div class="problem"><strong>Issue:</strong> HPKE (Hybrid Public Key Encryption) appears both in "Traditional Asymmetric Algorithms" and "Others" sections</div>
+                <div class="fix-label">Fix:</div><pre>#### Traditional Asymmetric Algorithms
+- RSA, RSA-Bind, DSA, ECDSA, ECDH, DH, SM2, SM9, Paillier, ElGamal
+...
+#### Others
+- DRBG, GM-DRBG
+- HKDF, SCRYPT, PBKDF2
+- SHA1, SHA2, SHA3, SHA256-MB, MD5, SM3
+- HMAC, CMAC
+- HPKE</pre>
+            </div>
+</div>
+</div></body></html>

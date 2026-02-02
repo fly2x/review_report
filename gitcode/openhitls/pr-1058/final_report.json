@@ -1,0 +1,198 @@
+{
+  "context": {
+    "owner": "openhitls",
+    "repo": "openhitls",
+    "pr_id": "1058",
+    "title": "",
+    "reviewers": [
+      "claude",
+      "gemini",
+      "codex"
+    ]
+  },
+  "statistics": {
+    "total": 16,
+    "critical": 0,
+    "high": 0,
+    "medium": 7,
+    "low": 9
+  },
+  "issues": [
+    {
+      "file": "README-zh.md",
+      "line": "20",
+      "severity": "medium",
+      "title": "Typo \"Pailler\" should be \"Paillier\"",
+      "reviewers": "CLAUDE, CODEX",
+      "confidence": "trusted",
+      "problem": "The asymmetric algorithm name is misspelled as \"Pailler\" instead of the correct spelling \"Paillier\"",
+      "code": "- 传统非对称算法：RSA，RSA-Bind，DSA，ECDSA，ECDH，DH，SM2，SM9，Pailler，ElGamal；",
+      "fix": "- 传统非对称算法：RSA，RSA-Bind，DSA，ECDSA，ECDH，DH，SM2，SM9，Paillier，ElGamal；"
+    },
+    {
+      "file": "docs/zh/1_发行声明.md",
+      "line": "35",
+      "severity": "medium",
+      "title": "Typo \"Pailler\" should be \"Paillier\"",
+      "reviewers": "CLAUDE, CODEX",
+      "confidence": "trusted",
+      "problem": "The asymmetric algorithm name is misspelled as \"Pailler\" instead of the correct spelling \"Paillier\"",
+      "code": "* Pailler算法支持同态运算",
+      "fix": "* Paillier算法支持同态运算"
+    },
+    {
+      "file": "README.md",
+      "line": "16",
+      "severity": "medium",
+      "title": "Incorrect term \"publicly token\" should be \"Privacy Pass token\"",
+      "reviewers": "CLAUDE, CODEX",
+      "confidence": "trusted",
+      "problem": "The component description says \"publicly token authentication\" but should say \"Privacy Pass token authentication\" based on RFC 9578",
+      "code": "- Authentication: Support Privacy Pass、HOTP、TOTP、SPAKE2+.",
+      "fix": "- Authentication: Support Privacy Pass, HOTP, TOTP, SPAKE2+."
+    },
+    {
+      "file": "docs/zh/1_发行声明.md",
+      "line": "56",
+      "severity": "medium",
+      "title": "Typo \"PKIL\" should be \"PKI\"",
+      "reviewers": "CLAUDE, GEMINI, CODEX",
+      "confidence": "trusted",
+      "problem": "The command line section has a typo \"PKIL\" instead of \"PKI\"",
+      "code": "* 证书和PKIL: req，x509，pkcs7，pkcs12，crl ...",
+      "fix": "* 证书和PKI: req，x509，pkcs7，pkcs12，crl ..."
+    },
+    {
+      "file": "README-zh.md",
+      "line": "45",
+      "severity": "medium",
+      "title": "Incorrect term \"publicly token\" in Chinese",
+      "reviewers": "CLAUDE, CODEX",
+      "confidence": "trusted",
+      "problem": "The component description says \"publicly token认证功能\" but should say \"Privacy Pass token认证功能\"",
+      "code": "- Auth认证组件提供了认证功能，当前提供publicly token认证功能，TOTP/HOTP，SPAKE2+等协议；",
+      "fix": "- Auth认证组件提供了认证功能，当前提供Privacy Pass token认证功能，TOTP/HOTP，SPAKE2+等协议；"
+    },
+    {
+      "file": "README.md",
+      "line": "8",
+      "severity": "medium",
+      "title": "Misleading ISO19790 certification claim",
+      "reviewers": "CODEX",
+      "confidence": "evaluate",
+      "problem": "The README states \"ISO19790 certified\" which reads like a formal certification claim but the repository only documents an ISO19790 provider feature. This could be misleading without evidence of actual certification.",
+      "code": "Currently, 5 components and cryptographic algorithms are configured, ISO19790 certified, and the performance optimization of ShangMi cryptographic algorithms on ARM, x86 is ready.",
+      "fix": "Currently, 5 components and cryptographic algorithms are configured, ISO19790 provider support is available, and the performance optimization of ShangMi cryptographic algorithms on ARM, x86 is ready."
+    },
+    {
+      "file": "README-zh.md",
+      "line": "8",
+      "severity": "medium",
+      "title": "Misleading ISO19790 certification claim in Chinese",
+      "reviewers": "CODEX",
+      "confidence": "evaluate",
+      "problem": "\"已经通过ISO19790认证\" reads like a formal certification claim but the repository only documents an ISO19790 provider feature",
+      "code": "openHiTLS为密码算法提供最佳性能优化。当前已支持5个组件和算法特性可按需配置，已经通过ISO19790认证，支持ARM、x86架构CPU上的算法性能优化，更多架构和特性待规划。",
+      "fix": "openHiTLS为密码算法提供最佳性能优化。当前已支持5个组件和算法特性可按需配置，已提供ISO19790 Provider支持，支持ARM、x86架构CPU上的算法性能优化，更多架构和特性待规划。"
+    },
+    {
+      "file": "README-zh.md",
+      "line": "16",
+      "severity": "low",
+      "title": "Mixed Chinese and English punctuation",
+      "reviewers": "CLAUDE, GEMINI",
+      "confidence": "trusted",
+      "problem": "The Chinese README uses English comma instead of Chinese enumeration mark (、) and is missing space before 等认证协议",
+      "code": "- 认证：支持 Privacy Pass、HOTP、TOTP、SPAKE2+等认证协议；",
+      "fix": "- 认证：支持 Privacy Pass、HOTP、TOTP、SPAKE2+ 等认证协议；"
+    },
+    {
+      "file": "README.md",
+      "line": "16",
+      "severity": "low",
+      "title": "Mixed Chinese and English punctuation in English document",
+      "reviewers": "CLAUDE, GEMINI",
+      "confidence": "trusted",
+      "problem": "The English README uses Chinese enumeration mark (、) instead of English comma (,)",
+      "code": "- Authentication: Support Privacy Pass、HOTP、TOTP、SPAKE2+.",
+      "fix": "- Authentication: Support Privacy Pass, HOTP, TOTP, SPAKE2+."
+    },
+    {
+      "file": "README.md",
+      "line": "21",
+      "severity": "low",
+      "title": "Inconsistent capitalization of \"random\"",
+      "reviewers": "GEMINI",
+      "confidence": "likely",
+      "problem": "The item \"random\" starts with a lowercase letter, while other items in the list start with uppercase",
+      "code": "- random: DRBG, DRBG-GM",
+      "fix": "- Random: DRBG, DRBG-GM"
+    },
+    {
+      "file": "README.md",
+      "line": "124",
+      "severity": "low",
+      "title": "Non-standard architecture name \"x8664\"",
+      "reviewers": "GEMINI",
+      "confidence": "likely",
+      "problem": "The text \"x8664\" is used in the description header, but \"x86_64\" is the standard notation",
+      "code": "* x8664 Optimize the full build:",
+      "fix": "* x86_64 Optimize the full build:"
+    },
+    {
+      "file": "README-zh.md",
+      "line": "8",
+      "severity": "low",
+      "title": "Extra space in Chinese text",
+      "reviewers": "GEMINI",
+      "confidence": "likely",
+      "problem": "There is an extra space in the Chinese word \"通过\" (written as \"通 过\")",
+      "code": "openHiTLS为密码算法提供最佳性能优化。当前已支持5个组件和算法特性可按需配置，已经通过ISO19790认证，支持ARM、x86架构CPU上的算法性能优化，更多架构和特性待规划。",
+      "fix": "openHiTLS为密码算法提供最佳性能优化。当前已支持5个组件和算法特性可按需配置，已经通过ISO19790认证，支持ARM、x86架构CPU上的算法性能优化，更多架构和特性待规划。"
+    },
+    {
+      "file": "README-zh.md",
+      "line": "21-24",
+      "severity": "low",
+      "title": "Inconsistent punctuation in algorithm list",
+      "reviewers": "CLAUDE, GEMINI",
+      "confidence": "trusted",
+      "problem": "The list items starting from line 21 lack the closing semicolon (；), which is present in the preceding items",
+      "code": "- 随机数：DRBG，GM-DRBG\n- 密钥派生：HKDF，SCRYPT，PBKDF2\n- 哈希算法：SHA系列，MD5，SM3\n- 消息认证码：HMAC，CMAC",
+      "fix": "- 随机数：DRBG，GM-DRBG；\n- 密钥派生：HKDF，SCRYPT，PBKDF2；\n- 哈希算法：SHA系列，MD5，SM3；\n- 消息认证码：HMAC，CMAC；"
+    },
+    {
+      "file": "README-zh.md",
+      "line": "35",
+      "severity": "low",
+      "title": "Non-standard architecture name \"x8664\"",
+      "reviewers": "GEMINI",
+      "confidence": "likely",
+      "problem": "The text uses \"x8664\" which is a non-standard abbreviation for \"x86_64\"",
+      "code": "- 基于ARMv8、ARMv7、x8664 CPU算法性能优化；",
+      "fix": "- 基于ARMv8、ARMv7、x86_64 CPU算法性能优化；"
+    },
+    {
+      "file": "docs/zh/1_发行声明.md",
+      "line": "40",
+      "severity": "low",
+      "title": "Inconsistent abbreviation \"Buff\" vs \"Buffer\"",
+      "reviewers": "CODEX",
+      "confidence": "likely",
+      "problem": "\"Buff\" is an inconsistent abbreviation compared to \"Buffer\" used elsewhere in the documentation",
+      "code": "* 支持从Buff加载证书",
+      "fix": "* 支持从Buffer加载证书"
+    },
+    {
+      "file": "docs/en/2_Key Features.md",
+      "line": "28",
+      "severity": "low",
+      "title": "HPKE listed twice in algorithm categories",
+      "reviewers": "CLAUDE",
+      "confidence": "likely",
+      "problem": "HPKE (Hybrid Public Key Encryption) appears both in \"Traditional Asymmetric Algorithms\" and \"Others\" sections",
+      "code": "#### Traditional Asymmetric Algorithms\n- RSA, RSA-Bind, DSA, ECDSA, ECDH, DH, SM2, SM9, Paillier, ElGamal, HPKE\n...\n#### Others\n- DRBG, GM-DRBG\n- HKDF, SCRYPT, PBKDF2\n- SHA1, SHA2, SHA3, SHA256-MB, MD5, SM3\n- HMAC, CMAC\n- HPKE",
+      "fix": "#### Traditional Asymmetric Algorithms\n- RSA, RSA-Bind, DSA, ECDSA, ECDH, DH, SM2, SM9, Paillier, ElGamal\n...\n#### Others\n- DRBG, GM-DRBG\n- HKDF, SCRYPT, PBKDF2\n- SHA1, SHA2, SHA3, SHA256-MB, MD5, SM3\n- HMAC, CMAC\n- HPKE"
+    }
+  ]
+}

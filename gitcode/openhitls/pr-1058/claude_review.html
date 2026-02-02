@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Code Review: openhitls/openhitls#1058 - CLAUDE</title>
+    <style>
+        :root { --critical: #dc2626; --high: #ea580c; --medium: #ca8a04; --low: #65a30d; }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: system-ui, sans-serif; background: #f8fafc; color: #1e293b; padding: 2rem; line-height: 1.6; }
+        .container { max-width: 900px; margin: 0 auto; }
+        h1 { font-size: 1.5rem; margin-bottom: 0.5rem; }
+        .subtitle { color: #64748b; margin-bottom: 2rem; }
+        .section { margin-bottom: 2rem; }
+        .section-title { font-size: 1.1rem; font-weight: 600; padding: 0.5rem 1rem; border-radius: 0.5rem 0.5rem 0 0; color: white; }
+        .section-title.critical { background: var(--critical); }
+        .section-title.high { background: var(--high); }
+        .section-title.medium { background: var(--medium); }
+        .section-title.low { background: var(--low); }
+        .issue { background: white; border: 1px solid #e2e8f0; border-top: none; padding: 1rem; }
+        .issue:last-child { border-radius: 0 0 0.5rem 0.5rem; }
+        .issue-title { font-weight: 600; margin-bottom: 0.25rem; }
+        .issue-location { font-family: monospace; font-size: 0.875rem; color: #64748b; margin-bottom: 0.75rem; }
+        .issue-source { font-size: 0.75rem; color: #94a3b8; margin-top: 0.5rem; }
+        pre { background: #1e293b; color: #e2e8f0; padding: 0.75rem; border-radius: 0.375rem; overflow-x: auto; font-size: 0.875rem; margin: 0.5rem 0; }
+        .problem { margin: 0.75rem 0; }
+        .fix-label { font-weight: 600; margin-top: 0.75rem; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Code Review: openhitls/openhitls#1058 - CLAUDE</h1>
+        <div class="subtitle"></div>
+<div class="section"><div class="section-title medium">Medium</div>
+<div class="issue">
+                <div class="issue-title">Typo in algorithm name "Pailler" should be "Paillier"</div>
+                <div class="issue-location">README-zh.md:20</div>
+                <pre>- 传统非对称算法：RSA，RSA-Bind，DSA，ECDSA，ECDH，DH，SM2，SM9，Pailler，ElGamal；</pre>
+                <div class="problem"><strong>Issue:</strong> The asymmetric algorithm name is misspelled as "Pailler" instead of the correct spelling "Paillier"</div>
+                <div class="fix-label">Fix:</div><pre>- 传统非对称算法：RSA，RSA-Bind，DSA，ECDSA，ECDH，DH，SM2，SM9，Paillier，ElGamal；</pre>
+                <div class="issue-source">Reviewer: claude</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">Typo in algorithm name "Pailler" should be "Paillier"</div>
+                <div class="issue-location">docs/zh/1_发行声明.md:35</div>
+                <pre>* Pailler算法支持同态运算</pre>
+                <div class="problem"><strong>Issue:</strong> The asymmetric algorithm name is misspelled as "Pailler" instead of the correct spelling "Paillier"</div>
+                <div class="fix-label">Fix:</div><pre>* Paillier算法支持同态运算</pre>
+                <div class="issue-source">Reviewer: claude</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">Incorrect term "publicly token" - should be "Privacy Pass token"</div>
+                <div class="issue-location">README.md:45</div>
+                <pre>- Auth authentication component provides authentication functions. Currently, it provides publicly token authentication, TOTP/HOTP, SPAKE2+.</pre>
+                <div class="problem"><strong>Issue:</strong> The component description says "publicly token authentication" but should say "Privacy Pass token authentication" based on RFC 9578</div>
+                <div class="fix-label">Fix:</div><pre>- Auth authentication component provides authentication functions. Currently, it provides Privacy Pass token authentication, TOTP/HOTP, SPAKE2+.</pre>
+                <div class="issue-source">Reviewer: claude</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">Incorrect term "publicly token" - should be "Privacy Pass token"</div>
+                <div class="issue-location">README-zh.md:45</div>
+                <pre>- Auth认证组件提供了认证功能，当前提供publicly token认证功能，TOTP/HOTP，SPAKE2+等协议；</pre>
+                <div class="problem"><strong>Issue:</strong> The component description says "publicly token认证功能" but should say "Privacy Pass token认证功能"</div>
+                <div class="fix-label">Fix:</div><pre>- Auth认证组件提供了认证功能，当前提供Privacy Pass token认证功能，TOTP/HOTP，SPAKE2+等协议；</pre>
+                <div class="issue-source">Reviewer: claude</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">Typo "PKIL" should be "PKI"</div>
+                <div class="issue-location">docs/zh/1_发行声明.md:56</div>
+                <pre>* 证书和PKIL: req，x509，pkcs7，pkcs12，crl ...</pre>
+                <div class="problem"><strong>Issue:</strong> The command line section has a typo "PKIL" instead of "PKI"</div>
+                <div class="fix-label">Fix:</div><pre>* 证书和PKI: req，x509，pkcs7，pkcs12，crl ...</pre>
+                <div class="issue-source">Reviewer: claude</div>
+            </div>
+</div>
+<div class="section"><div class="section-title low">Low</div>
+<div class="issue">
+                <div class="issue-title">Incorrect term "Privacy Pass" uses Chinese punctuation</div>
+                <div class="issue-location">README.md:16</div>
+                <pre>- Authentication: Support Privacy Pass、HOTP、TOTP、SPAKE2+.</pre>
+                <div class="problem"><strong>Issue:</strong> The English README uses Chinese enumeration mark (、) instead of English comma in "Privacy Pass、HOTP、TOTP、SPAKE2+"</div>
+                <div class="fix-label">Fix:</div><pre>- Authentication: Support Privacy Pass, HOTP, TOTP, SPAKE2+.</pre>
+                <div class="issue-source">Reviewer: claude</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">Mixed Chinese and English punctuation in protocol list</div>
+                <div class="issue-location">README-zh.md:16</div>
+                <pre>- 认证：支持 Privacy Pass、HOTP、TOTP、SPAKE2+等认证协议；</pre>
+                <div class="problem"><strong>Issue:</strong> The Chinese README uses English comma instead of Chinese enumeration mark (、) consistently</div>
+                <div class="fix-label">Fix:</div><pre>- 认证：支持 Privacy Pass、HOTP、TOTP、SPAKE2+ 等认证协议；</pre>
+                <div class="issue-source">Reviewer: claude</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">Missing semicolon at end of list item</div>
+                <div class="issue-location">README-zh.md:28</div>
+                <pre>- 传统证书能力：支持X509解析验证，CRL解析验证，CSR请求生成，部分/全部证书链生成验证</pre>
+                <div class="problem"><strong>Issue:</strong> The traditional certificate capabilities line is missing a semicolon at the end, inconsistent with other items</div>
+                <div class="fix-label">Fix:</div><pre>- 传统证书能力：支持X509解析验证，CRL解析验证，CSR请求生成，部分/全部证书链生成验证；</pre>
+                <div class="issue-source">Reviewer: claude</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">HPKE listed twice in algorithm categories</div>
+                <div class="issue-location">docs/en/2_Key Features.md:28</div>
+                <pre>#### Traditional Asymmetric Algorithms
+- RSA, RSA-Bind, DSA, ECDSA, ECDH, DH, SM2, SM9, Paillier, ElGamal, HPKE
+...
+#### Others
+- DRBG, GM-DRBG
+- HKDF, SCRYPT, PBKDF2
+- SHA1, SHA2, SHA3, SHA256-MB, MD5, SM3
+- HMAC, CMAC
+- HPKE</pre>
+                <div class="problem"><strong>Issue:</strong> HPKE (Hybrid Public Key Encryption) appears both in "Traditional Asymmetric Algorithms" and "Others" sections</div>
+                <div class="fix-label">Fix:</div><pre>#### Traditional Asymmetric Algorithms
+- RSA, RSA-Bind, DSA, ECDSA, ECDH, DH, SM2, SM9, Paillier, ElGamal
+...
+#### Others
+- DRBG, GM-DRBG
+- HKDF, SCRYPT, PBKDF2
+- SHA1, SHA2, SHA3, SHA256-MB, MD5, SM3
+- HMAC, CMAC
+- HPKE</pre>
+                <div class="issue-source">Reviewer: claude</div>
+            </div>
+</div>
+</div></body></html>

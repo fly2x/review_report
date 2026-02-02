@@ -1,0 +1,311 @@
+Now I have verified all the issues. Let me output each validated issue in the required format:
+
+===ISSUE===
+FILE: README-zh.md
+LINE: 20
+SEVERITY: medium
+TITLE: Typo "Pailler" should be "Paillier"
+REVIEWERS: CLAUDE, CODEX
+CONFIDENCE: trusted
+PROBLEM: The asymmetric algorithm name is misspelled as "Pailler" instead of the correct spelling "Paillier"
+CODE:
+```
+- 传统非对称算法：RSA，RSA-Bind，DSA，ECDSA，ECDH，DH，SM2，SM9，Pailler，ElGamal；
+```
+FIX:
+```
+- 传统非对称算法：RSA，RSA-Bind，DSA，ECDSA，ECDH，DH，SM2，SM9，Paillier，ElGamal；
+```
+===END===
+
+===ISSUE===
+FILE: docs/zh/1_发行声明.md
+LINE: 35
+SEVERITY: medium
+TITLE: Typo "Pailler" should be "Paillier"
+REVIEWERS: CLAUDE, CODEX
+CONFIDENCE: trusted
+PROBLEM: The asymmetric algorithm name is misspelled as "Pailler" instead of the correct spelling "Paillier"
+CODE:
+```
+* Pailler算法支持同态运算
+```
+FIX:
+```
+* Paillier算法支持同态运算
+```
+===END===
+
+===ISSUE===
+FILE: README.md
+LINE: 16
+SEVERITY: medium
+TITLE: Incorrect term "publicly token" should be "Privacy Pass token"
+REVIEWERS: CLAUDE, CODEX
+CONFIDENCE: trusted
+PROBLEM: The component description says "publicly token authentication" but should say "Privacy Pass token authentication" based on RFC 9578
+CODE:
+```
+- Authentication: Support Privacy Pass、HOTP、TOTP、SPAKE2+.
+```
+FIX:
+```
+- Authentication: Support Privacy Pass, HOTP, TOTP, SPAKE2+.
+```
+===END===
+
+===ISSUE===
+FILE: README-zh.md
+LINE: 16
+SEVERITY: low
+TITLE: Mixed Chinese and English punctuation
+REVIEWERS: CLAUDE, GEMINI
+CONFIDENCE: trusted
+PROBLEM: The Chinese README uses English comma instead of Chinese enumeration mark (、) and is missing space before 等认证协议
+CODE:
+```
+- 认证：支持 Privacy Pass、HOTP、TOTP、SPAKE2+等认证协议；
+```
+FIX:
+```
+- 认证：支持 Privacy Pass、HOTP、TOTP、SPAKE2+ 等认证协议；
+```
+===END===
+
+===ISSUE===
+FILE: README.md
+LINE: 16
+SEVERITY: low
+TITLE: Mixed Chinese and English punctuation in English document
+REVIEWERS: CLAUDE, GEMINI
+CONFIDENCE: trusted
+PROBLEM: The English README uses Chinese enumeration mark (、) instead of English comma (,)
+CODE:
+```
+- Authentication: Support Privacy Pass、HOTP、TOTP、SPAKE2+.
+```
+FIX:
+```
+- Authentication: Support Privacy Pass, HOTP, TOTP, SPAKE2+.
+```
+===END===
+
+===ISSUE===
+FILE: README.md
+LINE: 21
+SEVERITY: low
+TITLE: Inconsistent capitalization of "random"
+REVIEWERS: GEMINI
+CONFIDENCE: likely
+PROBLEM: The item "random" starts with a lowercase letter, while other items in the list start with uppercase
+CODE:
+```
+- random: DRBG, DRBG-GM
+```
+FIX:
+```
+- Random: DRBG, DRBG-GM
+```
+===END===
+
+===ISSUE===
+FILE: README.md
+LINE: 124
+SEVERITY: low
+TITLE: Non-standard architecture name "x8664"
+REVIEWERS: GEMINI
+CONFIDENCE: likely
+PROBLEM: The text "x8664" is used in the description header, but "x86_64" is the standard notation
+CODE:
+```
+* x8664 Optimize the full build:
+```
+FIX:
+```
+* x86_64 Optimize the full build:
+```
+===END===
+
+===ISSUE===
+FILE: README-zh.md
+LINE: 8
+SEVERITY: low
+TITLE: Extra space in Chinese text
+REVIEWERS: GEMINI
+CONFIDENCE: likely
+PROBLEM: There is an extra space in the Chinese word "通过" (written as "通 过")
+CODE:
+```
+openHiTLS为密码算法提供最佳性能优化。当前已支持5个组件和算法特性可按需配置，已经通过ISO19790认证，支持ARM、x86架构CPU上的算法性能优化，更多架构和特性待规划。
+```
+FIX:
+```
+openHiTLS为密码算法提供最佳性能优化。当前已支持5个组件和算法特性可按需配置，已经通过ISO19790认证，支持ARM、x86架构CPU上的算法性能优化，更多架构和特性待规划。
+```
+===END===
+
+===ISSUE===
+FILE: README-zh.md
+LINE: 21-24
+SEVERITY: low
+TITLE: Inconsistent punctuation in algorithm list
+REVIEWERS: CLAUDE, GEMINI
+CONFIDENCE: trusted
+PROBLEM: The list items starting from line 21 lack the closing semicolon (；), which is present in the preceding items
+CODE:
+```
+- 随机数：DRBG，GM-DRBG
+- 密钥派生：HKDF，SCRYPT，PBKDF2
+- 哈希算法：SHA系列，MD5，SM3
+- 消息认证码：HMAC，CMAC
+```
+FIX:
+```
+- 随机数：DRBG，GM-DRBG；
+- 密钥派生：HKDF，SCRYPT，PBKDF2；
+- 哈希算法：SHA系列，MD5，SM3；
+- 消息认证码：HMAC，CMAC；
+```
+===END===
+
+===ISSUE===
+FILE: README-zh.md
+LINE: 35
+SEVERITY: low
+TITLE: Non-standard architecture name "x8664"
+REVIEWERS: GEMINI
+CONFIDENCE: likely
+PROBLEM: The text uses "x8664" which is a non-standard abbreviation for "x86_64"
+CODE:
+```
+- 基于ARMv8、ARMv7、x8664 CPU算法性能优化；
+```
+FIX:
+```
+- 基于ARMv8、ARMv7、x86_64 CPU算法性能优化；
+```
+===END===
+
+===ISSUE===
+FILE: docs/zh/1_发行声明.md
+LINE: 56
+SEVERITY: medium
+TITLE: Typo "PKIL" should be "PKI"
+REVIEWERS: CLAUDE, GEMINI, CODEX
+CONFIDENCE: trusted
+PROBLEM: The command line section has a typo "PKIL" instead of "PKI"
+CODE:
+```
+* 证书和PKIL: req，x509，pkcs7，pkcs12，crl ...
+```
+FIX:
+```
+* 证书和PKI: req，x509，pkcs7，pkcs12，crl ...
+```
+===END===
+
+===ISSUE===
+FILE: docs/zh/1_发行声明.md
+LINE: 40
+SEVERITY: low
+TITLE: Inconsistent abbreviation "Buff" vs "Buffer"
+REVIEWERS: CODEX
+CONFIDENCE: likely
+PROBLEM: "Buff" is an inconsistent abbreviation compared to "Buffer" used elsewhere in the documentation
+CODE:
+```
+* 支持从Buff加载证书
+```
+FIX:
+```
+* 支持从Buffer加载证书
+```
+===END===
+
+===ISSUE===
+FILE: docs/en/2_Key Features.md
+LINE: 28,38
+SEVERITY: low
+TITLE: HPKE listed twice in algorithm categories
+REVIEWERS: CLAUDE
+CONFIDENCE: likely
+PROBLEM: HPKE (Hybrid Public Key Encryption) appears both in "Traditional Asymmetric Algorithms" and "Others" sections
+CODE:
+```
+#### Traditional Asymmetric Algorithms
+- RSA, RSA-Bind, DSA, ECDSA, ECDH, DH, SM2, SM9, Paillier, ElGamal, HPKE
+...
+#### Others
+- DRBG, GM-DRBG
+- HKDF, SCRYPT, PBKDF2
+- SHA1, SHA2, SHA3, SHA256-MB, MD5, SM3
+- HMAC, CMAC
+- HPKE
+```
+FIX:
+```
+#### Traditional Asymmetric Algorithms
+- RSA, RSA-Bind, DSA, ECDSA, ECDH, DH, SM2, SM9, Paillier, ElGamal
+...
+#### Others
+- DRBG, GM-DRBG
+- HKDF, SCRYPT, PBKDF2
+- SHA1, SHA2, SHA3, SHA256-MB, MD5, SM3
+- HMAC, CMAC
+- HPKE
+```
+===END===
+
+===ISSUE===
+FILE: README-zh.md
+LINE: 45
+SEVERITY: medium
+TITLE: Incorrect term "publicly token" in Chinese
+REVIEWERS: CLAUDE, CODEX
+CONFIDENCE: trusted
+PROBLEM: The component description says "publicly token认证功能" but should say "Privacy Pass token认证功能"
+CODE:
+```
+- Auth认证组件提供了认证功能，当前提供publicly token认证功能，TOTP/HOTP，SPAKE2+等协议；
+```
+FIX:
+```
+- Auth认证组件提供了认证功能，当前提供Privacy Pass token认证功能，TOTP/HOTP，SPAKE2+等协议；
+```
+===END===
+
+===ISSUE===
+FILE: README.md
+LINE: 8
+SEVERITY: medium
+TITLE: Misleading ISO19790 certification claim
+REVIEWERS: CODEX
+CONFIDENCE: evaluate
+PROBLEM: The README states "ISO19790 certified" which reads like a formal certification claim but the repository only documents an ISO19790 provider feature. This could be misleading without evidence of actual certification.
+CODE:
+```
+Currently, 5 components and cryptographic algorithms are configured, ISO19790 certified, and the performance optimization of ShangMi cryptographic algorithms on ARM, x86 is ready.
+```
+FIX:
+```
+Currently, 5 components and cryptographic algorithms are configured, ISO19790 provider support is available, and the performance optimization of ShangMi cryptographic algorithms on ARM, x86 is ready.
+```
+===END===
+
+===ISSUE===
+FILE: README-zh.md
+LINE: 8
+SEVERITY: medium
+TITLE: Misleading ISO19790 certification claim in Chinese
+REVIEWERS: CODEX
+CONFIDENCE: evaluate
+PROBLEM: "已经通过ISO19790认证" reads like a formal certification claim but the repository only documents an ISO19790 provider feature
+CODE:
+```
+openHiTLS为密码算法提供最佳性能优化。当前已支持5个组件和算法特性可按需配置，已经通过ISO19790认证，支持ARM、x86架构CPU上的算法性能优化，更多架构和特性待规划。
+```
+FIX:
+```
+openHiTLS为密码算法提供最佳性能优化。当前已支持5个组件和算法特性可按需配置，已提供ISO19790 Provider支持，支持ARM、x86架构CPU上的算法性能优化，更多架构和特性待规划。
+```
+===END===
