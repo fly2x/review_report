@@ -1,136 +1,102 @@
-I will start by listing the changed files and their statistics to confirm the scope of the PR, and then I will examine the diffs for each file to identify any issues.
-I will read the differences for `README.md` and `README-zh.md` to check for any inconsistencies or errors in the main documentation.
-I will read `configure.py` to verify the valid `asm_type` values, confirming whether `x8664` is a valid option or a typo.
-I will read `config/json/feature.json` to verify the valid values for `asm_type`, specifically checking if `x8664` is supported.
-I will read the English documentation files `docs/en/1_Release Notes.md`, `docs/en/2_Key Features.md`, and `docs/en/6_Appendix/2_Change History.md` to identify any issues or inconsistencies.
-I will examine the Chinese documentation files `docs/zh/1_发行声明.md`, `docs/zh/2_关键特性.md`, and `docs/zh/6_附录/2_修订记录.md` to identify any issues, while also verifying if the Chinese "Change History" file was deleted like its English counterpart.
-I will verify the inconsistencies and typos found in `README.md`, `README-zh.md`, and `docs/zh/1_发行声明.md`, including mixed delimiters, inconsistent capitalization, missing punctuation, and the deletion of the "Change History" files. Then, I will generate the issue report.
+I will list the changed files and their statistics to understand the scope of the PR.
+I will read the diff for `README.md` to check for any incorrect instructions or issues.
+I will check `configure.py` to verify the valid values for the `--asm_type` flag and determine if `x8664` is correct.
+I will check `README-zh.md` to see if there are any inconsistencies or errors in the Chinese documentation.
+I will read `README-zh.md` to confirm the line numbers of the identified typos and formatting issues.
+I will check the current branch and status to confirm if the PR branch is checked out and to verify the file content against the diff.
+I will use `grep` to search for the string "通 过" in `README-zh.md` to definitively confirm the presence of the typo.
+I will use `grep` to search for the string "其他 模块" in `README-zh.md` to check for the extra space.
+I will check the commit hashes of `HEAD` and `mr-1058` to ensure they match and that I am reviewing the correct version of the code.
+I will run `cat README-zh.md` to view the raw content of the file and ensure there are no processing artifacts.
+I will read the diff for `docs/en/1_Release Notes.md` to check for any issues or errors in the release notes.
+I will read the diff for `docs/zh/1_发行声明.md` to check for any issues or inconsistencies in the Chinese release notes.
+I will read the diff for `docs/en/2_Key Features.md` to check for any issues or inconsistencies in the key features documentation.
+I will read the diff for `docs/zh/2_关键特性.md` to check for any issues or inconsistencies in the Chinese key features documentation.
+I will run `cat` on `docs/zh/2_关键特性.md` to confirm the presence of extra spaces in the Chinese key features documentation.
+I will read the diff for `docs/zh/4_使用指南/4_配置指南.md` to check for any issues.
+I will read the diffs for `docs/en/6_Appendix/2_Change History.md` and `docs/zh/6_附录/2_修订记录.md` to check for any issues.
+I will read the diff for `docs/zh/6_附录/2_修订记录.md` to confirm if it was also deleted.
+I will run `git diff --stat` again to verify the correct filename and encoding for the Chinese change history file.
+I will use `ls` with a wildcard to find the exact path of the Chinese change history file to avoid encoding issues.
+I will run `cat README-zh.md` again to verify the spacing in the phrase "部分/全部证书链 生成验证".
+I will read `README-zh.md` and `docs/zh/2_关键特性.md` again to confirm the exact line numbers and content for the identified issues.
+I will run `cat -A docs/zh/2_关键特性.md` to reveal any hidden characters or formatting issues.
+===ISSUE===
+FILE: README-zh.md
+LINE: 5
+SEVERITY: low
+TITLE: Typo in Chinese text (extra space)
+PROBLEM: There is an unnecessary space in the word "通用" (universal/general).
+CODE:
+```
+欢迎访问openHiTLS代码仓，该代码仓的项目官网是openHiTLS社区<https://openhitls.net>，openHiTLS的目标是提供高效、敏捷的全场景开源密码学开发套件。openHiTLS已支持通 用的标准密码算法、(D)TLS、(D)TLCP等安全通信协议，更多特性待规划。
+```
+FIX:
+```
+欢迎访问openHiTLS代码仓，该代码仓的项目官网是openHiTLS社区<https://openhitls.net>，openHiTLS的目标是提供高效、敏捷的全场景开源密码学开发套件。openHiTLS已支持通用的标准密码算法、(D)TLS、(D)TLCP等安全通信协议，更多特性待规划。
+```
+===END===
 
 ===ISSUE===
-FILE: README.md
-LINE: 14
+FILE: README-zh.md
+LINE: 103
 SEVERITY: low
-TITLE: Mixed delimiters in feature list
-PROBLEM: The line uses a Chinese-style enumeration comma (、) instead of an English comma (,).
+TITLE: Punctuation spacing issue
+PROBLEM: There is an unnecessary space before the period at the end of the sentence.
 CODE:
 ```
-- Authentication: Support Privacy Pass、HOTP、TOTP、SPAKE2+.
+openHiTLS依赖于Secure C（libboundscheck），**现已由 configure.py 脚本自动管理** 。
 ```
 FIX:
 ```
-- Authentication: Support Privacy Pass, HOTP, TOTP, SPAKE2+.
+openHiTLS依赖于Secure C（libboundscheck），**现已由 configure.py 脚本自动管理**。
 ```
 ===END===
-===ISSUE===
-FILE: README.md
-LINE: 19
-SEVERITY: low
-TITLE: Inconsistent capitalization
-PROBLEM: The item "random" starts with a lowercase letter, while other items in the list start with uppercase (e.g., "Symmetric algorithms", "Post-quantum algorithms").
-CODE:
-```
-   - random: DRBG, DRBG-GM
-```
-FIX:
-```
-   - Random: DRBG, DRBG-GM
-```
-===END===
-===ISSUE===
-FILE: README.md
-LINE: 125
-SEVERITY: low
-TITLE: Non-standard architecture name in header
-PROBLEM: The text "x8664" is used in the description header, but "x86_64" is the standard notation.
-CODE:
-```
-* x8664 Optimize the full build:
-```
-FIX:
-```
-* x86_64 Optimize the full build:
-```
-===END===
+
 ===ISSUE===
 FILE: README-zh.md
-LINE: 10
+LINE: 132
 SEVERITY: low
-TITLE: Typo (Extra space)
-PROBLEM: There is an extra space in the Chinese word "通过" (written as "通 过").
+TITLE: Typo in link text (extra space)
+PROBLEM: There is an unnecessary space in the link text "构建及安装指导".
 CODE:
 ```
-openHiTLS为密码算法提供最佳性能优化。当前已支持5个组件和算法特性可按需配置，已经通 过ISO19790认证，支持ARM、x86架构CPU上的算法性能优化，更多架构和特性待规划。
+在Linux系统中进行构建与安装时，可参考[构建安装指导](docs/zh/4_使用指南/1_构建及 安装指导.md)
 ```
 FIX:
 ```
-openHiTLS为密码算法提供最佳性能优化。当前已支持5个组件和算法特性可按需配置，已经通过ISO19790认证，支持ARM、x86架构CPU上的算法性能优化，更多架构和特性待规划。
+在Linux系统中进行构建与安装时，可参考[构建安装指导](docs/zh/4_使用指南/1_构建及安装指导.md)
 ```
 ===END===
+
 ===ISSUE===
 FILE: README-zh.md
-LINE: 23-27
+LINE: 160
 SEVERITY: low
-TITLE: Inconsistent punctuation in list
-PROBLEM: The list items starting from line 23 lack the closing semicolon (；), which is present in the preceding items (lines 17, 19, 21).
+TITLE: Typo in text (extra space)
+PROBLEM: There is an unnecessary space in the phrase "平台上".
 CODE:
 ```
-   - 随机数：DRBG，GM-DRBG
-   - 密钥派生：HKDF，SCRYPT，PBKDF2
-   - 哈希算法：SHA系列，MD5，SM3
-   - 消息认证码：HMAC，CMAC
-   - 其他：HPKE
+如果您有意为openHiTLS社区做贡献，请先在[CLA签署](https://cla.openhitls.net)平台 上完成CLA签署。
 ```
 FIX:
 ```
-   - 随机数：DRBG，GM-DRBG；
-   - 密钥派生：HKDF，SCRYPT，PBKDF2；
-   - 哈希算法：SHA系列，MD5，SM3；
-   - 消息认证码：HMAC，CMAC；
-   - 其他：HPKE
+如果您有意为openHiTLS社区做贡献，请先在[CLA签署](https://cla.openhitls.net)平台上完成CLA签署。
 ```
 ===END===
+
 ===ISSUE===
-FILE: README-zh.md
-LINE: 39
+FILE: docs/zh/2_关键特性.md
+LINE: 3
 SEVERITY: low
-TITLE: Non-standard architecture name
-PROBLEM: The text uses "x8664" which is a non-standard abbreviation for "x86_64" in this context.
+TITLE: Multiple typos in overview text (extra spaces)
+PROBLEM: There are unnecessary spaces in "等不同", "支持", and "后量子".
 CODE:
 ```
-- 基于ARMv8、ARMv7、x8664 CPU算法性能优化；
+openHiTLS的目标是提供高效敏捷的全场景密码学套件，通过模块分层特性分级的弹性架构 ，实现特性按需选择和扩展，支撑全场景应用满足RAM/ROM内存、计算性能、特性满足度等 不同需求；当前已支持密码算法功能以及TLS、DTLS、TLCP安全通信协议功能，商密算法支 持基于ARM、x86指令的性能优化，**并支持混合密钥交换（Hybrid Key Exchange）和后量 子密码算法**，更多特性待规划、欢迎参与共建。
 ```
 FIX:
 ```
-- 基于ARMv8、ARMv7、x86_64 CPU算法性能优化；
-```
-===END===
-===ISSUE===
-FILE: docs/zh/1_发行声明.md
-LINE: 57
-SEVERITY: low
-TITLE: Typo in PKI acronym
-PROBLEM: The text says "PKIL" instead of "PKI".
-CODE:
-```
- * 证书和PKIL: req，x509，pkcs7，pkcs12，crl ...
-```
-FIX:
-```
- * 证书和PKI: req，x509，pkcs7，pkcs12，crl ...
-```
-===END===
-===ISSUE===
-FILE: docs/en/6_Appendix/2_Change History.md
-LINE: 1-5
-SEVERITY: low
-TITLE: Deletion of Change History
-PROBLEM: The change history file is being deleted. While the new "Release Notes" covers the current version, historical data (v0.1.0 alpha1) is lost.
-CODE:
-```
-(File deleted)
-```
-FIX:
-```
-(Consider keeping the file or merging historical versions into Release Notes)
+openHiTLS的目标是提供高效敏捷的全场景密码学套件，通过模块分层特性分级的弹性架构，实现特性按需选择和扩展，支撑全场景应用满足RAM/ROM内存、计算性能、特性满足度等不同需求；当前已支持密码算法功能以及TLS、DTLS、TLCP安全通信协议功能，商密算法支持基于ARM、x86指令的性能优化，**并支持混合密钥交换（Hybrid Key Exchange）和后量子密码算法**，更多特性待规划、欢迎参与共建。
 ```
 ===END===

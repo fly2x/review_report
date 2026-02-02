@@ -4,114 +4,67 @@
 
 ## Low
 
-### Mixed delimiters in feature list
-`README.md:14`
+### Typo in Chinese text (extra space)
+`README-zh.md:5`
 ```
-- Authentication: Support Privacy Pass、HOTP、TOTP、SPAKE2+.
+欢迎访问openHiTLS代码仓，该代码仓的项目官网是openHiTLS社区<https://openhitls.net>，openHiTLS的目标是提供高效、敏捷的全场景开源密码学开发套件。openHiTLS已支持通 用的标准密码算法、(D)TLS、(D)TLCP等安全通信协议，更多特性待规划。
 ```
-**Issue**: The line uses a Chinese-style enumeration comma (、) instead of an English comma (,).
+**Issue**: There is an unnecessary space in the word "通用" (universal/general).
 **Fix**:
 ```
-- Authentication: Support Privacy Pass, HOTP, TOTP, SPAKE2+.
+欢迎访问openHiTLS代码仓，该代码仓的项目官网是openHiTLS社区<https://openhitls.net>，openHiTLS的目标是提供高效、敏捷的全场景开源密码学开发套件。openHiTLS已支持通用的标准密码算法、(D)TLS、(D)TLCP等安全通信协议，更多特性待规划。
 ```
 
 ---
 
-### Inconsistent capitalization
-`README.md:19`
+### Punctuation spacing issue
+`README-zh.md:103`
 ```
-- random: DRBG, DRBG-GM
+openHiTLS依赖于Secure C（libboundscheck），**现已由 configure.py 脚本自动管理** 。
 ```
-**Issue**: The item "random" starts with a lowercase letter, while other items in the list start with uppercase (e.g., "Symmetric algorithms", "Post-quantum algorithms").
+**Issue**: There is an unnecessary space before the period at the end of the sentence.
 **Fix**:
 ```
-- Random: DRBG, DRBG-GM
+openHiTLS依赖于Secure C（libboundscheck），**现已由 configure.py 脚本自动管理**。
 ```
 
 ---
 
-### Non-standard architecture name in header
-`README.md:125`
+### Typo in link text (extra space)
+`README-zh.md:132`
 ```
-* x8664 Optimize the full build:
+在Linux系统中进行构建与安装时，可参考[构建安装指导](docs/zh/4_使用指南/1_构建及 安装指导.md)
 ```
-**Issue**: The text "x8664" is used in the description header, but "x86_64" is the standard notation.
+**Issue**: There is an unnecessary space in the link text "构建及安装指导".
 **Fix**:
 ```
-* x86_64 Optimize the full build:
+在Linux系统中进行构建与安装时，可参考[构建安装指导](docs/zh/4_使用指南/1_构建及安装指导.md)
 ```
 
 ---
 
-### Typo (Extra space)
-`README-zh.md:10`
+### Typo in text (extra space)
+`README-zh.md:160`
 ```
-openHiTLS为密码算法提供最佳性能优化。当前已支持5个组件和算法特性可按需配置，已经通 过ISO19790认证，支持ARM、x86架构CPU上的算法性能优化，更多架构和特性待规划。
+如果您有意为openHiTLS社区做贡献，请先在[CLA签署](https://cla.openhitls.net)平台 上完成CLA签署。
 ```
-**Issue**: There is an extra space in the Chinese word "通过" (written as "通 过").
+**Issue**: There is an unnecessary space in the phrase "平台上".
 **Fix**:
 ```
-openHiTLS为密码算法提供最佳性能优化。当前已支持5个组件和算法特性可按需配置，已经通过ISO19790认证，支持ARM、x86架构CPU上的算法性能优化，更多架构和特性待规划。
+如果您有意为openHiTLS社区做贡献，请先在[CLA签署](https://cla.openhitls.net)平台上完成CLA签署。
 ```
 
 ---
 
-### Inconsistent punctuation in list
-`README-zh.md:23-27`
+### Multiple typos in overview text (extra spaces)
+`docs/zh/2_关键特性.md:3`
 ```
-- 随机数：DRBG，GM-DRBG
-   - 密钥派生：HKDF，SCRYPT，PBKDF2
-   - 哈希算法：SHA系列，MD5，SM3
-   - 消息认证码：HMAC，CMAC
-   - 其他：HPKE
+openHiTLS的目标是提供高效敏捷的全场景密码学套件，通过模块分层特性分级的弹性架构 ，实现特性按需选择和扩展，支撑全场景应用满足RAM/ROM内存、计算性能、特性满足度等 不同需求；当前已支持密码算法功能以及TLS、DTLS、TLCP安全通信协议功能，商密算法支 持基于ARM、x86指令的性能优化，**并支持混合密钥交换（Hybrid Key Exchange）和后量 子密码算法**，更多特性待规划、欢迎参与共建。
 ```
-**Issue**: The list items starting from line 23 lack the closing semicolon (；), which is present in the preceding items (lines 17, 19, 21).
+**Issue**: There are unnecessary spaces in "等不同", "支持", and "后量子".
 **Fix**:
 ```
-- 随机数：DRBG，GM-DRBG；
-   - 密钥派生：HKDF，SCRYPT，PBKDF2；
-   - 哈希算法：SHA系列，MD5，SM3；
-   - 消息认证码：HMAC，CMAC；
-   - 其他：HPKE
-```
-
----
-
-### Non-standard architecture name
-`README-zh.md:39`
-```
-- 基于ARMv8、ARMv7、x8664 CPU算法性能优化；
-```
-**Issue**: The text uses "x8664" which is a non-standard abbreviation for "x86_64" in this context.
-**Fix**:
-```
-- 基于ARMv8、ARMv7、x86_64 CPU算法性能优化；
-```
-
----
-
-### Typo in PKI acronym
-`docs/zh/1_发行声明.md:57`
-```
-* 证书和PKIL: req，x509，pkcs7，pkcs12，crl ...
-```
-**Issue**: The text says "PKIL" instead of "PKI".
-**Fix**:
-```
-* 证书和PKI: req，x509，pkcs7，pkcs12，crl ...
-```
-
----
-
-### Deletion of Change History
-`docs/en/6_Appendix/2_Change History.md:1-5`
-```
-(File deleted)
-```
-**Issue**: The change history file is being deleted. While the new "Release Notes" covers the current version, historical data (v0.1.0 alpha1) is lost.
-**Fix**:
-```
-(Consider keeping the file or merging historical versions into Release Notes)
+openHiTLS的目标是提供高效敏捷的全场景密码学套件，通过模块分层特性分级的弹性架构，实现特性按需选择和扩展，支撑全场景应用满足RAM/ROM内存、计算性能、特性满足度等不同需求；当前已支持密码算法功能以及TLS、DTLS、TLCP安全通信协议功能，商密算法支持基于ARM、x86指令的性能优化，**并支持混合密钥交换（Hybrid Key Exchange）和后量子密码算法**，更多特性待规划、欢迎参与共建。
 ```
 
 ---

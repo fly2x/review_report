@@ -3,7 +3,7 @@
 You are reviewing PR #1058 for openhitls/openhitls.
 
 
-## Changed Files (8 files)
+## Changed Files (9 files)
 
 **Docs** (5 files):
   - README-zh.md
@@ -12,9 +12,10 @@ You are reviewing PR #1058 for openhitls/openhitls.
   - docs/en/2_Key Features.md
   - docs/en/6_Appendix/2_Change History.md
 
-**Other** (3 files):
+**Other** (4 files):
   - "docs/zh/1_\345\217\221\350\241\214\345\243\260\346\230\216.md"
   - "docs/zh/2_\345\205\263\351\224\256\347\211\271\346\200\247.md"
+  - "docs/zh/4_\344\275\277\347\224\250\346\214\207\345\215\227/4_\351\205\215\347\275\256\346\214\207\345\215\227.md"
   - "docs/zh/6_\351\231\204\345\275\225/2_\344\277\256\350\256\242\350\256\260\345\275\225.md"
 
 
