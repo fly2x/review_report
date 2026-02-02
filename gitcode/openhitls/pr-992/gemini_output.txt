@@ -1,140 +1,58 @@
-The code review of the `openHiTLS` PR #992 identifies the following issues, including a **CRITICAL** cryptographic vulnerability in the HSS signature verification logic.
-
+I will start by checking the current git status and recent commit history to understand the context of the PR and verify the base commit.
+I will list the changed files and their diff statistics to confirm the scope of the changes.
+I will read the content of `crypto/lms/src/lms_core.c` to examine the core LMS cryptographic logic.
+I will read `crypto/lms/src/lms_ots.c` to examine the LMS One-Time Signature implementation, focusing on parameter validation and complexity.
+I will check `crypto/lms/src/lms_local.h` to verify macros such as `LMS_MAX_HASH` and `LMS_CHECKSUM_LEN` and ensure buffer safety.
+I will read `crypto/lms/include/crypt_lms.h` to locate the definition of `LMS_MAX_HASH` and check for other relevant definitions.
+I will read `crypto/lms/src/lms_params.h` to locate the definition of `LMS_MAX_HASH` and check for other parameter definitions.
+I will search for the definition of `LmsLookupParamSet` in the `crypto/lms/src/` directory to verify its implementation and check for any potential issues.
+I will read `crypto/lms/src/lms_hash.c` to examine `LmsLookupParamSet` and `LmsHash` implementations.
+I will read `crypto/lms/src/hss_core.c` to examine the HSS implementation and how it utilizes the LMS functions.
+I will read `crypto/lms/src/hss_utils.c` to examine the implementation of `HssCalculateTreeIndices` and other utility functions.
+I will read `config/macro_config/hitls_config_layer_crypto.h` to confirm if the LMS configuration is enabled.
 ===ISSUE===
 FILE: crypto/lms/src/hss_utils.c
-LINE: 317
+LINE: 274
 SEVERITY: critical
-TITLE: HSS Index Calculation Logic Error leading to OTS Key Reuse
-PROBLEM: The calculation of `leafIndex[i]` uses `sigsPerTree[i + 1]` as the divisor. This is incorrect. `sigsPerTree[i]` represents the weight/stride of level `i`, while `sigsPerTree[i+1]` is the weight of level `i+1`. Using the smaller weight of the next level causes the leaf index at the current level (e.g., the top level) to change too rapidly (for every message instead of every subtree). This results in the same One-Time Signature (OTS) key at the top level being used to sign multiple different child tree roots (different messages), which is a catastrophic security failure allowing forgery.
+TITLE: HSS Tree Index Calculation Uses Wrong Level Height
+PROBLEM: The calculation of `sigsPerTree[i]` incorrectly uses the height of the child level (`i + 1`) instead of the current level (`i`). `sigsPerTree[i]` represents the capacity (number of bottom-level signatures) covered by a tree at level `i`. It should be `sigsPerTree[i + 1] * (1 << height_of_level_i)`. The current code computes `sigsPerTree[i + 1] * (1 << height_of_level_i_plus_1)`, effectively using the child's height twice. This results in incorrect tree and leaf indices when different levels have different heights (e.g., h=10 at level 0, h=20 at level 1).
 CODE:
 ```c
-        if (i == para->levels - 1) {
-            // Bottom level: leaf = globalIndex mod (2^height)
-            leafIndex[i] = (uint32_t)(globalIndex % maxLeaves);
-        } else {
-            // Higher levels: leaf = (globalIndex / sigsPerTree[i+1]) mod (2^height)
-            leafIndex[i] = (uint32_t)((globalIndex / sigsPerTree[i + 1]) % maxLeaves);
-        }
-```
-FIX:
-```c
-        // Leaf index at level i = (globalIndex / sigsPerTree[i]) % (2^height[i])
-        // Note: sigsPerTree[i] accounts for all levels below i.
-        leafIndex[i] = (uint32_t)((globalIndex / sigsPerTree[i]) % maxLeaves);
-```
-===END===
-
-===ISSUE===
-FILE: crypto/lms/src/hss_utils.c
-LINE: 305
-SEVERITY: critical
-TITLE: HSS Tree Index Calculation Logic Error
-PROBLEM: The calculation `treeIndex[i] = globalIndex / sigsPerTree[i]` is incorrect. `sigsPerTree[i]` is the capacity of the *subtrees* rooted at level `i` (number of bottom-level signatures per leaf at level `i`). Dividing by this value gives the cumulative index of the leaf at level `i`, not the index of the tree *containing* that leaf. For level `i`, the tree index should be determined by the capacity of the tree at level `i` (which is `sigsPerTree[i-1]` in the conceptual hierarchy, or `sigsPerTree[i] * 2^height[i]`). Using the wrong divisor means the derived tree seeds are incorrect and change too frequently, further compounding the OTS reuse issue.
-CODE:
-```c
-    for (uint32_t i = 0; i < para->levels; i++) {
-        // Tree index at level i = globalIndex / sigsPerTree[i]
-        treeIndex[i] = globalIndex / sigsPerTree[i];
-```
-FIX:
-```c
-    uint64_t currentCapacity = 0;
-    // Calculate capacity of the top level tree (Level 0)
-    if (para->levels > 0) {
-         uint32_t h0 = para->levelPara[0].height;
-         currentCapacity = sigsPerTree[0] * (1ULL << h0);
+    for (int32_t i = (int32_t)para->levels - 2; i >= 0; i--) {
+        uint32_t childHeight = para->levelPara[i + 1].height;
+        sigsPerTree[i] = sigsPerTree[i + 1] * (1ULL << childHeight);
     }
-
-    for (uint32_t i = 0; i < para->levels; i++) {
-        // Capacity of the tree at level i
-        uint64_t treeCapacity; 
-        if (i == 0) {
-             treeCapacity = currentCapacity; // Should theoretically be infinite/total cap
-             treeIndex[i] = 0; // Root tree is always index 0
-        } else {
-             // Capacity of a tree at level i is sigsPerTree[i-1]
-             treeCapacity = sigsPerTree[i-1];
-             treeIndex[i] = globalIndex / treeCapacity;
-        }
-        
-        // Leaf calculation uses sigsPerTree[i] (signatures per leaf at level i)
+```
+FIX:
+```c
+    for (int32_t i = (int32_t)para->levels - 2; i >= 0; i--) {
         uint32_t height = para->levelPara[i].height;
-        uint64_t maxLeaves = 1ULL << height;
-        leafIndex[i] = (uint32_t)((globalIndex / sigsPerTree[i]) % maxLeaves);
-    }
-```
-===END===
-
-===ISSUE===
-FILE: crypto/lms/src/lms_ots.c
-LINE: 105
-SEVERITY: high
-TITLE: Unbounded Memory Allocation in LmOtsComputeQ
-PROBLEM: The function allocates memory based on `messageLen` which is provided by the caller. If a user passes a very large message (e.g., a large file mapped into memory), this triggers a large allocation. This can lead to Denial of Service (DoS) via memory exhaustion. Furthermore, buffering the entire message to hash it is inefficient; a streaming hash update should be used.
-CODE:
-```c
-    uint8_t *prefix = BSL_SAL_Malloc(LMS_MESG_PREFIX_LEN(n) + messageLen);
-    if (prefix == NULL) {
-        return CRYPT_MEM_ALLOC_FAIL;
-    }
-
-    (void)memcpy_s(prefix + LMS_MESG_I_OFFSET, LMS_I_LEN, I, LMS_I_LEN);
-    // ...
-    (void)memcpy_s(prefix + LMS_MESG_PREFIX_LEN(n), messageLen, message, messageLen);
-
-    LmsHash(Q, prefix, LMS_MESG_PREFIX_LEN(n) + messageLen);
-    BSL_SAL_FREE(prefix);
-```
-FIX:
-```c
-    // Initialize Hash Context
-    void *ctx = NULL; // Assume EAL_MdCtxNew wrapper exists or use specific stack context
-    // EAL_MdInit(ctx, SHA256) ...
-    
-    // Hash Prefix
-    uint8_t prefixBuf[LMS_MESG_PREFIX_LEN(LMS_MAX_HASH)];
-    // ... Fill prefixBuf ...
-    // EAL_MdUpdate(ctx, prefixBuf, prefixLen);
-    
-    // Hash Message
-    // EAL_MdUpdate(ctx, message, messageLen);
-    
-    // Finalize
-    // EAL_MdFinal(ctx, Q);
-    
-    // Alternatively, if streaming API is not available, enforce a maximum message size
-    if (messageLen > HITLS_MAX_MESSAGE_SIZE) {
-        return CRYPT_INVALID_ARG;
+        sigsPerTree[i] = sigsPerTree[i + 1] * (1ULL << height);
     }
 ```
 ===END===
 
 ===ISSUE===
 FILE: crypto/lms/src/lms_core.c
-LINE: 316
+LINE: 133
 SEVERITY: medium
-TITLE: Performance/DoS Risk in LmsSign
-PROBLEM: `LmsSign` calls `LmsSignWriteSignature`, which calls `LmsGenerateAuthPath`. `LmsGenerateAuthPath` (via `LmsComputeLeafNodes`) regenerates the **entire Merkle Tree** (all leaves and internal nodes) for every single signature. For larger tree parameters (e.g., H=20, 1M leaves), this involves millions of hash operations per signature, making the signing operation extremely slow (seconds to minutes) and resource-intensive. This renders the implementation unusable for high-performance applications and susceptible to DoS.
+TITLE: Unsafe Memory Allocation for Large Merkle Trees
+PROBLEM: `LmsComputeRoot` allocates memory for the entire Merkle tree (`2 * numLeaves * n`). While `LmsParaInit` restricts height to 15 (max ~1MB), `LmsLookupParamSet` supports heights up to 25. If `LmsComputeRoot` is called with a valid parameter set for h=20 (1M leaves) or h=25 (32M leaves) — which is permitted by `LmsLookupParamSet` — it will attempt to allocate 64MB or 2GB of contiguous memory, potentially causing Denial of Service or OOM on constrained systems. The implementation should either support large trees using a low-memory algorithm (e.g., TreeHash) or explicitly validate `height` within `LmsComputeRoot` against the implementation's limit.
 CODE:
 ```c
-int32_t LmsGenerateAuthPath(uint8_t *authPath, const LMS_Para *para,
-    const uint8_t *I, const uint8_t *seed, uint32_t q)
-{
-    // ...
-    int32_t ret = LmsComputeLeafNodes(tree, para, I, seed, numLeaves);
-    // ...
-}
+    uint32_t numLeaves = 1u << para->height;
+    size_t treeSize = 2 * numLeaves * para->n;
+    uint8_t *tree = BSL_SAL_Calloc(treeSize, 1);
 ```
 FIX:
 ```c
-/*
- * Optimizing the tree traversal (e.g., using the fractal tree representation or caching) 
- * is required for H > 15. 
- * For now, at least add a warning or restriction on height for this implementation.
- */
-// In LmsParaInit or LmsKeyGen check:
-if (para->height > 15) {
-    // Return error or warning that performance will be degraded
-}
+    // Validate height to prevent excessive memory allocation
+    if (para->height > LMS_MAX_PRACTICAL_HEIGHT) {
+        return CRYPT_LMS_INVALID_PARAM;
+    }
+
+    uint32_t numLeaves = 1u << para->height;
+    size_t treeSize = 2 * numLeaves * para->n;
+    uint8_t *tree = BSL_SAL_Calloc(treeSize, 1);
 ```
 ===END===

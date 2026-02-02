@@ -1,211 +1,24 @@
-# Code Review: openHiTLS/openhitls#992
+# Code Review: openhitls/openhitls#992
 **Reviewer**: CLAUDE
 
 
-## High
+## Critical
 
-### NULL pointer dereference in HssCtrlGetLevels
-`crypto/lms/src/hss_api.c:291-297`
+### Missing error codes CRYPT_LMS_PAIRWISE_CHECK_FAIL and CRYPT_HSS_PAIRWISE_CHECK_FAIL
+`include/crypto/crypt_errno.h:672-687`
 ```
-static int32_t HssCtrlGetLevels(CRYPT_HSS_Ctx *ctx, void *val, uint32_t valLen)
-{
-    if (valLen < sizeof(uint32_t)) {
-        return CRYPT_HSS_INVALID_PARAM;
-    }
-    *(uint32_t *)val = ctx->para->levels;  // NULL pointer dereference if ctx->para is NULL
-    return CRYPT_SUCCESS;
-}
+CRYPT_HSS_SIGN_FAIL,                         /**< HSS signature generation failed. */
+    CRYPT_HSS_KEYGEN_FAIL,                       /**< HSS key generation failed. */
+};
 ```
-**Issue**: The function HssCtrlGetLevels dereferences ctx->para without checking if it's NULL. Since ctx->para is allocated separately in NewCtx and could potentially be NULL in error conditions or if memory allocation failed partially, this could cause a NULL pointer dereference.
+**Issue**: The code in lms_api.c (lines 510, 515, 529) and hss_api.c (lines 439, 445, 455, 471) uses CRYPT_LMS_PAIRWISE_CHECK_FAIL and CRYPT_HSS_PAIRWISE_CHECK_FAIL error codes, but these are not defined in crypt_errno.h. This will cause compilation errors.
 **Fix**:
 ```
-static int32_t HssCtrlGetLevels(CRYPT_HSS_Ctx *ctx, void *val, uint32_t valLen)
-{
-    if (valLen < sizeof(uint32_t)) {
-        return CRYPT_HSS_INVALID_PARAM;
-    }
-    if (ctx->para == NULL) {
-        return CRYPT_NULL_INPUT;
-    }
-    *(uint32_t *)val = ctx->para->levels;
-    return CRYPT_SUCCESS;
-}
-```
-
----
-
-### NULL pointer dereference in HssCtrlGetSigLen
-`crypto/lms/src/hss_api.c:245-264`
-```
-static int32_t HssCtrlGetSigLen(CRYPT_HSS_Ctx *ctx, void *val, uint32_t valLen)
-{
-    if (valLen < sizeof(uint32_t)) {
-        return CRYPT_HSS_INVALID_PARAM;
-    }
-
-    if (ctx->para->pubKeyLen == 0) {  // NULL pointer dereference
-        int32_t ret = HssParaInit(ctx->para, ctx->para->levels, ctx->para->lmsType, ctx->para->otsType);
-```
-**Issue**: The function HssCtrlGetSigLen dereferences ctx->para without checking if it's NULL. This could cause a crash when called on a context with uninitialized or freed para.
-**Fix**:
-```
-static int32_t HssCtrlGetSigLen(CRYPT_HSS_Ctx *ctx, void *val, uint32_t valLen)
-{
-    if (valLen < sizeof(uint32_t)) {
-        return CRYPT_HSS_INVALID_PARAM;
-    }
-
-    if (ctx->para == NULL) {
-        return CRYPT_NULL_INPUT;
-    }
-
-    if (ctx->para->pubKeyLen == 0) {
-        int32_t ret = HssParaInit(ctx->para, ctx->para->levels, ctx->para->lmsType, ctx->para->otsType);
-```
-
----
-
-### NULL pointer dereference in HssCtrlGetRemaining
-`crypto/lms/src/hss_api.c:267-288`
-```
-static int32_t HssCtrlGetRemaining(CRYPT_HSS_Ctx *ctx, void *val, uint32_t valLen)
-{
-    if (valLen < sizeof(uint64_t)) {
-        return CRYPT_HSS_INVALID_PARAM;
-    }
-
-    if (ctx->para->pubKeyLen == 0) {  // NULL pointer dereference
-```
-**Issue**: The function HssCtrlGetRemaining dereferences ctx->para without checking if it's NULL.
-**Fix**:
-```
-static int32_t HssCtrlGetRemaining(CRYPT_HSS_Ctx *ctx, void *val, uint32_t valLen)
-{
-    if (valLen < sizeof(uint64_t)) {
-        return CRYPT_HSS_INVALID_PARAM;
-    }
-
-    if (ctx->para == NULL) {
-        return CRYPT_NULL_INPUT;
-    }
-
-    if (ctx->para->pubKeyLen == 0) {
-```
-
----
-
-### NULL pointer dereference in HssCtrlSetLmsType
-`crypto/lms/src/hss_api.c:185-203`
-```
-static int32_t HssCtrlSetLmsType(CRYPT_HSS_Ctx *ctx, void *val, uint32_t valLen)
-{
-    if (valLen < 2 * sizeof(uint32_t)) {
-        return CRYPT_HSS_INVALID_PARAM;
-    }
-    uint32_t *params = (uint32_t *)val;
-    uint32_t levelIdx = params[0];
-    uint32_t lmsType = params[1];
-
-    if (levelIdx >= ctx->para->levels) {  // NULL pointer dereference
-```
-**Issue**: The function HssCtrlSetLmsType dereferences ctx->para without checking if it's NULL before accessing ctx->para->levels.
-**Fix**:
-```
-static int32_t HssCtrlSetLmsType(CRYPT_HSS_Ctx *ctx, void *val, uint32_t valLen)
-{
-    if (valLen < 2 * sizeof(uint32_t)) {
-        return CRYPT_HSS_INVALID_PARAM;
-    }
-    if (ctx->para == NULL) {
-        return CRYPT_NULL_INPUT;
-    }
-    uint32_t *params = (uint32_t *)val;
-    uint32_t levelIdx = params[0];
-    uint32_t lmsType = params[1];
-
-    if (levelIdx >= ctx->para->levels) {
-```
-
----
-
-### NULL pointer dereference in HssCtrlSetOtsType
-`crypto/lms/src/hss_api.c:206-224`
-```
-static int32_t HssCtrlSetOtsType(CRYPT_HSS_Ctx *ctx, void *val, uint32_t valLen)
-{
-    if (valLen < 2 * sizeof(uint32_t)) {
-        return CRYPT_HSS_INVALID_PARAM;
-    }
-    uint32_t *params = (uint32_t *)val;
-    uint32_t levelIdx = params[0];
-    uint32_t otsType = params[1];
-
-    if (levelIdx >= ctx->para->levels) {  // NULL pointer dereference
-```
-**Issue**: The function HssCtrlSetOtsType dereferences ctx->para without checking if it's NULL before accessing ctx->para->levels.
-**Fix**:
-```
-static int32_t HssCtrlSetOtsType(CRYPT_HSS_Ctx *ctx, void *val, uint32_t valLen)
-{
-    if (valLen < 2 * sizeof(uint32_t)) {
-        return CRYPT_HSS_INVALID_PARAM;
-    }
-    if (ctx->para == NULL) {
-        return CRYPT_NULL_INPUT;
-    }
-    uint32_t *params = (uint32_t *)val;
-    uint32_t levelIdx = params[0];
-    uint32_t otsType = params[1];
-
-    if (levelIdx >= ctx->para->levels) {
-```
-
----
-
-### NULL pointer dereference in CRYPT_HSS_SetPubKey
-`crypto/lms/src/hss_api.c:360-395`
-```
-int32_t CRYPT_HSS_SetPubKey(CRYPT_HSS_Ctx *ctx, BSL_Param *param)
-{
-    if (ctx == NULL || param == NULL) {
-        return CRYPT_NULL_INPUT;
-    }
-
-    // Find public key parameter
-    const BSL_Param *pubKeyParam = BSL_PARAM_FindConstParam(param, CRYPT_PARAM_HSS_PUBKEY);
-    if (pubKeyParam == NULL || pubKeyParam->value == NULL) {
-        return CRYPT_HSS_NO_KEY;
-    }
-
-    if (pubKeyParam->valueLen != HSS_PUBKEY_LEN) {
-        return CRYPT_HSS_INVALID_KEY_LEN;
-    }
-
-    // Copy public key
-    (void)memcpy_s(ctx->publicKey, HSS_PUBKEY_LEN, pubKeyParam->value, HSS_PUBKEY_LEN);
-
-    // Extract and validate parameters from public key
-    uint32_t levels = (uint32_t)LmsGetBigendian(ctx->publicKey + HSS_PUBKEY_LEVELS_OFFSET, LMS_TYPE_LEN);
-    uint32_t lmsType = (uint32_t)LmsGetBigendian(ctx->publicKey + HSS_PUBKEY_LMS_TYPE_OFFSET, LMS_TYPE_LEN);
-    uint32_t otsType = (uint32_t)LmsGetBigendian(ctx->publicKey + HSS_PUBKEY_OTS_TYPE_OFFSET, LMS_TYPE_LEN);
-
-    if (levels < HSS_MIN_LEVELS || levels > HSS_MAX_LEVELS) {
-        return CRYPT_HSS_INVALID_PARAM;
-    }
-
-    // Store top-level parameters
-    ctx->para->levels = levels;  // NULL pointer dereference
-    ctx->para->lmsType[0] = lmsType;
-    ctx->para->otsType[0] = otsType;
-```
-**Issue**: The function CRYPT_HSS_SetPubKey dereferences ctx->para without checking if it's NULL before storing the levels and type values.
-**Fix**:
-```
-int32_t CRYPT_HSS_SetPubKey(CRYPT_HSS_Ctx *ctx, BSL_Param *param)
-{
-    if (ctx == NULL || ctx->para == NULL || param == NULL) {
-        return CRYPT_NULL_INPUT;
-    }
+CRYPT_HSS_SIGN_FAIL,                         /**< HSS signature generation failed. */
+    CRYPT_HSS_KEYGEN_FAIL,                       /**< HSS key generation failed. */
+    CRYPT_LMS_PAIRWISE_CHECK_FAIL,               /**< LMS key pair check failed. */
+    CRYPT_HSS_PAIRWISE_CHECK_FAIL,               /**< HSS key pair check failed. */
+};
 ```
 
 ---
@@ -213,59 +26,43 @@ int32_t CRYPT_HSS_SetPubKey(CRYPT_HSS_Ctx *ctx, BSL_Param *param)
 
 ## Medium
 
-### Unnecessary memory zeroization after freeing members in CRYPT_HSS_FreeCtx
-`crypto/lms/src/hss_api.c:72-95`
+### libCtx field not copied in CRYPT_LMS_DupCtx
+`crypto/lms/src/lms_api.c:118-120`
 ```
-int32_t CRYPT_HSS_FreeCtx(CRYPT_HSS_Ctx *ctx)
-{
-    if (ctx == NULL) {
-        return CRYPT_SUCCESS;
-    }
+ctx->signatureIndex = srcCtx->signatureIndex;
 
-    if (ctx->privateKey != NULL) {
-        LmsZeroize(ctx->privateKey, HSS_PRVKEY_LEN);
-        BSL_SAL_Free(ctx->privateKey);
-    }
-
-    if (ctx->publicKey != NULL) {
-        BSL_SAL_Free(ctx->publicKey);
-    }
-
-    if (ctx->para != NULL) {
-        LmsZeroize(ctx->para, sizeof(HSS_Para));
-        BSL_SAL_Free(ctx->para);
-    }
-
-    LmsZeroize(ctx, sizeof(CRYPT_HSS_Ctx));  // Unnecessary - ctx will be freed immediately
-    BSL_SAL_Free(ctx);
-    return CRYPT_SUCCESS;
+    return ctx;
 }
 ```
-**Issue**: The function calls LmsZeroize(ctx, sizeof(CRYPT_HSS_Ctx)) after freeing ctx->privateKey, ctx->publicKey, and ctx->para. Since ctx is about to be freed, zeroizing the context structure itself is unnecessary. Additionally, the code reads the just-freed pointer values (though not dereferenced) which is poor practice.
+**Issue**: The CRYPT_LMS_DupCtx function does not copy the libCtx field from the source context. The duplicated context will always have libCtx = NULL, even if the source context had a valid library context pointer. This can cause issues when the duplicated context is used with provider APIs that rely on libCtx.
 **Fix**:
 ```
-int32_t CRYPT_HSS_FreeCtx(CRYPT_HSS_Ctx *ctx)
-{
-    if (ctx == NULL) {
-        return CRYPT_SUCCESS;
-    }
+ctx->signatureIndex = srcCtx->signatureIndex;
+    ctx->libCtx = srcCtx->libCtx;
 
-    if (ctx->privateKey != NULL) {
-        LmsZeroize(ctx->privateKey, HSS_PRVKEY_LEN);
-        BSL_SAL_Free(ctx->privateKey);
-    }
+    return ctx;
+}
+```
 
-    if (ctx->publicKey != NULL) {
-        BSL_SAL_Free(ctx->publicKey);
-    }
+---
 
-    if (ctx->para != NULL) {
-        LmsZeroize(ctx->para, sizeof(HSS_Para));
-        BSL_SAL_Free(ctx->para);
-    }
+### libCtx field not copied in CRYPT_HSS_DupCtx
+`crypto/lms/src/hss_api.c:121-123`
+```
+// Copy state
+    newCtx->signatureIndex = srcCtx->signatureIndex;
 
-    BSL_SAL_Free(ctx);
-    return CRYPT_SUCCESS;
+    return newCtx;
+}
+```
+**Issue**: The CRYPT_HSS_DupCtx function does not copy the libCtx field from the source context. The duplicated context will always have libCtx = NULL, even if the source context had a valid library context pointer. This can cause issues when the duplicated context is used with provider APIs that rely on libCtx.
+**Fix**:
+```
+// Copy state
+    newCtx->signatureIndex = srcCtx->signatureIndex;
+    newCtx->libCtx = srcCtx->libCtx;
+
+    return newCtx;
 }
 ```
 
@@ -274,18 +71,74 @@ int32_t CRYPT_HSS_FreeCtx(CRYPT_HSS_Ctx *ctx)
 
 ## Low
 
-### Missing NULL ctx check in HssCtrlGetPubKeyLen
-`crypto/lms/src/hss_api.c:227-234`
+### Context structure not zeroized before free in CRYPT_HSS_FreeCtx
+`crypto/lms/src/hss_api.c:91-92`
 ```
-static int32_t HssCtrlGetPubKeyLen(void *val, uint32_t valLen)
-{
-    if (valLen < sizeof(uint32_t)) {
-        return CRYPT_HSS_INVALID_PARAM;
+if (ctx->para != NULL) {
+        LmsZeroize(ctx->para, sizeof(HSS_Para));
+        BSL_SAL_Free(ctx->para);
     }
-    *(uint32_t *)val = HSS_PUBKEY_LEN;
-    return CRYPT_SUCCESS;
+
+    BSL_SAL_Free(ctx);
 }
 ```
-**Issue**: While HssCtrlGetPubKeyLen doesn't dereference ctx (it only returns a constant), the function signature accepts CRYPT_HSS_Ctx *ctx but doesn't validate it. This is inconsistent with other ctrl functions and could lead to confusion.
+**Issue**: Unlike CRYPT_LMS_FreeCtx which zeroizes the ctx structure before freeing, CRYPT_HSS_FreeCtx does not zeroize the ctx structure. The ctx structure contains signatureIndex which may be considered sensitive state information. For consistency with LMS and proper secure cleanup, ctx should be zeroized.
+**Fix**:
+```
+if (ctx->para != NULL) {
+        LmsZeroize(ctx->para, sizeof(HSS_Para));
+        BSL_SAL_Free(ctx->para);
+    }
+
+    LmsZeroize(ctx, sizeof(CRYPT_HSS_Ctx));
+    BSL_SAL_Free(ctx);
+}
+```
+
+---
+
+### Magic numbers used for control commands instead of defined constants
+`crypto/provider/src/cmvp/cmvp_utils/cmvp_selftest_lms.c:45-48`
+```
+uint32_t lmsType = 5;  // LMS_SHA256_M32_H5
+    uint32_t otsType = 4;  // LMOTS_SHA256_N32_W8
+    GOTO_ERR_IF_TRUE(CRYPT_EAL_PkeyCtrl(pkey, 1, &lmsType, sizeof(lmsType)) != CRYPT_SUCCESS,
+        CRYPT_CMVP_ERR_ALGO_SELFTEST);
+    GOTO_ERR_IF_TRUE(CRYPT_EAL_PkeyCtrl(pkey, 2, &otsType, sizeof(otsType)) != CRYPT_SUCCESS,
+        CRYPT_CMVP_ERR_ALGO_SELFTEST);
+```
+**Issue**: The selftest code uses magic numbers 1 and 2 for CRYPT_EAL_PkeyCtrl calls instead of the defined symbolic constants CRYPT_CTRL_LMS_SET_TYPE and CRYPT_CTRL_LMS_SET_OTS_TYPE. This makes the code harder to maintain and could break if the control command values change.
+**Fix**:
+```
+uint32_t lmsType = LMS_SHA256_M32_H5;
+    uint32_t otsType = LMOTS_SHA256_N32_W8;
+    GOTO_ERR_IF_TRUE(CRYPT_EAL_PkeyCtrl(pkey, CRYPT_CTRL_LMS_SET_TYPE, &lmsType, sizeof(lmsType)) != CRYPT_SUCCESS,
+        CRYPT_CMVP_ERR_ALGO_SELFTEST);
+    GOTO_ERR_IF_TRUE(CRYPT_EAL_PkeyCtrl(pkey, CRYPT_CTRL_LMS_SET_OTS_TYPE, &otsType, sizeof(otsType)) != CRYPT_SUCCESS,
+        CRYPT_CMVP_ERR_ALGO_SELFTEST);
+```
+
+---
+
+### Magic numbers used for control commands instead of defined constants
+`crypto/provider/src/cmvp/cmvp_utils/cmvp_selftest_hss.c:48-58`
+```
+GOTO_ERR_IF_TRUE(CRYPT_EAL_PkeyCtrl(pkey, 1, &levels, sizeof(levels)) != CRYPT_SUCCESS,
+        CRYPT_CMVP_ERR_ALGO_SELFTEST);
+    GOTO_ERR_IF_TRUE(CRYPT_EAL_PkeyCtrl(pkey, 2, lmsParams, sizeof(lmsParams)) != CRYPT_SUCCESS,
+        CRYPT_CMVP_ERR_ALGO_SELFTEST);
+    GOTO_ERR_IF_TRUE(CRYPT_EAL_PkeyCtrl(pkey, 3, otsParams, sizeof(otsParams)) != CRYPT_SUCCESS,
+        CRYPT_CMVP_ERR_ALGO_SELFTEST);
+```
+**Issue**: The selftest code uses magic numbers 1, 2, and 3 for CRYPT_EAL_PkeyCtrl calls instead of the defined symbolic constants CRYPT_CTRL_HSS_SET_LEVELS, CRYPT_CTRL_HSS_SET_LMS_TYPE, and CRYPT_CTRL_HSS_SET_OTS_TYPE. This makes the code harder to maintain and could break if the control command values change.
+**Fix**:
+```
+GOTO_ERR_IF_TRUE(CRYPT_EAL_PkeyCtrl(pkey, CRYPT_CTRL_HSS_SET_LEVELS, &levels, sizeof(levels)) != CRYPT_SUCCESS,
+        CRYPT_CMVP_ERR_ALGO_SELFTEST);
+    GOTO_ERR_IF_TRUE(CRYPT_EAL_PkeyCtrl(pkey, CRYPT_CTRL_HSS_SET_LMS_TYPE, lmsParams, sizeof(lmsParams)) != CRYPT_SUCCESS,
+        CRYPT_CMVP_ERR_ALGO_SELFTEST);
+    GOTO_ERR_IF_TRUE(CRYPT_EAL_PkeyCtrl(pkey, CRYPT_CTRL_HSS_SET_OTS_TYPE, otsParams, sizeof(otsParams)) != CRYPT_SUCCESS,
+        CRYPT_CMVP_ERR_ALGO_SELFTEST);
+```
 
 ---

@@ -1,6 +1,6 @@
-# Code Review Task
+# Change Review Task
 
-You are reviewing PR #992 for openHiTLS/openhitls.
+You are reviewing PR #992 for openhitls/openhitls.
 
 
 ## Changed Files (37 files)
@@ -48,7 +48,7 @@ You are reviewing PR #992 for openHiTLS/openhitls.
 
 ## Your Task
 
-Perform a thorough code review by:
+Perform a thorough change review by:
 
 1. **Understand the Change**
    - Read the diff stats: `git diff --stat 05342ecfae9070fa5ea390a0d4ef8e4e054fae6c mr-992`
@@ -58,6 +58,7 @@ Perform a thorough code review by:
    - For each changed file, view its diff: `git diff 05342ecfae9070fa5ea390a0d4ef8e4e054fae6c mr-992 -- <file>`
    - If you need more context, read the full file or search for related code
    - Look for: security issues, logic errors, edge cases, error handling
+   - For non-code files (docs/config), focus on correctness and safety of the content
 
 3. **Track Dependencies**
    - When you find a changed function, check its callers
@@ -69,6 +70,9 @@ Perform a thorough code review by:
    - Logic: null/nil checks, boundary conditions, error paths
    - API: breaking changes, compatibility, proper error returns
    - Resources: leaks, proper cleanup, race conditions
+   - Documentation (Markdown/docs): incorrect or outdated instructions, wrong flags/paths,
+     broken references, misleading examples, missing steps, or unsafe guidance
+   - Config/build/CI: insecure defaults, mismatched versions, missing required keys
 
 ## Output Format - CRITICAL
 
@@ -98,8 +102,9 @@ FIX:
 - ONLY output ===ISSUE=== blocks, nothing else
 - Do NOT write summaries or conclusions
 - Do NOT use markdown headers or bullet points outside of issue blocks
-- Only flag issues in CHANGED code (not pre-existing issues)
+- Only flag issues in CHANGED lines (code or docs, not pre-existing issues)
 - Be specific with line numbers
 - Provide working fixes, not just descriptions
+  - For docs, FIX should be the corrected text/snippet
 
 Start the review now. Output each issue as you find it.

@@ -1,160 +1,168 @@
 ===ISSUE===
-FILE: crypto/lms/src/hss_utils.c
-LINE: 117-224
-SEVERITY: high
-TITLE: HSS param compression allows unsupported levels leading to OOB read on decompress
-PROBLEM: The compressed parameter format only has 8 bytes (max 3 levels), but HssCompressParamSet accepts levels up to 8 and silently truncates. HssDecompressParamSet then trusts `levels` and reads `compressed[...+1]`, which goes out of bounds when levels ≥ 4 (index 8). This is an out-of-bounds read and also produces keys that can’t be safely reloaded.
+FILE: crypto/lms/src/lms_core.c
+LINE: 140-151
+SEVERITY: critical
+TITLE: Unsigned loop underflow in internal node computation
+PROBLEM: The loop decrements a uint32_t while checking `r >= 1`. When r reaches 0 it wraps to UINT32_MAX, causing an infinite loop and out-of-bounds tree indexing during root/auth-path computation.
 CODE:
+```c
+for (uint32_t r = numLeaves - LMS_ROOT_NODE_INDEX; r >= LMS_ROOT_NODE_INDEX; r--) {
+    uint32_t leftChild = LMS_LEFT_CHILD_MULTIPLIER * r;
+    uint32_t rightChild = LMS_LEFT_CHILD_MULTIPLIER * r + LMS_RIGHT_CHILD_OFFSET;
+
+    LmsInternalHashCtx ctx = {I, r, &tree[leftChild * n], &tree[rightChild * n], n};
+    int32_t ret = LmsComputeInternalHash(&tree[r * n], &ctx);
+    if (ret != CRYPT_SUCCESS) {
+        return ret;
+    }
+}
 ```
-if (para->levels < HSS_MIN_LEVELS || para->levels > HSS_MAX_LEVELS) {
-    return CRYPT_HSS_INVALID_LEVEL;
+FIX:
+```c
+for (uint32_t r = numLeaves - LMS_ROOT_NODE_INDEX; r > 0; r--) {
+    uint32_t leftChild = LMS_LEFT_CHILD_MULTIPLIER * r;
+    uint32_t rightChild = LMS_LEFT_CHILD_MULTIPLIER * r + LMS_RIGHT_CHILD_OFFSET;
+
+    LmsInternalHashCtx ctx = {I, r, &tree[leftChild * n], &tree[rightChild * n], n};
+    int32_t ret = LmsComputeInternalHash(&tree[r * n], &ctx);
+    if (ret != CRYPT_SUCCESS) {
+        return ret;
+    }
+}
+```
+===END===
+===ISSUE===
+FILE: crypto/lms/src/hss_utils.c
+LINE: 355-369
+SEVERITY: high
+TITLE: Missing overflow checks can cause division by zero in tree index calculation
+PROBLEM: `sigsPerTree[i]` is computed by multiplying powers of two without overflow checks. For larger levels/heights this can wrap to 0, and the later `globalIndex / sigsPerTree[i]` division can crash or compute wrong indices.
+CODE:
+```c
+uint64_t sigsPerTree[HSS_MAX_LEVELS];
+sigsPerTree[para->levels - 1] = 1ULL << para->levelPara[para->levels - 1].height;
+
+for (int32_t i = (int32_t)para->levels - 2; i >= 0; i--) {
+    uint32_t childHeight = para->levelPara[i + 1].height;
+    sigsPerTree[i] = sigsPerTree[i + 1] * (1ULL << childHeight);
 }
 
-memset(compressed, 0, HSS_COMPRESSED_PARAMS_LEN);
-compressed[0] = (uint8_t)para->levels;
+...
+treeIndex[i] = globalIndex / sigsPerTree[i];
+```
+FIX:
+```c
+uint64_t sigsPerTree[HSS_MAX_LEVELS];
+sigsPerTree[para->levels - 1] = 1ULL << para->levelPara[para->levels - 1].height;
 
-for (uint32_t i = 0; i < para->levels && i < HSS_MAX_COMPRESSED_LEVELS; i++) {
-    ...
+for (int32_t i = (int32_t)para->levels - 2; i >= 0; i--) {
+    uint32_t childHeight = para->levelPara[i + 1].height;
+    uint64_t factor = 1ULL << childHeight;
+    if (sigsPerTree[i + 1] > (UINT64_MAX / factor)) {
+        return CRYPT_HSS_INVALID_PARAM;
+    }
+    sigsPerTree[i] = sigsPerTree[i + 1] * factor;
 }
 
-uint32_t levels = compressed[0];
+...
+if (sigsPerTree[i] == 0) {
+    return CRYPT_HSS_INVALID_PARAM;
+}
+treeIndex[i] = globalIndex / sigsPerTree[i];
+```
+===END===
+===ISSUE===
+FILE: crypto/lms/src/hss_utils.c
+LINE: 32-34
+SEVERITY: medium
+TITLE: Levels accepted beyond what private-key compression supports
+PROBLEM: `HssParaInit` accepts up to `HSS_MAX_LEVELS` (8), but the private key stores a compressed parameter set that only supports `HSS_MAX_COMPRESSED_LEVELS` (3). Keys with 4–8 levels will fail in `HssCompressParamSet`/`CRYPT_HSS_Gen` and cannot be imported via `CRYPT_HSS_SetPrvKey`.
+CODE:
+```c
 if (levels < HSS_MIN_LEVELS || levels > HSS_MAX_LEVELS) {
     return CRYPT_HSS_INVALID_LEVEL;
 }
-
-for (uint32_t i = 0; i < levels; i++) {
-    uint8_t lmsComp = compressed[HSS_COMPRESSED_LEVEL_FIELD_SIZE + i * HSS_COMPRESSED_PARAM_PAIR_SIZE];
-    uint8_t otsComp = compressed[HSS_COMPRESSED_LEVEL_FIELD_SIZE + i * HSS_COMPRESSED_PARAM_PAIR_SIZE + 1];
-    ...
-}
 ```
 FIX:
-```
-if (para->levels < HSS_MIN_LEVELS || para->levels > HSS_MAX_LEVELS ||
-    para->levels > HSS_MAX_COMPRESSED_LEVELS) {
+```c
+if (levels < HSS_MIN_LEVELS || levels > HSS_MAX_LEVELS || levels > HSS_MAX_COMPRESSED_LEVELS) {
     return CRYPT_HSS_INVALID_LEVEL;
-}
-
-memset(compressed, 0, HSS_COMPRESSED_PARAMS_LEN);
-compressed[0] = (uint8_t)para->levels;
-
-for (uint32_t i = 0; i < para->levels; i++) {
-    ...
-}
-
-uint32_t levels = compressed[0];
-if (levels < HSS_MIN_LEVELS || levels > HSS_MAX_LEVELS ||
-    levels > HSS_MAX_COMPRESSED_LEVELS) {
-    return CRYPT_HSS_INVALID_LEVEL;
-}
-
-for (uint32_t i = 0; i < levels; i++) {
-    ...
 }
 ```
 ===END===
-
 ===ISSUE===
-FILE: crypto/lms/src/hss_api.c
-LINE: 362-395
+FILE: crypto/lms/src/lms_hash.c
+LINE: 274-276
 SEVERITY: medium
-TITLE: HSS public key load never initializes derived parameters
-PROBLEM: CRYPT_HSS_SetPubKey only stores `levels`, `lmsType[0]`, and `otsType[0]` but never calls HssParaInit. As a result `levelPara[*].sigLen` stays zero and HssParseSignature/Verify parse signatures incorrectly (verification always fails for a freshly loaded public key).
+TITLE: Parameter sets H20/H25 are advertised but always rejected
+PROBLEM: The PR adds LMS/HSS parameter IDs for heights 20/25, but `LmsParaInit` rejects any height > 15, so those algorithm IDs can never be used (keygen/verify fails with CRYPT_LMS_INVALID_PARAM). This is inconsistent with the public enums/config.
 CODE:
+```c
+// Validate height to prevent DoS via full tree regeneration on each signature
+if (para->height > LMS_MAX_PRACTICAL_HEIGHT) {
+    return CRYPT_LMS_INVALID_PARAM;
+}
 ```
-ctx->para->levels = levels;
-ctx->para->lmsType[0] = lmsType;
-ctx->para->otsType[0] = otsType;
+FIX:
+```c
+if (para->height > LMS_MAX_HEIGHT) {
+    return CRYPT_LMS_INVALID_PARAM;
+}
+```
+===END===
+===ISSUE===
+FILE: crypto/lms/src/lms_hash.c
+LINE: 151-167
+SEVERITY: medium
+TITLE: Seed derivation ignores hash failure
+PROBLEM: `LmsSeedDerive` discards the return value of `LmsHash` and always returns success, so a hash failure leaves `seed` uninitialized and still advances `j`, producing invalid signatures/keys.
+CODE:
+```c
+LmsHash(seed, buffer, LMS_PRG_LEN);
+LmsZeroize(buffer, LMS_PRG_LEN);
 
+if (incrementJ) {
+    derive->j += 1;
+}
 return CRYPT_SUCCESS;
 ```
 FIX:
-```
-ctx->para->levels = levels;
-ctx->para->lmsType[0] = lmsType;
-ctx->para->otsType[0] = otsType;
-
-for (uint32_t i = 0; i < levels; i++) {
-    if (ctx->para->lmsType[i] == 0 || ctx->para->otsType[i] == 0) {
-        return CRYPT_HSS_INVALID_PARAM;
-    }
-}
-
-int32_t ret = HssParaInit(ctx->para, levels, ctx->para->lmsType, ctx->para->otsType);
+```c
+int32_t ret = LmsHash(seed, buffer, LMS_PRG_LEN);
+LmsZeroize(buffer, LMS_PRG_LEN);
 if (ret != CRYPT_SUCCESS) {
-    return ret;
-}
-```
-===END===
-
-===ISSUE===
-FILE: crypto/lms/src/hss_core.c
-LINE: 361-395
-SEVERITY: low
-TITLE: HSS signature parsing ignores trailing bytes
-PROBLEM: HssParseSignature only checks `bottomSigLen > remaining` and then sets `bottomSig`, which means extra trailing bytes are silently ignored. This makes signature parsing non-strict and allows malleable signatures with junk suffixes to pass structure validation.
-CODE:
-```
-parsed->bottomSigLen = para->levelPara[bottomLevel].sigLen;
-
-if (parsed->bottomSigLen > remaining) {
-    return CRYPT_HSS_SIGNATURE_PARSE_FAIL;
+    return CRYPT_LMS_HASH_FAIL;
 }
 
-parsed->bottomSig = sigPtr;
-return CRYPT_SUCCESS;
-```
-FIX:
-```
-parsed->bottomSigLen = para->levelPara[bottomLevel].sigLen;
-
-if (parsed->bottomSigLen != remaining) {
-    return CRYPT_HSS_SIGNATURE_PARSE_FAIL;
+if (incrementJ) {
+    derive->j += 1;
 }
-
-parsed->bottomSig = sigPtr;
 return CRYPT_SUCCESS;
 ```
 ===END===
-
 ===ISSUE===
-FILE: crypto/lms/src/lms_api.c
-LINE: 124-152
-SEVERITY: low
-TITLE: LMS context comparison treats missing keys as equal
-PROBLEM: CRYPT_LMS_Cmp compares keys only when both sides are non-NULL. If one context has a public/private key and the other doesn’t, it returns success, incorrectly reporting equality.
+FILE: crypto/lms/src/lms_ots.c
+LINE: 161-176
+SEVERITY: medium
+TITLE: LM-OTS Q computation ignores hash failure
+PROBLEM: `LmOtsComputeQ` does not check the return of `LmsHash`, so a hash failure results in an invalid Q/checksum being used while still returning success.
 CODE:
-```
-/* Compare public keys */
-if (ctx1->publicKey != NULL && ctx2->publicKey != NULL) {
-    if (memcmp(ctx1->publicKey, ctx2->publicKey, ctx1->para->pubKeyLen) != 0) {
-        return CRYPT_LMS_CMP_FALSE;
-    }
-}
+```c
+LmsHash(Q, prefix, LMS_MESG_PREFIX_LEN(ctx->n) + messageLen);
+BSL_SAL_FREE(prefix);
 
-/* Compare private keys */
-if (ctx1->privateKey != NULL && ctx2->privateKey != NULL) {
-    if (memcmp(ctx1->privateKey, ctx2->privateKey, ctx1->para->prvKeyLen) != 0) {
-        return CRYPT_LMS_CMP_FALSE;
-    }
-}
+LmsPutBigendian(&Q[ctx->n], LmOtsComputeChecksum(Q, ctx->n, ctx->w, ctx->ls), LMS_CHECKSUM_LEN);
+return CRYPT_SUCCESS;
 ```
 FIX:
-```
-if ((ctx1->publicKey == NULL) != (ctx2->publicKey == NULL)) {
-    return CRYPT_LMS_CMP_FALSE;
-}
-if (ctx1->publicKey != NULL &&
-    memcmp(ctx1->publicKey, ctx2->publicKey, ctx1->para->pubKeyLen) != 0) {
-    return CRYPT_LMS_CMP_FALSE;
+```c
+int32_t ret = LmsHash(Q, prefix, LMS_MESG_PREFIX_LEN(ctx->n) + messageLen);
+BSL_SAL_FREE(prefix);
+if (ret != CRYPT_SUCCESS) {
+    return CRYPT_LMS_HASH_FAIL;
 }
 
-if ((ctx1->privateKey == NULL) != (ctx2->privateKey == NULL)) {
-    return CRYPT_LMS_CMP_FALSE;
-}
-if (ctx1->privateKey != NULL &&
-    memcmp(ctx1->privateKey, ctx2->privateKey, ctx1->para->prvKeyLen) != 0) {
-    return CRYPT_LMS_CMP_FALSE;
-}
+LmsPutBigendian(&Q[ctx->n], LmOtsComputeChecksum(Q, ctx->n, ctx->w, ctx->ls), LMS_CHECKSUM_LEN);
+return CRYPT_SUCCESS;
 ```
 ===END===
