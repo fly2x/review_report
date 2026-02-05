@@ -1,11 +1,11 @@
 # Final Code Review Report
-## openhitls/openhitls - PR #992
+## openHiTLS/openhitls - PR #992
 
 ### Summary
-- **Total Issues**: 9
-- **Critical**: 2
-- **High**: 0
-- **Medium**: 4
+- **Total Issues**: 11
+- **Critical**: 1
+- **High**: 5
+- **Medium**: 2
 - **Low**: 3
 - **Reviewers**: claude, gemini, codex
 
@@ -14,59 +14,133 @@
 
 ## Critical
 
-### Missing error code CRYPT_LMS_PAIRWISE_CHECK_FAIL
-`crypto/lms/src/lms_api.c:510`
-**Reviewers**: CLAUDE | **置信度**: 可信
+### Ignored return value of LmsHash in LmOtsGeneratePublicKey
+`crypto/lms/src/lms_ots.c:136`
+**Reviewers**: GEMINI | **置信度**: 可信
 ```
-if (pubLmsType != prvLmsType || pubOtsType != prvOtsType) {
-    return CRYPT_LMS_PAIRWISE_CHECK_FAIL;
-}
+LmsHash(publicKey, buffer, LMS_PBLC_PREFIX_LEN + params.p * params.n);
+BSL_SAL_FREE(buffer);
 
-// Compare I values
-if (memcmp(pubKey->publicKey + LMS_PUBKEY_I_OFFSET, prvKey->privateKey + LMS_PRVKEY_I_OFFSET, LMS_I_LEN) != 0) {
-    return CRYPT_LMS_PAIRWISE_CHECK_FAIL;
-}
-
-if (memcmp(computedRoot, pubKey->publicKey + LMS_PUBKEY_ROOT_OFFSET, LMS_SHA256_N) != 0) {
-    return CRYPT_LMS_PAIRWISE_CHECK_FAIL;
-}
+return CRYPT_SUCCESS;
 ```
-**Issue**: The code in lms_api.c uses CRYPT_LMS_PAIRWISE_CHECK_FAIL error code at lines 510, 515, and 529 in the LMSKeyPairCheck function, but this error code is not defined in crypt_errno.h. This will cause compilation errors when HITLS_CRYPTO_LMS_CHECK is enabled.
+**Issue**: The return value of `LmsHash` is ignored when generating the public key. If the hash calculation fails (e.g., due to hardware failure or resource exhaustion), the function returns `CRYPT_SUCCESS` but the `publicKey` buffer will contain uninitialized or partial data, leading to a compromised key.
 **Fix**:
 ```
-// Add to include/crypto/crypt_errno.h after CRYPT_HSS_KEYGEN_FAIL:
-    CRYPT_LMS_PAIRWISE_CHECK_FAIL,               /**< LMS key pair check failed. */
-    CRYPT_HSS_PAIRWISE_CHECK_FAIL,               /**< HSS key pair check failed. */
+ret = LmsHash(publicKey, buffer, LMS_PBLC_PREFIX_LEN + params.p * params.n);
+BSL_SAL_FREE(buffer);
+
+return ret;
 ```
 
 ---
 
-### Missing error code CRYPT_HSS_PAIRWISE_CHECK_FAIL
-`crypto/lms/src/hss_api.c:439`
-**Reviewers**: CLAUDE | **置信度**: 可信
+
+## High
+
+### Ignored return value of LmsHash in LmOtsComputeQ
+`crypto/lms/src/lms_ots.c:172`
+**Reviewers**: GEMINI | **置信度**: 可信
 ```
-if (pubLevels != prvKey->para->levels) {
-    return CRYPT_HSS_PAIRWISE_CHECK_FAIL;
-}
+LmsHash(Q, prefix, LMS_MESG_PREFIX_LEN(ctx->n) + messageLen);
+BSL_SAL_FREE(prefix);
 
-if (pubLmsType != prvKey->para->lmsType[0] || pubOtsType != prvKey->para->otsType[0]) {
-    return CRYPT_HSS_PAIRWISE_CHECK_FAIL;
-}
-
-if (memcmp(rootI, pubKey->publicKey + HSS_PUBKEY_I_OFFSET, LMS_I_LEN) != 0) {
-    return CRYPT_HSS_PAIRWISE_CHECK_FAIL;
-}
-
-if (memcmp(computedRoot, pubKey->publicKey + HSS_PUBKEY_ROOT_OFFSET, LMS_SHA256_N) != 0) {
-    return CRYPT_HSS_PAIRWISE_CHECK_FAIL;
-}
+LmsPutBigendian(&Q[ctx->n], LmOtsComputeChecksum(Q, ctx->n, ctx->w, ctx->ls), LMS_CHECKSUM_LEN);
+return CRYPT_SUCCESS;
 ```
-**Issue**: The code in hss_api.c uses CRYPT_HSS_PAIRWISE_CHECK_FAIL error code at lines 439, 445, 455, and 471 in the HSS key pair check functions, but this error code is not defined in crypt_errno.h. This will cause compilation errors when HITLS_CRYPTO_HSS_CHECK is enabled.
+**Issue**: The return value of `LmsHash` is ignored when computing the message digest `Q`. Failure to compute the hash correctly will result in an invalid signature or verification failure, but the function proceeds as if successful.
 **Fix**:
 ```
-// Add to include/crypto/crypt_errno.h after CRYPT_HSS_KEYGEN_FAIL:
-    CRYPT_LMS_PAIRWISE_CHECK_FAIL,               /**< LMS key pair check failed. */
-    CRYPT_HSS_PAIRWISE_CHECK_FAIL,               /**< HSS key pair check failed. */
+int32_t ret = LmsHash(Q, prefix, LMS_MESG_PREFIX_LEN(ctx->n) + messageLen);
+BSL_SAL_FREE(prefix);
+if (ret != CRYPT_SUCCESS) {
+    return ret;
+}
+
+LmsPutBigendian(&Q[ctx->n], LmOtsComputeChecksum(Q, ctx->n, ctx->w, ctx->ls), LMS_CHECKSUM_LEN);
+return CRYPT_SUCCESS;
+```
+
+---
+
+### Ignored return value of LmsHash in LmOtsSignChains
+`crypto/lms/src/lms_ots.c:198`
+**Reviewers**: GEMINI | **置信度**: 可信
+```
+(void)memcpy_s(iterBuf + LMS_ITER_PREV_OFFSET, ctx->n, tmp, ctx->n);
+LmsHash(tmp, iterBuf, LMS_ITER_LEN(ctx->n));
+```
+**Issue**: `LmsHash` return value is ignored inside the signature chain generation loop. If any hash step fails, the resulting signature chain `tmp` will be invalid, creating a broken signature.
+**Fix**:
+```
+(void)memcpy_s(iterBuf + LMS_ITER_PREV_OFFSET, ctx->n, tmp, ctx->n);
+if (LmsHash(tmp, iterBuf, LMS_ITER_LEN(ctx->n)) != CRYPT_SUCCESS) {
+    return CRYPT_LMS_HASH_FAIL;
+}
+```
+
+---
+
+### Ignored return value of LmsHash in LmOtsValidateChains
+`crypto/lms/src/lms_ots.c:288`
+**Reviewers**: GEMINI | **置信度**: 可信
+```
+(void)memcpy_s(iterBuf + LMS_ITER_PREV_OFFSET, ctx->n, tmp, ctx->n);
+LmsHash(tmp, iterBuf, LMS_ITER_LEN(ctx->n));
+```
+**Issue**: `LmsHash` return value is ignored during signature validation chain recomputation. This can lead to incorrect validation results (false positives or false negatives) if the hash function fails.
+**Fix**:
+```
+(void)memcpy_s(iterBuf + LMS_ITER_PREV_OFFSET, ctx->n, tmp, ctx->n);
+if (LmsHash(tmp, iterBuf, LMS_ITER_LEN(ctx->n)) != CRYPT_SUCCESS) {
+    return CRYPT_LMS_HASH_FAIL;
+}
+```
+
+---
+
+### Ignored return value of LmsHash in LmOtsValidateSignature
+`crypto/lms/src/lms_ots.c:333`
+**Reviewers**: GEMINI | **置信度**: 可信
+```
+LmsHash(computedPubKey, finalBuf, LMS_PBLC_PREFIX_LEN + params.p * params.n);
+
+LmsZeroize(Q, sizeof(Q));
+BSL_SAL_FREE(finalBuf);
+
+return CRYPT_SUCCESS;
+```
+**Issue**: The final hash step to compute the public key candidate in `LmOtsValidateSignature` ignores the return value of `LmsHash`. This can cause incorrect signature validation if the hash fails.
+**Fix**:
+```
+int32_t ret2 = LmsHash(computedPubKey, finalBuf, LMS_PBLC_PREFIX_LEN + params.p * params.n);
+
+LmsZeroize(Q, sizeof(Q));
+BSL_SAL_FREE(finalBuf);
+
+return ret2;
+```
+
+---
+
+### Wrong height used for HSS tree index calculation
+`crypto/lms/src/hss_utils.c:360-362`
+**Reviewers**: CODEX | **置信度**: 可信
+```
+for (int32_t i = (int32_t)para->levels - 2; i >= 0; i--) {
+    uint32_t childHeight = para->levelPara[i + 1].height;
+    sigsPerTree[i] = sigsPerTree[i + 1] * (1ULL << childHeight);
+}
+```
+**Issue**: The loop uses the child height (`para->levelPara[i + 1].height`) instead of the current level height when computing `sigsPerTree[i]`. This miscomputes `treeIndex`/`leafIndex` for non-uniform hierarchies, which can cause LM-OTS key reuse and incorrect capacity tracking. It also lacks overflow checks.
+**Fix**:
+```
+for (int32_t i = (int32_t)para->levels - 2; i >= 0; i--) {
+    uint32_t height = para->levelPara[i].height;
+    if (height > 63 || sigsPerTree[i + 1] > (UINT64_MAX >> height)) {
+        return CRYPT_HSS_INVALID_PARAM;
+    }
+    sigsPerTree[i] = sigsPerTree[i + 1] * (1ULL << height);
+}
 ```
 
 ---
@@ -74,122 +148,56 @@ if (memcmp(computedRoot, pubKey->publicKey + HSS_PUBKEY_ROOT_OFFSET, LMS_SHA256_
 
 ## Medium
 
-### Seed derivation ignores hash failure
-`crypto/lms/src/lms_hash.c:161`
-**Reviewers**: CODEX | **置信度**: 较可信
+### HSS private-key load leaves stale tree cache
+`crypto/lms/src/hss_api.c:373-378`
+**Reviewers**: CODEX | **置信度**: 可信
 ```
-int32_t LmsSeedDerive(uint8_t *seed, LMS_SeedDerive *derive, bool incrementJ)
-{
-    uint8_t buffer[LMS_PRG_LEN];
-
-    (void)memcpy_s(buffer + LMS_PRG_I_OFFSET, LMS_I_LEN, derive->I, LMS_I_LEN);
-    LmsPutBigendian(buffer + LMS_PRG_Q_OFFSET, derive->q, LMS_Q_LEN);
-    LmsPutBigendian(buffer + LMS_PRG_J_OFFSET, derive->j, LMS_K_LEN);
-    buffer[LMS_PRG_FF_OFFSET] = LMS_PRG_FF_VALUE;
-    (void)memcpy_s(buffer + LMS_PRG_SEED_OFFSET, LMS_SEED_LEN, derive->masterSeed, LMS_SEED_LEN);
-
-    LmsHash(seed, buffer, LMS_PRG_LEN);
-    LmsZeroize(buffer, LMS_PRG_LEN);
-
-    if (incrementJ) {
-        derive->j += 1;
-    }
-    return CRYPT_SUCCESS;
+int32_t ret = HssDecompressParamSet(ctx->para, compressed);
+if (ret != CRYPT_SUCCESS) {
+    return ret;
 }
+
+return CRYPT_SUCCESS;
 ```
-**Issue**: LmsSeedDerive calls LmsHash at line 161 but does not check the return value. If the hash operation fails, the seed buffer will contain uninitialized/invalid data, but the function still returns CRYPT_SUCCESS and advances the j counter. This could result in invalid keys or signatures being generated without any error indication.
+**Issue**: After loading a new private key via `CRYPT_HSS_SetPrvKey`, cached Merkle trees from the previous key remain marked valid, so signing can reuse stale trees and produce invalid signatures or key reuse.
 **Fix**:
 ```
-int32_t LmsSeedDerive(uint8_t *seed, LMS_SeedDerive *derive, bool incrementJ)
-{
-    uint8_t buffer[LMS_PRG_LEN];
-
-    (void)memcpy_s(buffer + LMS_PRG_I_OFFSET, LMS_I_LEN, derive->I, LMS_I_LEN);
-    LmsPutBigendian(buffer + LMS_PRG_Q_OFFSET, derive->q, LMS_Q_LEN);
-    LmsPutBigendian(buffer + LMS_PRG_J_OFFSET, derive->j, LMS_K_LEN);
-    buffer[LMS_PRG_FF_OFFSET] = LMS_PRG_FF_VALUE;
-    (void)memcpy_s(buffer + LMS_PRG_SEED_OFFSET, LMS_SEED_LEN, derive->masterSeed, LMS_SEED_LEN);
-
-    int32_t ret = LmsHash(seed, buffer, LMS_PRG_LEN);
-    LmsZeroize(buffer, LMS_PRG_LEN);
-    if (ret != CRYPT_SUCCESS) {
-        return CRYPT_LMS_HASH_FAIL;
-    }
-
-    if (incrementJ) {
-        derive->j += 1;
-    }
-    return CRYPT_SUCCESS;
+int32_t ret = HssDecompressParamSet(ctx->para, compressed);
+if (ret != CRYPT_SUCCESS) {
+    return ret;
 }
+
+for (uint32_t i = 0; i < HSS_MAX_LEVELS; i++) {
+    if (ctx->cachedTrees[i] != NULL) {
+        LmsZeroize(ctx->cachedTrees[i], ctx->cachedTreeSizes[i]);
+        BSL_SAL_Free(ctx->cachedTrees[i]);
+        ctx->cachedTrees[i] = NULL;
+        ctx->cachedTreeSizes[i] = 0;
+    }
+    ctx->treeCacheValid[i] = false;
+}
+
+return CRYPT_SUCCESS;
 ```
 
 ---
 
-### LM-OTS Q computation ignores hash failure
-`crypto/lms/src/lms_ots.c:172`
-**Reviewers**: CODEX | **置信度**: 较可信
+### Levels accepted that key format cannot encode
+`crypto/lms/src/hss_api.c:191-195`
+**Reviewers**: CODEX | **置信度**: 可信
 ```
-LmsHash(Q, prefix, LMS_MESG_PREFIX_LEN(ctx->n) + messageLen);
-    BSL_SAL_FREE(prefix);
-
-    LmsPutBigendian(&Q[ctx->n], LmOtsComputeChecksum(Q, ctx->n, ctx->w, ctx->ls), LMS_CHECKSUM_LEN);
-    return CRYPT_SUCCESS;
+if (levels < HSS_MIN_LEVELS || levels > HSS_MAX_LEVELS) {
+    return CRYPT_HSS_INVALID_LEVEL;
+}
+ctx->para->levels = levels;
 ```
-**Issue**: LmOtsComputeQ calls LmsHash at line 172 but does not check the return value. If the hash operation fails, an invalid Q and checksum will be computed, but the function returns CRYPT_SUCCESS. This could result in invalid signatures being generated without any error indication.
+**Issue**: The control API allows up to 8 levels (`HSS_MAX_LEVELS`), but the compressed parameter set in the private key only supports 3 levels (`HSS_MAX_COMPRESSED_LEVELS`), so valid configuration can still fail later in keygen or SetPrvKey.
 **Fix**:
 ```
-int32_t ret = LmsHash(Q, prefix, LMS_MESG_PREFIX_LEN(ctx->n) + messageLen);
-    BSL_SAL_FREE(prefix);
-    if (ret != CRYPT_SUCCESS) {
-        return CRYPT_LMS_HASH_FAIL;
-    }
-
-    LmsPutBigendian(&Q[ctx->n], LmOtsComputeChecksum(Q, ctx->n, ctx->w, ctx->ls), LMS_CHECKSUM_LEN);
-    return CRYPT_SUCCESS;
-```
-
----
-
-### libCtx field not copied in CRYPT_LMS_DupCtx
-`crypto/lms/src/lms_api.c:118-120`
-**Reviewers**: CLAUDE | **置信度**: 较可信
-```
-ctx->signatureIndex = srcCtx->signatureIndex;
-
-    return ctx;
+if (levels < HSS_MIN_LEVELS || levels > HSS_MAX_LEVELS || levels > HSS_MAX_COMPRESSED_LEVELS) {
+    return CRYPT_HSS_INVALID_LEVEL;
 }
-```
-**Issue**: The CRYPT_LMS_DupCtx function does not copy the libCtx field from the source context. The duplicated context will always have libCtx = NULL (from CRYPT_LMS_NewCtx initialization), even if the source context had a valid library context pointer. This can cause issues when the duplicated context is used with provider APIs that rely on libCtx.
-**Fix**:
-```
-ctx->signatureIndex = srcCtx->signatureIndex;
-    ctx->libCtx = srcCtx->libCtx;
-
-    return ctx;
-}
-```
-
----
-
-### libCtx field not copied in CRYPT_HSS_DupCtx
-`crypto/lms/src/hss_api.c:121-123`
-**Reviewers**: CLAUDE | **置信度**: 较可信
-```
-// Copy state
-    newCtx->signatureIndex = srcCtx->signatureIndex;
-
-    return newCtx;
-}
-```
-**Issue**: The CRYPT_HSS_DupCtx function does not copy the libCtx field from the source context. The duplicated context will always have libCtx = NULL, even if the source context had a valid library context pointer. This can cause issues when the duplicated context is used with provider APIs that rely on libCtx.
-**Fix**:
-```
-// Copy state
-    newCtx->signatureIndex = srcCtx->signatureIndex;
-    newCtx->libCtx = srcCtx->libCtx;
-
-    return newCtx;
-}
+ctx->para->levels = levels;
 ```
 
 ---
@@ -197,77 +205,69 @@ ctx->signatureIndex = srcCtx->signatureIndex;
 
 ## Low
 
-### Context structure not zeroized before free in CRYPT_HSS_FreeCtx
-`crypto/lms/src/hss_api.c:91-92`
-**Reviewers**: CLAUDE | **置信度**: 较可信
+### Master seed not cleared on root-seed hash failure
+`crypto/lms/src/hss_utils.c:284-286`
+**Reviewers**: CODEX | **置信度**: 可信
 ```
-if (ctx->para != NULL) {
-        LmsZeroize(ctx->para, sizeof(HSS_Para));
-        BSL_SAL_Free(ctx->para);
-    }
-
-    BSL_SAL_Free(ctx);
+int32_t ret = LmsHash(hash, buffer, HSS_ROOT_SEED_DERIVE_BUF_LEN);
+if (ret != CRYPT_SUCCESS) {
+    return CRYPT_HSS_SEED_DERIVE_FAIL;
 }
 ```
-**Issue**: Unlike CRYPT_LMS_FreeCtx which zeroizes the ctx structure before freeing (line 73), CRYPT_HSS_FreeCtx does not zeroize the ctx structure before calling BSL_SAL_Free. The ctx structure contains signatureIndex which may be considered sensitive state information. For consistency with LMS and proper secure cleanup, ctx should be zeroized.
+**Issue**: On hash failure, the stack buffer containing `masterSeed` is returned without zeroization, leaving sensitive material in memory.
 **Fix**:
 ```
-if (ctx->para != NULL) {
-        LmsZeroize(ctx->para, sizeof(HSS_Para));
-        BSL_SAL_Free(ctx->para);
-    }
-
-    LmsZeroize(ctx, sizeof(CRYPT_HSS_Ctx));
-    BSL_SAL_Free(ctx);
+int32_t ret = LmsHash(hash, buffer, HSS_ROOT_SEED_DERIVE_BUF_LEN);
+if (ret != CRYPT_SUCCESS) {
+    LmsZeroize(buffer, sizeof(buffer));
+    LmsZeroize(hash, sizeof(hash));
+    return CRYPT_HSS_SEED_DERIVE_FAIL;
 }
 ```
 
 ---
 
-### Magic numbers used for control commands instead of defined constants
-`crypto/provider/src/cmvp/cmvp_utils/cmvp_selftest_lms.c:45-51`
-**Reviewers**: CLAUDE | **置信度**: 较可信
+### Master seed not cleared on second hash failure
+`crypto/lms/src/hss_utils.c:294-296`
+**Reviewers**: CODEX | **置信度**: 可信
 ```
-uint32_t lmsType = 5;  // LMS_SHA256_M32_H5
-    uint32_t otsType = 4;  // LMOTS_SHA256_N32_W8
-    GOTO_ERR_IF_TRUE(CRYPT_EAL_PkeyCtrl(pkey, 1, &lmsType, sizeof(lmsType)) != CRYPT_SUCCESS,
-        CRYPT_CMVP_ERR_ALGO_SELFTEST);
-    GOTO_ERR_IF_TRUE(CRYPT_EAL_PkeyCtrl(pkey, 2, &otsType, sizeof(otsType)) != CRYPT_SUCCESS,
-        CRYPT_CMVP_ERR_ALGO_SELFTEST);
+ret = LmsHash(rootSeed, buffer, HSS_ROOT_SEED_DERIVE_BUF_LEN);
+if (ret != CRYPT_SUCCESS) {
+    return CRYPT_HSS_SEED_DERIVE_FAIL;
+}
 ```
-**Issue**: The selftest code uses magic numbers 1 and 2 for CRYPT_EAL_PkeyCtrl calls instead of the defined symbolic constants CRYPT_CTRL_LMS_SET_TYPE and CRYPT_CTRL_LMS_SET_OTS_TYPE. Also, magic numbers 5 and 4 are used for lmsType and otsType instead of enum constants. This makes the code harder to maintain and could break if the control command values change.
+**Issue**: On the second hash failure in `HssGenerateRootSeed`, the stack buffer containing `masterSeed` is returned without zeroization, leaving sensitive material in memory.
 **Fix**:
 ```
-uint32_t lmsType = LMS_SHA256_M32_H5;
-    uint32_t otsType = LMOTS_SHA256_N32_W8;
-    GOTO_ERR_IF_TRUE(CRYPT_EAL_PkeyCtrl(pkey, CRYPT_CTRL_LMS_SET_TYPE, &lmsType, sizeof(lmsType)) != CRYPT_SUCCESS,
-        CRYPT_CMVP_ERR_ALGO_SELFTEST);
-    GOTO_ERR_IF_TRUE(CRYPT_EAL_PkeyCtrl(pkey, CRYPT_CTRL_LMS_SET_OTS_TYPE, &otsType, sizeof(otsType)) != CRYPT_SUCCESS,
-        CRYPT_CMVP_ERR_ALGO_SELFTEST);
+ret = LmsHash(rootSeed, buffer, HSS_ROOT_SEED_DERIVE_BUF_LEN);
+if (ret != CRYPT_SUCCESS) {
+    LmsZeroize(buffer, sizeof(buffer));
+    LmsZeroize(hash, sizeof(hash));
+    return CRYPT_HSS_SEED_DERIVE_FAIL;
+}
 ```
 
 ---
 
-### Magic numbers used for control commands instead of defined constants
-`crypto/provider/src/cmvp/cmvp_utils/cmvp_selftest_hss.c:48-62`
-**Reviewers**: CLAUDE | **置信度**: 较可信
+### HSS compare ignores private seed
+`crypto/lms/src/hss_api.c:173-177`
+**Reviewers**: CODEX | **置信度**: 可信
 ```
-GOTO_ERR_IF_TRUE(CRYPT_EAL_PkeyCtrl(pkey, 1, &levels, sizeof(levels)) != CRYPT_SUCCESS,
-        CRYPT_CMVP_ERR_ALGO_SELFTEST);
-    GOTO_ERR_IF_TRUE(CRYPT_EAL_PkeyCtrl(pkey, 2, lmsParams, sizeof(lmsParams)) != CRYPT_SUCCESS,
-        CRYPT_CMVP_ERR_ALGO_SELFTEST);
-    GOTO_ERR_IF_TRUE(CRYPT_EAL_PkeyCtrl(pkey, 3, otsParams, sizeof(otsParams)) != CRYPT_SUCCESS,
-        CRYPT_CMVP_ERR_ALGO_SELFTEST);
+if (ctx1->privateKey != NULL && ctx2->privateKey != NULL) {
+    // Only compare the counter and parameters, not the secret seed
+    if (memcmp(ctx1->privateKey, ctx2->privateKey, HSS_PRVKEY_SEED_OFFSET) != 0) {
+        return CRYPT_HSS_CMP_FALSE;
+    }
+}
 ```
-**Issue**: The selftest code uses magic numbers 1, 2, and 3 for CRYPT_EAL_PkeyCtrl calls instead of the defined symbolic constants CRYPT_CTRL_HSS_SET_LEVELS, CRYPT_CTRL_HSS_SET_LMS_TYPE, and CRYPT_CTRL_HSS_SET_OTS_TYPE. This makes the code harder to maintain and could break if the control command values change.
+**Issue**: Two different private keys with different master seeds can compare equal if public keys are not set, which can lead to incorrect key matching/caching. The comparison only checks the counter and parameters, not the secret seed.
 **Fix**:
 ```
-GOTO_ERR_IF_TRUE(CRYPT_EAL_PkeyCtrl(pkey, CRYPT_CTRL_HSS_SET_LEVELS, &levels, sizeof(levels)) != CRYPT_SUCCESS,
-        CRYPT_CMVP_ERR_ALGO_SELFTEST);
-    GOTO_ERR_IF_TRUE(CRYPT_EAL_PkeyCtrl(pkey, CRYPT_CTRL_HSS_SET_LMS_TYPE, lmsParams, sizeof(lmsParams)) != CRYPT_SUCCESS,
-        CRYPT_CMVP_ERR_ALGO_SELFTEST);
-    GOTO_ERR_IF_TRUE(CRYPT_EAL_PkeyCtrl(pkey, CRYPT_CTRL_HSS_SET_OTS_TYPE, otsParams, sizeof(otsParams)) != CRYPT_SUCCESS,
-        CRYPT_CMVP_ERR_ALGO_SELFTEST);
+if (ctx1->privateKey != NULL && ctx2->privateKey != NULL) {
+    if (memcmp(ctx1->privateKey, ctx2->privateKey, HSS_PRVKEY_LEN) != 0) {
+        return CRYPT_HSS_CMP_FALSE;
+    }
+}
 ```
 
 ---

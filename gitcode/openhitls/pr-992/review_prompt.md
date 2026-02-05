@@ -1,6 +1,6 @@
 # Change Review Task
 
-You are reviewing PR #992 for openhitls/openhitls.
+You are reviewing PR #992 for openHiTLS/openhitls.
 
 
 ## Changed Files (37 files)
@@ -51,11 +51,11 @@ You are reviewing PR #992 for openhitls/openhitls.
 Perform a thorough change review by:
 
 1. **Understand the Change**
-   - Read the diff stats: `git diff --stat 05342ecfae9070fa5ea390a0d4ef8e4e054fae6c mr-992`
+   - Read the diff stats: `git diff --stat b5351df3e5473e944ea1170dd21102ff44ad9cdd mr-992`
    - Understand what this PR is trying to achieve
 
 2. **Review Each File**
-   - For each changed file, view its diff: `git diff 05342ecfae9070fa5ea390a0d4ef8e4e054fae6c mr-992 -- <file>`
+   - For each changed file, view its diff: `git diff b5351df3e5473e944ea1170dd21102ff44ad9cdd mr-992 -- <file>`
    - If you need more context, read the full file or search for related code
    - Look for: security issues, logic errors, edge cases, error handling
    - For non-code files (docs/config), focus on correctness and safety of the content

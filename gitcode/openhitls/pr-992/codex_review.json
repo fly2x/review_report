@@ -1,62 +1,52 @@
 [
   {
     "source": "codex",
-    "file": "crypto/lms/src/lms_core.c",
-    "line": "140-151",
-    "severity": "critical",
-    "title": "Unsigned loop underflow in internal node computation",
-    "problem": "The loop decrements a uint32_t while checking `r >= 1`. When r reaches 0 it wraps to UINT32_MAX, causing an infinite loop and out-of-bounds tree indexing during root/auth-path computation.",
-    "code": "for (uint32_t r = numLeaves - LMS_ROOT_NODE_INDEX; r >= LMS_ROOT_NODE_INDEX; r--) {\n    uint32_t leftChild = LMS_LEFT_CHILD_MULTIPLIER * r;\n    uint32_t rightChild = LMS_LEFT_CHILD_MULTIPLIER * r + LMS_RIGHT_CHILD_OFFSET;\n\n    LmsInternalHashCtx ctx = {I, r, &tree[leftChild * n], &tree[rightChild * n], n};\n    int32_t ret = LmsComputeInternalHash(&tree[r * n], &ctx);\n    if (ret != CRYPT_SUCCESS) {\n        return ret;\n    }\n}",
-    "fix": "for (uint32_t r = numLeaves - LMS_ROOT_NODE_INDEX; r > 0; r--) {\n    uint32_t leftChild = LMS_LEFT_CHILD_MULTIPLIER * r;\n    uint32_t rightChild = LMS_LEFT_CHILD_MULTIPLIER * r + LMS_RIGHT_CHILD_OFFSET;\n\n    LmsInternalHashCtx ctx = {I, r, &tree[leftChild * n], &tree[rightChild * n], n};\n    int32_t ret = LmsComputeInternalHash(&tree[r * n], &ctx);\n    if (ret != CRYPT_SUCCESS) {\n        return ret;\n    }\n}"
-  },
-  {
-    "source": "codex",
     "file": "crypto/lms/src/hss_utils.c",
-    "line": "355-369",
+    "line": "355-362",
     "severity": "high",
-    "title": "Missing overflow checks can cause division by zero in tree index calculation",
-    "problem": "`sigsPerTree[i]` is computed by multiplying powers of two without overflow checks. For larger levels/heights this can wrap to 0, and the later `globalIndex / sigsPerTree[i]` division can crash or compute wrong indices.",
-    "code": "uint64_t sigsPerTree[HSS_MAX_LEVELS];\nsigsPerTree[para->levels - 1] = 1ULL << para->levelPara[para->levels - 1].height;\n\nfor (int32_t i = (int32_t)para->levels - 2; i >= 0; i--) {\n    uint32_t childHeight = para->levelPara[i + 1].height;\n    sigsPerTree[i] = sigsPerTree[i + 1] * (1ULL << childHeight);\n}\n\n...\ntreeIndex[i] = globalIndex / sigsPerTree[i];",
-    "fix": "uint64_t sigsPerTree[HSS_MAX_LEVELS];\nsigsPerTree[para->levels - 1] = 1ULL << para->levelPara[para->levels - 1].height;\n\nfor (int32_t i = (int32_t)para->levels - 2; i >= 0; i--) {\n    uint32_t childHeight = para->levelPara[i + 1].height;\n    uint64_t factor = 1ULL << childHeight;\n    if (sigsPerTree[i + 1] > (UINT64_MAX / factor)) {\n        return CRYPT_HSS_INVALID_PARAM;\n    }\n    sigsPerTree[i] = sigsPerTree[i + 1] * factor;\n}\n\n...\nif (sigsPerTree[i] == 0) {\n    return CRYPT_HSS_INVALID_PARAM;\n}\ntreeIndex[i] = globalIndex / sigsPerTree[i];"
+    "title": "Wrong Height Used For HSS Tree Index Calculation",
+    "problem": "I can see why you computed `sigsPerTree` this way, but using the child height here miscomputes `treeIndex`/`leafIndex` for non-uniform hierarchies, which can cause LM-OTS key reuse and incorrect capacity tracking; it also lacks overflow checks.",
+    "code": "for (int32_t i = (int32_t)para->levels - 2; i >= 0; i--) {\n    uint32_t childHeight = para->levelPara[i + 1].height;\n    sigsPerTree[i] = sigsPerTree[i + 1] * (1ULL << childHeight);\n}",
+    "fix": "uint32_t bottomHeight = para->levelPara[para->levels - 1].height;\nif (bottomHeight > LMS_MAX_SAFE_HEIGHT_FOR_UINT64) {\n    return CRYPT_HSS_INVALID_PARAM;\n}\nsigsPerTree[para->levels - 1] = 1ULL << bottomHeight;\n\nfor (int32_t i = (int32_t)para->levels - 2; i >= 0; i--) {\n    uint32_t height = para->levelPara[i].height;\n    if (height > LMS_MAX_SAFE_HEIGHT_FOR_UINT64 || sigsPerTree[i + 1] > (UINT64_MAX >> height)) {\n        return CRYPT_HSS_INVALID_PARAM;\n    }\n    sigsPerTree[i] = sigsPerTree[i + 1] * (1ULL << height);\n}"
+  },
+  {
+    "source": "codex",
+    "file": "crypto/lms/src/hss_api.c",
+    "line": "363-377",
+    "severity": "medium",
+    "title": "HSS Private-Key Load Leaves Stale Tree Cache",
+    "problem": "After loading a new private key, cached Merkle trees from the previous key remain marked valid, so signing can reuse stale trees and produce invalid signatures or key reuse.",
+    "code": "int32_t ret = HssDecompressParamSet(ctx->para, compressed);\nif (ret != CRYPT_SUCCESS) {\n    return ret;\n}\n\nreturn CRYPT_SUCCESS;",
+    "fix": "int32_t ret = HssDecompressParamSet(ctx->para, compressed);\nif (ret != CRYPT_SUCCESS) {\n    return ret;\n}\n\nfor (uint32_t i = 0; i < HSS_MAX_LEVELS; i++) {\n    if (ctx->cachedTrees[i] != NULL) {\n        LmsZeroize(ctx->cachedTrees[i], ctx->cachedTreeSizes[i]);\n        BSL_SAL_Free(ctx->cachedTrees[i]);\n        ctx->cachedTrees[i] = NULL;\n        ctx->cachedTreeSizes[i] = 0;\n    }\n    ctx->treeCacheValid[i] = false;\n}\n\nreturn CRYPT_SUCCESS;"
+  },
+  {
+    "source": "codex",
+    "file": "crypto/lms/src/hss_api.c",
+    "line": "185-195",
+    "severity": "medium",
+    "title": "Levels Accepted That Key Format Cannot Encode",
+    "problem": "The control API allows up to 8 levels, but the compressed parameter set in the private key only supports 3 levels, so valid configuration can still fail later in keygen or SetPrvKey.",
+    "code": "if (levels < HSS_MIN_LEVELS || levels > HSS_MAX_LEVELS) {\n    return CRYPT_HSS_INVALID_LEVEL;\n}\nctx->para->levels = levels;",
+    "fix": "if (levels < HSS_MIN_LEVELS || levels > HSS_MAX_LEVELS || levels > HSS_MAX_COMPRESSED_LEVELS) {\n    return CRYPT_HSS_INVALID_LEVEL;\n}\nctx->para->levels = levels;"
   },
   {
     "source": "codex",
     "file": "crypto/lms/src/hss_utils.c",
-    "line": "32-34",
-    "severity": "medium",
-    "title": "Levels accepted beyond what private-key compression supports",
-    "problem": "`HssParaInit` accepts up to `HSS_MAX_LEVELS` (8), but the private key stores a compressed parameter set that only supports `HSS_MAX_COMPRESSED_LEVELS` (3). Keys with 4–8 levels will fail in `HssCompressParamSet`/`CRYPT_HSS_Gen` and cannot be imported via `CRYPT_HSS_SetPrvKey`.",
-    "code": "if (levels < HSS_MIN_LEVELS || levels > HSS_MAX_LEVELS) {\n    return CRYPT_HSS_INVALID_LEVEL;\n}",
-    "fix": "if (levels < HSS_MIN_LEVELS || levels > HSS_MAX_LEVELS || levels > HSS_MAX_COMPRESSED_LEVELS) {\n    return CRYPT_HSS_INVALID_LEVEL;\n}"
+    "line": "283-296",
+    "severity": "low",
+    "title": "Master Seed Not Cleared On Root-Seed Hash Failure",
+    "problem": "On hash failure, the stack buffer containing `masterSeed` is returned without zeroization, leaving sensitive material in memory.",
+    "code": "int32_t ret = LmsHash(hash, buffer, HSS_ROOT_SEED_DERIVE_BUF_LEN);\nif (ret != CRYPT_SUCCESS) {\n    return CRYPT_HSS_SEED_DERIVE_FAIL;\n}\n...\nret = LmsHash(rootSeed, buffer, HSS_ROOT_SEED_DERIVE_BUF_LEN);\nif (ret != CRYPT_SUCCESS) {\n    return CRYPT_HSS_SEED_DERIVE_FAIL;\n}",
+    "fix": "int32_t ret = LmsHash(hash, buffer, HSS_ROOT_SEED_DERIVE_BUF_LEN);\nif (ret != CRYPT_SUCCESS) {\n    LmsZeroize(buffer, sizeof(buffer));\n    LmsZeroize(hash, sizeof(hash));\n    return CRYPT_HSS_SEED_DERIVE_FAIL;\n}\n...\nret = LmsHash(rootSeed, buffer, HSS_ROOT_SEED_DERIVE_BUF_LEN);\nif (ret != CRYPT_SUCCESS) {\n    LmsZeroize(buffer, sizeof(buffer));\n    LmsZeroize(hash, sizeof(hash));\n    return CRYPT_HSS_SEED_DERIVE_FAIL;\n}"
   },
   {
     "source": "codex",
-    "file": "crypto/lms/src/lms_hash.c",
-    "line": "274-276",
-    "severity": "medium",
-    "title": "Parameter sets H20/H25 are advertised but always rejected",
-    "problem": "The PR adds LMS/HSS parameter IDs for heights 20/25, but `LmsParaInit` rejects any height > 15, so those algorithm IDs can never be used (keygen/verify fails with CRYPT_LMS_INVALID_PARAM). This is inconsistent with the public enums/config.",
-    "code": "// Validate height to prevent DoS via full tree regeneration on each signature\nif (para->height > LMS_MAX_PRACTICAL_HEIGHT) {\n    return CRYPT_LMS_INVALID_PARAM;\n}",
-    "fix": "if (para->height > LMS_MAX_HEIGHT) {\n    return CRYPT_LMS_INVALID_PARAM;\n}"
-  },
-  {
-    "source": "codex",
-    "file": "crypto/lms/src/lms_hash.c",
-    "line": "151-167",
-    "severity": "medium",
-    "title": "Seed derivation ignores hash failure",
-    "problem": "`LmsSeedDerive` discards the return value of `LmsHash` and always returns success, so a hash failure leaves `seed` uninitialized and still advances `j`, producing invalid signatures/keys.",
-    "code": "LmsHash(seed, buffer, LMS_PRG_LEN);\nLmsZeroize(buffer, LMS_PRG_LEN);\n\nif (incrementJ) {\n    derive->j += 1;\n}\nreturn CRYPT_SUCCESS;",
-    "fix": "int32_t ret = LmsHash(seed, buffer, LMS_PRG_LEN);\nLmsZeroize(buffer, LMS_PRG_LEN);\nif (ret != CRYPT_SUCCESS) {\n    return CRYPT_LMS_HASH_FAIL;\n}\n\nif (incrementJ) {\n    derive->j += 1;\n}\nreturn CRYPT_SUCCESS;"
-  },
-  {
-    "source": "codex",
-    "file": "crypto/lms/src/lms_ots.c",
-    "line": "161-176",
-    "severity": "medium",
-    "title": "LM-OTS Q computation ignores hash failure",
-    "problem": "`LmOtsComputeQ` does not check the return of `LmsHash`, so a hash failure results in an invalid Q/checksum being used while still returning success.",
-    "code": "LmsHash(Q, prefix, LMS_MESG_PREFIX_LEN(ctx->n) + messageLen);\nBSL_SAL_FREE(prefix);\n\nLmsPutBigendian(&Q[ctx->n], LmOtsComputeChecksum(Q, ctx->n, ctx->w, ctx->ls), LMS_CHECKSUM_LEN);\nreturn CRYPT_SUCCESS;",
-    "fix": "int32_t ret = LmsHash(Q, prefix, LMS_MESG_PREFIX_LEN(ctx->n) + messageLen);\nBSL_SAL_FREE(prefix);\nif (ret != CRYPT_SUCCESS) {\n    return CRYPT_LMS_HASH_FAIL;\n}\n\nLmsPutBigendian(&Q[ctx->n], LmOtsComputeChecksum(Q, ctx->n, ctx->w, ctx->ls), LMS_CHECKSUM_LEN);\nreturn CRYPT_SUCCESS;"
+    "file": "crypto/lms/src/hss_api.c",
+    "line": "172-176",
+    "severity": "low",
+    "title": "HSS Compare Ignores Private Seed",
+    "problem": "Two different private keys with different master seeds can compare equal if public keys are not set, which can lead to incorrect key matching/caching.",
+    "code": "if (ctx1->privateKey != NULL && ctx2->privateKey != NULL) {\n    // Only compare the counter and parameters, not the secret seed\n    if (memcmp(ctx1->privateKey, ctx2->privateKey, HSS_PRVKEY_SEED_OFFSET) != 0) {\n        return CRYPT_HSS_CMP_FALSE;\n    }\n}",
+    "fix": "if (ctx1->privateKey != NULL && ctx2->privateKey != NULL) {\n    if (memcmp(ctx1->privateKey, ctx2->privateKey, HSS_PRVKEY_LEN) != 0) {\n        return CRYPT_HSS_CMP_FALSE;\n    }\n}"
   }
 ]

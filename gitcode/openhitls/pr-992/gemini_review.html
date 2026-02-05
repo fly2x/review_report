@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Code Review: openhitls/openhitls#992 - GEMINI</title>
+    <title>Code Review: openHiTLS/openhitls#992 - GEMINI</title>
     <style>
         :root { --critical: #dc2626; --high: #ea580c; --medium: #ca8a04; --low: #65a30d; }
         * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -29,40 +29,226 @@
 </head>
 <body>
     <div class="container">
-        <h1>Code Review: openhitls/openhitls#992 - GEMINI</h1>
+        <h1>Code Review: openHiTLS/openhitls#992 - GEMINI</h1>
         <div class="subtitle"></div>
 <div class="section"><div class="section-title critical">Critical</div>
 <div class="issue">
-                <div class="issue-title">HSS Tree Index Calculation Uses Wrong Level Height</div>
-                <div class="issue-location">crypto/lms/src/hss_utils.c:274</div>
-                <pre>for (int32_t i = (int32_t)para-&gt;levels - 2; i &gt;= 0; i--) {
-        uint32_t childHeight = para-&gt;levelPara[i + 1].height;
-        sigsPerTree[i] = sigsPerTree[i + 1] * (1ULL &lt;&lt; childHeight);
-    }</pre>
-                <div class="problem"><strong>Issue:</strong> The calculation of `sigsPerTree[i]` incorrectly uses the height of the child level (`i + 1`) instead of the current level (`i`). `sigsPerTree[i]` represents the capacity (number of bottom-level signatures) covered by a tree at level `i`. It should be `sigsPerTree[i + 1] * (1 << height_of_level_i)`. The current code computes `sigsPerTree[i + 1] * (1 << height_of_level_i_plus_1)`, effectively using the child's height twice. This results in incorrect tree and leaf indices when different levels have different heights (e.g., h=10 at level 0, h=20 at level 1).</div>
-                <div class="fix-label">Fix:</div><pre>for (int32_t i = (int32_t)para-&gt;levels - 2; i &gt;= 0; i--) {
-        uint32_t height = para-&gt;levelPara[i].height;
-        sigsPerTree[i] = sigsPerTree[i + 1] * (1ULL &lt;&lt; height);
-    }</pre>
+                <div class="issue-title">Ignored return value of LmsHash in LmOtsGeneratePublicKey</div>
+                <div class="issue-location">crypto/lms/src/lms_ots.c:135</div>
+                <pre>LmsHash(publicKey, buffer, LMS_PBLC_PREFIX_LEN + params.p * params.n);
+    BSL_SAL_FREE(buffer);
+
+    return CRYPT_SUCCESS;</pre>
+                <div class="problem"><strong>Issue:</strong> The return value of `LmsHash` is ignored. If the hash calculation fails (e.g., due to hardware failure or resource exhaustion), the function returns `CRYPT_SUCCESS` but the `publicKey` buffer will contain uninitialized or partial data, leading to a compromised key.</div>
+                <div class="fix-label">Fix:</div><pre>ret = LmsHash(publicKey, buffer, LMS_PBLC_PREFIX_LEN + params.p * params.n);
+    BSL_SAL_FREE(buffer);
+
+    return ret;</pre>
+                <div class="issue-source">Reviewer: gemini</div>
+            </div>
+</div>
+<div class="section"><div class="section-title high">High</div>
+<div class="issue">
+                <div class="issue-title">Ignored return value of LmsHash in LmOtsComputeQ</div>
+                <div class="issue-location">crypto/lms/src/lms_ots.c:171</div>
+                <pre>LmsHash(Q, prefix, LMS_MESG_PREFIX_LEN(ctx-&gt;n) + messageLen);
+    BSL_SAL_FREE(prefix);
+
+    LmsPutBigendian(&amp;Q[ctx-&gt;n], LmOtsComputeChecksum(Q, ctx-&gt;n, ctx-&gt;w, ctx-&gt;ls), LMS_CHECKSUM_LEN);
+    return CRYPT_SUCCESS;</pre>
+                <div class="problem"><strong>Issue:</strong> The return value of `LmsHash` is ignored when computing the message digest `Q`. Failure to compute the hash correctly will result in an invalid signature or verification failure, but the function proceeds as if successful.</div>
+                <div class="fix-label">Fix:</div><pre>int32_t ret = LmsHash(Q, prefix, LMS_MESG_PREFIX_LEN(ctx-&gt;n) + messageLen);
+    BSL_SAL_FREE(prefix);
+    if (ret != CRYPT_SUCCESS) {
+        return ret;
+    }
+
+    LmsPutBigendian(&amp;Q[ctx-&gt;n], LmOtsComputeChecksum(Q, ctx-&gt;n, ctx-&gt;w, ctx-&gt;ls), LMS_CHECKSUM_LEN);
+    return CRYPT_SUCCESS;</pre>
+                <div class="issue-source">Reviewer: gemini</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">Ignored return value of LmsHash in LmOtsSignChains</div>
+                <div class="issue-location">crypto/lms/src/lms_ots.c:197</div>
+                <pre>(void)memcpy_s(iterBuf + LMS_ITER_PREV_OFFSET, ctx-&gt;n, tmp, ctx-&gt;n);
+            LmsHash(tmp, iterBuf, LMS_ITER_LEN(ctx-&gt;n));
+        }
+
+        (void)memcpy_s(&amp;signature[LMS_TYPE_LEN + ctx-&gt;n + ctx-&gt;n * i], ctx-&gt;n, tmp, ctx-&gt;n);</pre>
+                <div class="problem"><strong>Issue:</strong> `LmsHash` return value is ignored inside the signature chain generation loop. If any hash step fails, the resulting signature chain `tmp` will be invalid, creating a broken signature.</div>
+                <div class="fix-label">Fix:</div><pre>(void)memcpy_s(iterBuf + LMS_ITER_PREV_OFFSET, ctx-&gt;n, tmp, ctx-&gt;n);
+            if (LmsHash(tmp, iterBuf, LMS_ITER_LEN(ctx-&gt;n)) != CRYPT_SUCCESS) {
+                return CRYPT_LMS_HASH_FAIL;
+            }
+        }
+
+        (void)memcpy_s(&amp;signature[LMS_TYPE_LEN + ctx-&gt;n + ctx-&gt;n * i], ctx-&gt;n, tmp, ctx-&gt;n);</pre>
+                <div class="issue-source">Reviewer: gemini</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">Ignored return value of LmsHash in LmOtsValidateChains</div>
+                <div class="issue-location">crypto/lms/src/lms_ots.c:289</div>
+                <pre>(void)memcpy_s(iterBuf + LMS_ITER_PREV_OFFSET, ctx-&gt;n, tmp, ctx-&gt;n);
+            LmsHash(tmp, iterBuf, LMS_ITER_LEN(ctx-&gt;n));
+        }
+
+        (void)memcpy_s(finalBuf + LMS_PBLC_PREFIX_LEN + i * ctx-&gt;n, ctx-&gt;n, tmp, ctx-&gt;n);</pre>
+                <div class="problem"><strong>Issue:</strong> `LmsHash` return value is ignored during signature validation chain recomputation. This can lead to incorrect validation results (false positives or false negatives) if the hash function fails.</div>
+                <div class="fix-label">Fix:</div><pre>(void)memcpy_s(iterBuf + LMS_ITER_PREV_OFFSET, ctx-&gt;n, tmp, ctx-&gt;n);
+            if (LmsHash(tmp, iterBuf, LMS_ITER_LEN(ctx-&gt;n)) != CRYPT_SUCCESS) {
+                return CRYPT_LMS_HASH_FAIL;
+            }
+        }
+
+        (void)memcpy_s(finalBuf + LMS_PBLC_PREFIX_LEN + i * ctx-&gt;n, ctx-&gt;n, tmp, ctx-&gt;n);</pre>
+                <div class="issue-source">Reviewer: gemini</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">Ignored return value of LmsHash in LmOtsValidateSignature</div>
+                <div class="issue-location">crypto/lms/src/lms_ots.c:333</div>
+                <pre>LmsHash(computedPubKey, finalBuf, LMS_PBLC_PREFIX_LEN + params.p * params.n);
+
+    LmsZeroize(Q, sizeof(Q));
+    BSL_SAL_FREE(finalBuf);
+
+    return CRYPT_SUCCESS;</pre>
+                <div class="problem"><strong>Issue:</strong> The final hash step to compute the public key candidate in `LmOtsValidateSignature` ignores the return value of `LmsHash`.</div>
+                <div class="fix-label">Fix:</div><pre>int32_t ret2 = LmsHash(computedPubKey, finalBuf, LMS_PBLC_PREFIX_LEN + params.p * params.n);
+
+    LmsZeroize(Q, sizeof(Q));
+    BSL_SAL_FREE(finalBuf);
+
+    return ret2;</pre>
                 <div class="issue-source">Reviewer: gemini</div>
             </div>
 </div>
 <div class="section"><div class="section-title medium">Medium</div>
 <div class="issue">
-                <div class="issue-title">Unsafe Memory Allocation for Large Merkle Trees</div>
-                <div class="issue-location">crypto/lms/src/lms_core.c:133</div>
-                <pre>uint32_t numLeaves = 1u &lt;&lt; para-&gt;height;
-    size_t treeSize = 2 * numLeaves * para-&gt;n;
-    uint8_t *tree = BSL_SAL_Calloc(treeSize, 1);</pre>
-                <div class="problem"><strong>Issue:</strong> `LmsComputeRoot` allocates memory for the entire Merkle tree (`2 * numLeaves * n`). While `LmsParaInit` restricts height to 15 (max ~1MB), `LmsLookupParamSet` supports heights up to 25. If `LmsComputeRoot` is called with a valid parameter set for h=20 (1M leaves) or h=25 (32M leaves) — which is permitted by `LmsLookupParamSet` — it will attempt to allocate 64MB or 2GB of contiguous memory, potentially causing Denial of Service or OOM on constrained systems. The implementation should either support large trees using a low-memory algorithm (e.g., TreeHash) or explicitly validate `height` within `LmsComputeRoot` against the implementation's limit.</div>
-                <div class="fix-label">Fix:</div><pre>// Validate height to prevent excessive memory allocation
-    if (para-&gt;height &gt; LMS_MAX_PRACTICAL_HEIGHT) {
-        return CRYPT_LMS_INVALID_PARAM;
+                <div class="issue-title">Incorrect memory free macro BSL_SAL_Free</div>
+                <div class="issue-location">crypto/lms/src/hss_core.c:188</div>
+                <pre>ret = HssSignChildPubKey(&amp;parentOutput, signCtx, parent, childPubKey, cache);
+    if (ret != CRYPT_SUCCESS) {
+        BSL_SAL_Free(parentSig);
+        return ret;
     }
 
-    uint32_t numLeaves = 1u &lt;&lt; para-&gt;height;
-    size_t treeSize = 2 * numLeaves * para-&gt;n;
-    uint8_t *tree = BSL_SAL_Calloc(treeSize, 1);</pre>
+    (void)memcpy_s(output-&gt;data, *output-&gt;len, parentSig, parentSigLen);
+    (void)memcpy_s(output-&gt;data + parentSigLen, *output-&gt;len - parentSigLen, childPubKey, LMS_PUBKEY_LEN);
+    *output-&gt;len = parentSigLen + LMS_PUBKEY_LEN;
+
+    BSL_SAL_Free(parentSig);
+    return CRYPT_SUCCESS;
+}</pre>
+                <div class="problem"><strong>Issue:</strong> The code uses `BSL_SAL_Free` (mixed case) instead of `BSL_SAL_FREE` (screaming snake case), which is used consistently elsewhere in the project and in `lms_core.c`. This is likely a compilation or linking error if the mixed-case alias doesn't exist.</div>
+                <div class="fix-label">Fix:</div><pre>ret = HssSignChildPubKey(&amp;parentOutput, signCtx, parent, childPubKey, cache);
+    if (ret != CRYPT_SUCCESS) {
+        BSL_SAL_FREE(parentSig);
+        return ret;
+    }
+
+    (void)memcpy_s(output-&gt;data, *output-&gt;len, parentSig, parentSigLen);
+    (void)memcpy_s(output-&gt;data + parentSigLen, *output-&gt;len - parentSigLen, childPubKey, LMS_PUBKEY_LEN);
+    *output-&gt;len = parentSigLen + LMS_PUBKEY_LEN;
+
+    BSL_SAL_FREE(parentSig);
+    return CRYPT_SUCCESS;
+}</pre>
+                <div class="issue-source">Reviewer: gemini</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">Incorrect memory free macro BSL_SAL_Free</div>
+                <div class="issue-location">crypto/lms/src/hss_api.c:36</div>
+                <pre>ctx-&gt;para = (HSS_Para *)BSL_SAL_Calloc(1, sizeof(HSS_Para));
+    if (ctx-&gt;para == NULL) {
+        BSL_SAL_Free(ctx);
+        return NULL;
+    }</pre>
+                <div class="problem"><strong>Issue:</strong> `BSL_SAL_Free` is used instead of the standard `BSL_SAL_FREE`. This occurs multiple times in this file.</div>
+                <div class="fix-label">Fix:</div><pre>ctx-&gt;para = (HSS_Para *)BSL_SAL_Calloc(1, sizeof(HSS_Para));
+    if (ctx-&gt;para == NULL) {
+        BSL_SAL_FREE(ctx);
+        return NULL;
+    }</pre>
+                <div class="issue-source">Reviewer: gemini</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">Incorrect memory free macro BSL_SAL_Free in CRYPT_HSS_NewCtx</div>
+                <div class="issue-location">crypto/lms/src/hss_api.c:46</div>
+                <pre>if (ctx-&gt;publicKey == NULL || ctx-&gt;privateKey == NULL) {
+        if (ctx-&gt;publicKey != NULL) {
+            BSL_SAL_Free(ctx-&gt;publicKey);
+        }
+        if (ctx-&gt;privateKey != NULL) {
+            BSL_SAL_Free(ctx-&gt;privateKey);
+        }
+        BSL_SAL_Free(ctx-&gt;para);
+        BSL_SAL_Free(ctx);
+        return NULL;
+    }</pre>
+                <div class="problem"><strong>Issue:</strong> `BSL_SAL_Free` is used instead of `BSL_SAL_FREE`.</div>
+                <div class="fix-label">Fix:</div><pre>if (ctx-&gt;publicKey == NULL || ctx-&gt;privateKey == NULL) {
+        if (ctx-&gt;publicKey != NULL) {
+            BSL_SAL_FREE(ctx-&gt;publicKey);
+        }
+        if (ctx-&gt;privateKey != NULL) {
+            BSL_SAL_FREE(ctx-&gt;privateKey);
+        }
+        BSL_SAL_FREE(ctx-&gt;para);
+        BSL_SAL_FREE(ctx);
+        return NULL;
+    }</pre>
+                <div class="issue-source">Reviewer: gemini</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">Incorrect memory free macro BSL_SAL_Free in CRYPT_HSS_FreeCtx</div>
+                <div class="issue-location">crypto/lms/src/hss_api.c:87</div>
+                <pre>if (ctx-&gt;privateKey != NULL) {
+        LmsZeroize(ctx-&gt;privateKey, HSS_PRVKEY_LEN);
+        BSL_SAL_Free(ctx-&gt;privateKey);
+    }
+
+    if (ctx-&gt;publicKey != NULL) {
+        BSL_SAL_Free(ctx-&gt;publicKey);
+    }
+
+    if (ctx-&gt;para != NULL) {
+        LmsZeroize(ctx-&gt;para, sizeof(HSS_Para));
+        BSL_SAL_Free(ctx-&gt;para);
+    }
+
+    // Free cached trees
+    for (uint32_t i = 0; i &lt; HSS_MAX_LEVELS; i++) {
+        if (ctx-&gt;cachedTrees[i] != NULL) {
+            LmsZeroize(ctx-&gt;cachedTrees[i], ctx-&gt;cachedTreeSizes[i]);
+            BSL_SAL_Free(ctx-&gt;cachedTrees[i]);
+        }
+    }
+
+    BSL_SAL_Free(ctx);</pre>
+                <div class="problem"><strong>Issue:</strong> `BSL_SAL_Free` is used consistently throughout `CRYPT_HSS_FreeCtx`.</div>
+                <div class="fix-label">Fix:</div><pre>if (ctx-&gt;privateKey != NULL) {
+        LmsZeroize(ctx-&gt;privateKey, HSS_PRVKEY_LEN);
+        BSL_SAL_FREE(ctx-&gt;privateKey);
+    }
+
+    if (ctx-&gt;publicKey != NULL) {
+        BSL_SAL_FREE(ctx-&gt;publicKey);
+    }
+
+    if (ctx-&gt;para != NULL) {
+        LmsZeroize(ctx-&gt;para, sizeof(HSS_Para));
+        BSL_SAL_FREE(ctx-&gt;para);
+    }
+
+    // Free cached trees
+    for (uint32_t i = 0; i &lt; HSS_MAX_LEVELS; i++) {
+        if (ctx-&gt;cachedTrees[i] != NULL) {
+            LmsZeroize(ctx-&gt;cachedTrees[i], ctx-&gt;cachedTreeSizes[i]);
+            BSL_SAL_FREE(ctx-&gt;cachedTrees[i]);
+        }
+    }
+
+    BSL_SAL_FREE(ctx);</pre>
                 <div class="issue-source">Reviewer: gemini</div>
             </div>
 </div>

@@ -1,22 +1,92 @@
 [
   {
     "source": "gemini",
-    "file": "crypto/lms/src/hss_utils.c",
-    "line": "274",
+    "file": "crypto/lms/src/lms_ots.c",
+    "line": "135",
     "severity": "critical",
-    "title": "HSS Tree Index Calculation Uses Wrong Level Height",
-    "problem": "The calculation of `sigsPerTree[i]` incorrectly uses the height of the child level (`i + 1`) instead of the current level (`i`). `sigsPerTree[i]` represents the capacity (number of bottom-level signatures) covered by a tree at level `i`. It should be `sigsPerTree[i + 1] * (1 << height_of_level_i)`. The current code computes `sigsPerTree[i + 1] * (1 << height_of_level_i_plus_1)`, effectively using the child's height twice. This results in incorrect tree and leaf indices when different levels have different heights (e.g., h=10 at level 0, h=20 at level 1).",
-    "code": "for (int32_t i = (int32_t)para->levels - 2; i >= 0; i--) {\n        uint32_t childHeight = para->levelPara[i + 1].height;\n        sigsPerTree[i] = sigsPerTree[i + 1] * (1ULL << childHeight);\n    }",
-    "fix": "for (int32_t i = (int32_t)para->levels - 2; i >= 0; i--) {\n        uint32_t height = para->levelPara[i].height;\n        sigsPerTree[i] = sigsPerTree[i + 1] * (1ULL << height);\n    }"
+    "title": "Ignored return value of LmsHash in LmOtsGeneratePublicKey",
+    "problem": "The return value of `LmsHash` is ignored. If the hash calculation fails (e.g., due to hardware failure or resource exhaustion), the function returns `CRYPT_SUCCESS` but the `publicKey` buffer will contain uninitialized or partial data, leading to a compromised key.",
+    "code": "LmsHash(publicKey, buffer, LMS_PBLC_PREFIX_LEN + params.p * params.n);\n    BSL_SAL_FREE(buffer);\n\n    return CRYPT_SUCCESS;",
+    "fix": "ret = LmsHash(publicKey, buffer, LMS_PBLC_PREFIX_LEN + params.p * params.n);\n    BSL_SAL_FREE(buffer);\n\n    return ret;"
   },
   {
     "source": "gemini",
-    "file": "crypto/lms/src/lms_core.c",
-    "line": "133",
+    "file": "crypto/lms/src/lms_ots.c",
+    "line": "171",
+    "severity": "high",
+    "title": "Ignored return value of LmsHash in LmOtsComputeQ",
+    "problem": "The return value of `LmsHash` is ignored when computing the message digest `Q`. Failure to compute the hash correctly will result in an invalid signature or verification failure, but the function proceeds as if successful.",
+    "code": "LmsHash(Q, prefix, LMS_MESG_PREFIX_LEN(ctx->n) + messageLen);\n    BSL_SAL_FREE(prefix);\n\n    LmsPutBigendian(&Q[ctx->n], LmOtsComputeChecksum(Q, ctx->n, ctx->w, ctx->ls), LMS_CHECKSUM_LEN);\n    return CRYPT_SUCCESS;",
+    "fix": "int32_t ret = LmsHash(Q, prefix, LMS_MESG_PREFIX_LEN(ctx->n) + messageLen);\n    BSL_SAL_FREE(prefix);\n    if (ret != CRYPT_SUCCESS) {\n        return ret;\n    }\n\n    LmsPutBigendian(&Q[ctx->n], LmOtsComputeChecksum(Q, ctx->n, ctx->w, ctx->ls), LMS_CHECKSUM_LEN);\n    return CRYPT_SUCCESS;"
+  },
+  {
+    "source": "gemini",
+    "file": "crypto/lms/src/lms_ots.c",
+    "line": "197",
+    "severity": "high",
+    "title": "Ignored return value of LmsHash in LmOtsSignChains",
+    "problem": "`LmsHash` return value is ignored inside the signature chain generation loop. If any hash step fails, the resulting signature chain `tmp` will be invalid, creating a broken signature.",
+    "code": "(void)memcpy_s(iterBuf + LMS_ITER_PREV_OFFSET, ctx->n, tmp, ctx->n);\n            LmsHash(tmp, iterBuf, LMS_ITER_LEN(ctx->n));\n        }\n\n        (void)memcpy_s(&signature[LMS_TYPE_LEN + ctx->n + ctx->n * i], ctx->n, tmp, ctx->n);",
+    "fix": "(void)memcpy_s(iterBuf + LMS_ITER_PREV_OFFSET, ctx->n, tmp, ctx->n);\n            if (LmsHash(tmp, iterBuf, LMS_ITER_LEN(ctx->n)) != CRYPT_SUCCESS) {\n                return CRYPT_LMS_HASH_FAIL;\n            }\n        }\n\n        (void)memcpy_s(&signature[LMS_TYPE_LEN + ctx->n + ctx->n * i], ctx->n, tmp, ctx->n);"
+  },
+  {
+    "source": "gemini",
+    "file": "crypto/lms/src/lms_ots.c",
+    "line": "289",
+    "severity": "high",
+    "title": "Ignored return value of LmsHash in LmOtsValidateChains",
+    "problem": "`LmsHash` return value is ignored during signature validation chain recomputation. This can lead to incorrect validation results (false positives or false negatives) if the hash function fails.",
+    "code": "(void)memcpy_s(iterBuf + LMS_ITER_PREV_OFFSET, ctx->n, tmp, ctx->n);\n            LmsHash(tmp, iterBuf, LMS_ITER_LEN(ctx->n));\n        }\n\n        (void)memcpy_s(finalBuf + LMS_PBLC_PREFIX_LEN + i * ctx->n, ctx->n, tmp, ctx->n);",
+    "fix": "(void)memcpy_s(iterBuf + LMS_ITER_PREV_OFFSET, ctx->n, tmp, ctx->n);\n            if (LmsHash(tmp, iterBuf, LMS_ITER_LEN(ctx->n)) != CRYPT_SUCCESS) {\n                return CRYPT_LMS_HASH_FAIL;\n            }\n        }\n\n        (void)memcpy_s(finalBuf + LMS_PBLC_PREFIX_LEN + i * ctx->n, ctx->n, tmp, ctx->n);"
+  },
+  {
+    "source": "gemini",
+    "file": "crypto/lms/src/lms_ots.c",
+    "line": "333",
+    "severity": "high",
+    "title": "Ignored return value of LmsHash in LmOtsValidateSignature",
+    "problem": "The final hash step to compute the public key candidate in `LmOtsValidateSignature` ignores the return value of `LmsHash`.",
+    "code": "LmsHash(computedPubKey, finalBuf, LMS_PBLC_PREFIX_LEN + params.p * params.n);\n\n    LmsZeroize(Q, sizeof(Q));\n    BSL_SAL_FREE(finalBuf);\n\n    return CRYPT_SUCCESS;",
+    "fix": "int32_t ret2 = LmsHash(computedPubKey, finalBuf, LMS_PBLC_PREFIX_LEN + params.p * params.n);\n\n    LmsZeroize(Q, sizeof(Q));\n    BSL_SAL_FREE(finalBuf);\n\n    return ret2;"
+  },
+  {
+    "source": "gemini",
+    "file": "crypto/lms/src/hss_core.c",
+    "line": "188",
     "severity": "medium",
-    "title": "Unsafe Memory Allocation for Large Merkle Trees",
-    "problem": "`LmsComputeRoot` allocates memory for the entire Merkle tree (`2 * numLeaves * n`). While `LmsParaInit` restricts height to 15 (max ~1MB), `LmsLookupParamSet` supports heights up to 25. If `LmsComputeRoot` is called with a valid parameter set for h=20 (1M leaves) or h=25 (32M leaves) — which is permitted by `LmsLookupParamSet` — it will attempt to allocate 64MB or 2GB of contiguous memory, potentially causing Denial of Service or OOM on constrained systems. The implementation should either support large trees using a low-memory algorithm (e.g., TreeHash) or explicitly validate `height` within `LmsComputeRoot` against the implementation's limit.",
-    "code": "uint32_t numLeaves = 1u << para->height;\n    size_t treeSize = 2 * numLeaves * para->n;\n    uint8_t *tree = BSL_SAL_Calloc(treeSize, 1);",
-    "fix": "// Validate height to prevent excessive memory allocation\n    if (para->height > LMS_MAX_PRACTICAL_HEIGHT) {\n        return CRYPT_LMS_INVALID_PARAM;\n    }\n\n    uint32_t numLeaves = 1u << para->height;\n    size_t treeSize = 2 * numLeaves * para->n;\n    uint8_t *tree = BSL_SAL_Calloc(treeSize, 1);"
+    "title": "Incorrect memory free macro BSL_SAL_Free",
+    "problem": "The code uses `BSL_SAL_Free` (mixed case) instead of `BSL_SAL_FREE` (screaming snake case), which is used consistently elsewhere in the project and in `lms_core.c`. This is likely a compilation or linking error if the mixed-case alias doesn't exist.",
+    "code": "ret = HssSignChildPubKey(&parentOutput, signCtx, parent, childPubKey, cache);\n    if (ret != CRYPT_SUCCESS) {\n        BSL_SAL_Free(parentSig);\n        return ret;\n    }\n\n    (void)memcpy_s(output->data, *output->len, parentSig, parentSigLen);\n    (void)memcpy_s(output->data + parentSigLen, *output->len - parentSigLen, childPubKey, LMS_PUBKEY_LEN);\n    *output->len = parentSigLen + LMS_PUBKEY_LEN;\n\n    BSL_SAL_Free(parentSig);\n    return CRYPT_SUCCESS;\n}",
+    "fix": "ret = HssSignChildPubKey(&parentOutput, signCtx, parent, childPubKey, cache);\n    if (ret != CRYPT_SUCCESS) {\n        BSL_SAL_FREE(parentSig);\n        return ret;\n    }\n\n    (void)memcpy_s(output->data, *output->len, parentSig, parentSigLen);\n    (void)memcpy_s(output->data + parentSigLen, *output->len - parentSigLen, childPubKey, LMS_PUBKEY_LEN);\n    *output->len = parentSigLen + LMS_PUBKEY_LEN;\n\n    BSL_SAL_FREE(parentSig);\n    return CRYPT_SUCCESS;\n}"
+  },
+  {
+    "source": "gemini",
+    "file": "crypto/lms/src/hss_api.c",
+    "line": "36",
+    "severity": "medium",
+    "title": "Incorrect memory free macro BSL_SAL_Free",
+    "problem": "`BSL_SAL_Free` is used instead of the standard `BSL_SAL_FREE`. This occurs multiple times in this file.",
+    "code": "ctx->para = (HSS_Para *)BSL_SAL_Calloc(1, sizeof(HSS_Para));\n    if (ctx->para == NULL) {\n        BSL_SAL_Free(ctx);\n        return NULL;\n    }",
+    "fix": "ctx->para = (HSS_Para *)BSL_SAL_Calloc(1, sizeof(HSS_Para));\n    if (ctx->para == NULL) {\n        BSL_SAL_FREE(ctx);\n        return NULL;\n    }"
+  },
+  {
+    "source": "gemini",
+    "file": "crypto/lms/src/hss_api.c",
+    "line": "46",
+    "severity": "medium",
+    "title": "Incorrect memory free macro BSL_SAL_Free in CRYPT_HSS_NewCtx",
+    "problem": "`BSL_SAL_Free` is used instead of `BSL_SAL_FREE`.",
+    "code": "if (ctx->publicKey == NULL || ctx->privateKey == NULL) {\n        if (ctx->publicKey != NULL) {\n            BSL_SAL_Free(ctx->publicKey);\n        }\n        if (ctx->privateKey != NULL) {\n            BSL_SAL_Free(ctx->privateKey);\n        }\n        BSL_SAL_Free(ctx->para);\n        BSL_SAL_Free(ctx);\n        return NULL;\n    }",
+    "fix": "if (ctx->publicKey == NULL || ctx->privateKey == NULL) {\n        if (ctx->publicKey != NULL) {\n            BSL_SAL_FREE(ctx->publicKey);\n        }\n        if (ctx->privateKey != NULL) {\n            BSL_SAL_FREE(ctx->privateKey);\n        }\n        BSL_SAL_FREE(ctx->para);\n        BSL_SAL_FREE(ctx);\n        return NULL;\n    }"
+  },
+  {
+    "source": "gemini",
+    "file": "crypto/lms/src/hss_api.c",
+    "line": "87",
+    "severity": "medium",
+    "title": "Incorrect memory free macro BSL_SAL_Free in CRYPT_HSS_FreeCtx",
+    "problem": "`BSL_SAL_Free` is used consistently throughout `CRYPT_HSS_FreeCtx`.",
+    "code": "if (ctx->privateKey != NULL) {\n        LmsZeroize(ctx->privateKey, HSS_PRVKEY_LEN);\n        BSL_SAL_Free(ctx->privateKey);\n    }\n\n    if (ctx->publicKey != NULL) {\n        BSL_SAL_Free(ctx->publicKey);\n    }\n\n    if (ctx->para != NULL) {\n        LmsZeroize(ctx->para, sizeof(HSS_Para));\n        BSL_SAL_Free(ctx->para);\n    }\n\n    // Free cached trees\n    for (uint32_t i = 0; i < HSS_MAX_LEVELS; i++) {\n        if (ctx->cachedTrees[i] != NULL) {\n            LmsZeroize(ctx->cachedTrees[i], ctx->cachedTreeSizes[i]);\n            BSL_SAL_Free(ctx->cachedTrees[i]);\n        }\n    }\n\n    BSL_SAL_Free(ctx);",
+    "fix": "if (ctx->privateKey != NULL) {\n        LmsZeroize(ctx->privateKey, HSS_PRVKEY_LEN);\n        BSL_SAL_FREE(ctx->privateKey);\n    }\n\n    if (ctx->publicKey != NULL) {\n        BSL_SAL_FREE(ctx->publicKey);\n    }\n\n    if (ctx->para != NULL) {\n        LmsZeroize(ctx->para, sizeof(HSS_Para));\n        BSL_SAL_FREE(ctx->para);\n    }\n\n    // Free cached trees\n    for (uint32_t i = 0; i < HSS_MAX_LEVELS; i++) {\n        if (ctx->cachedTrees[i] != NULL) {\n            LmsZeroize(ctx->cachedTrees[i], ctx->cachedTreeSizes[i]);\n            BSL_SAL_FREE(ctx->cachedTrees[i]);\n        }\n    }\n\n    BSL_SAL_FREE(ctx);"
   }
 ]
