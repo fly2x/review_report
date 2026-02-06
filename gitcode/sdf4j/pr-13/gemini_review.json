@@ -1,0 +1,112 @@
+[
+  {
+    "source": "gemini",
+    "file": "sdf4j/src/main/native/src/sdf_jni_asymmetric.c",
+    "line": "366",
+    "severity": "medium",
+    "title": "Code Duplication in RSA Public Key Conversion",
+    "problem": "The function `JNI_SDF_ExternalPublicKeyOperation_RSA` manually converts the Java RSA public key to the native `RSArefPublicKey` structure. This duplicates the logic already implemented in `java_to_native_RSAPublicKey` (declared in `type_conversion.h`), increasing maintenance burden and the risk of inconsistencies (e.g., if the helper function is updated to handle edge cases).",
+    "code": "/* 转换公钥 */\n    RSArefPublicKey native_key;\n    memset(&native_key, 0, sizeof(RSArefPublicKey));\n\n    jclass key_class = (*env)->GetObjectClass(env, publicKey);\n    \n    /* 获取bits字段 */\n    jfieldID bits_fid = (*env)->GetFieldID(env, key_class, \"bits\", \"I\");\n    if (bits_fid == NULL) {\n        THROW_SDF_EXCEPTION(env, 0x01000001, \"Cannot get bits field\");\n        return NULL;\n    }\n    native_key.bits = (*env)->GetIntField(env, publicKey, bits_fid);\n\n    /* 获取m字段 */\n    jfieldID m_fid = (*env)->GetFieldID(env, key_class, \"m\", \"[B\");\n    if (m_fid != NULL) {\n        jbyteArray m_array = (jbyteArray)(*env)->GetObjectField(env, publicKey, m_fid);\n        if (m_array != NULL) {\n            jsize m_len = (*env)->GetArrayLength(env, m_array);\n            if (m_len > RSAref_MAX_LEN) m_len = RSAref_MAX_LEN;\n            (*env)->GetByteArrayRegion(env, m_array, 0, m_len, (jbyte*)native_key.m);\n        }\n    }\n\n    /* 获取e字段 */\n    jfieldID e_fid = (*env)->GetFieldID(env, key_class, \"e\", \"[B\");\n    if (e_fid != NULL) {\n        jbyteArray e_array = (jbyteArray)(*env)->GetObjectField(env, publicKey, e_fid);\n        if (e_array != NULL) {\n            jsize e_len = (*env)->GetArrayLength(env, e_array);\n            if (e_len > RSAref_MAX_LEN) e_len = RSAref_MAX_LEN;\n            (*env)->GetByteArrayRegion(env, e_array, 0, e_len, (jbyte*)native_key.e);\n        }\n    }",
+    "fix": "/* 转换公钥 */\n    RSArefPublicKey native_key;\n    if (!java_to_native_RSAPublicKey(env, publicKey, &native_key)) {\n        THROW_SDF_EXCEPTION(env, 0x0100001D, \"Failed to convert public key\");\n        return NULL;\n    }"
+  },
+  {
+    "source": "gemini",
+    "file": "sdf4j/src/main/native/src/sdf_jni_util.c",
+    "line": "46",
+    "severity": "low",
+    "title": "Incorrect Error Message in JNI_SDF_GenerateKeyPair_RSA",
+    "problem": "The error message \"Failed to compute hash\" is used when `SDF_GenerateKeyPair_RSA` fails. This is misleading as the operation is key generation, not hashing.",
+    "code": "if (ret != SDR_OK) {\n        THROW_SDF_EXCEPTION(env, ret, \"Failed to compute hash\");\n        return NULL;\n    }",
+    "fix": "if (ret != SDR_OK) {\n        THROW_SDF_EXCEPTION(env, ret, \"Failed to generate RSA key pair\");\n        return NULL;\n    }"
+  },
+  {
+    "source": "gemini",
+    "file": "sdf4j/src/main/native/src/sdf_jni_util.c",
+    "line": "97",
+    "severity": "low",
+    "title": "Incorrect Error Message in JNI_SDF_GenerateKeyPair_ECC",
+    "problem": "The error message \"Failed to compute hash\" is used when `SDF_GenerateKeyPair_ECC` fails. This is misleading as the operation is key generation, not hashing.",
+    "code": "if (ret != SDR_OK) {\n        THROW_SDF_EXCEPTION(env, ret, \"Failed to compute hash\");\n        return NULL;\n    }",
+    "fix": "if (ret != SDR_OK) {\n        THROW_SDF_EXCEPTION(env, ret, \"Failed to generate ECC key pair\");\n        return NULL;\n    }"
+  },
+  {
+    "source": "gemini",
+    "file": "sdf4j/src/main/native/src/sdf_jni_util.c",
+    "line": "170",
+    "severity": "low",
+    "title": "Incorrect Error Message in JNI_SDF_ExternalPrivateKeyOperation_RSA",
+    "problem": "The error message \"Failed to compute hash\" is used when `SDF_ExternalPrivateKeyOperation_RSA` fails. This is misleading as the operation is RSA private key operation, not hashing.",
+    "code": "if (ret != SDR_OK) {\n        free(output_buf);\n        THROW_SDF_EXCEPTION(env, ret, \"Failed to compute hash\");\n        return NULL;\n    }",
+    "fix": "if (ret != SDR_OK) {\n        free(output_buf);\n        THROW_SDF_EXCEPTION(env, ret, \"Failed to perform RSA private key operation\");\n        return NULL;\n    }"
+  },
+  {
+    "source": "gemini",
+    "file": "sdf4j/src/main/native/src/sdf_jni_util.c",
+    "line": "225",
+    "severity": "low",
+    "title": "Incorrect Error Message in JNI_SDF_ExternalSign_ECC",
+    "problem": "The error message \"Failed to compute hash\" is used when `SDF_ExternalSign_ECC` fails. This is misleading as the operation is ECC signing, not hashing.",
+    "code": "if (ret != SDR_OK) {\n        THROW_SDF_EXCEPTION(env, ret, \"Failed to compute hash\");\n        return NULL;\n    }",
+    "fix": "if (ret != SDR_OK) {\n        THROW_SDF_EXCEPTION(env, ret, \"Failed to sign with external private key\");\n        return NULL;\n    }"
+  },
+  {
+    "source": "gemini",
+    "file": "sdf4j/src/main/native/src/sdf_jni_util.c",
+    "line": "284",
+    "severity": "low",
+    "title": "Incorrect Error Message in JNI_SDF_ExternalDecrypt_ECC",
+    "problem": "The error message \"Failed to compute hash\" is used when `SDF_ExternalDecrypt_ECC` fails. This is misleading as the operation is ECC decryption, not hashing.",
+    "code": "if (ret != SDR_OK) {\n        free(ecc_cipher);\n        free(plaintext_buf);\n        THROW_SDF_EXCEPTION(env, ret, \"Failed to compute hash\");\n        return NULL;\n    }",
+    "fix": "if (ret != SDR_OK) {\n        free(ecc_cipher);\n        free(plaintext_buf);\n        THROW_SDF_EXCEPTION(env, ret, \"Failed to decrypt with external private key\");\n        return NULL;\n    }"
+  },
+  {
+    "source": "gemini",
+    "file": "sdf4j/src/main/native/src/sdf_jni_util.c",
+    "line": "375",
+    "severity": "low",
+    "title": "Incorrect Error Message in JNI_SDF_ExternalKeyEncrypt",
+    "problem": "The error message \"Failed to compute hash\" is used when `SDF_ExternalKeyEncrypt` fails. This is misleading as the operation is symmetric encryption, not hashing.",
+    "code": "if (ret != SDR_OK) {\n        free(enc_buf);\n        THROW_SDF_EXCEPTION(env, ret, \"Failed to compute hash\");\n        return NULL;\n    }",
+    "fix": "if (ret != SDR_OK) {\n        free(enc_buf);\n        THROW_SDF_EXCEPTION(env, ret, \"Failed to perform symmetric encryption\");\n        return NULL;\n    }"
+  },
+  {
+    "source": "gemini",
+    "file": "sdf4j/src/main/native/src/sdf_jni_util.c",
+    "line": "465",
+    "severity": "low",
+    "title": "Incorrect Error Message in JNI_SDF_ExternalKeyDecrypt",
+    "problem": "The error message \"Failed to compute hash\" is used when `SDF_ExternalKeyDecrypt` fails. This is misleading as the operation is symmetric decryption, not hashing.",
+    "code": "if (ret != SDR_OK) {\n        free(plaintext_buf);\n        THROW_SDF_EXCEPTION(env, ret, \"Failed to compute hash\");\n        return NULL;\n    }",
+    "fix": "if (ret != SDR_OK) {\n        free(plaintext_buf);\n        THROW_SDF_EXCEPTION(env, ret, \"Failed to perform symmetric decryption\");\n        return NULL;\n    }"
+  },
+  {
+    "source": "gemini",
+    "file": "sdf4j/src/main/native/src/sdf_jni_util.c",
+    "line": "524",
+    "severity": "low",
+    "title": "Incorrect Error Message in JNI_SDF_ExternalKeyEncryptInit",
+    "problem": "The error message \"Failed to compute hash\" is used when `SDF_ExternalKeyEncryptInit` fails. This is misleading as the operation is symmetric encryption initialization, not hashing.",
+    "code": "if (ret != SDR_OK) {\n        THROW_SDF_EXCEPTION(env, ret, \"Failed to compute hash\");\n    }",
+    "fix": "if (ret != SDR_OK) {\n        THROW_SDF_EXCEPTION(env, ret, \"Failed to initialize symmetric encryption\");\n    }"
+  },
+  {
+    "source": "gemini",
+    "file": "sdf4j/src/main/native/src/sdf_jni_util.c",
+    "line": "577",
+    "severity": "low",
+    "title": "Incorrect Error Message in JNI_SDF_ExternalKeyDecryptInit",
+    "problem": "The error message \"Failed to compute hash\" is used when `SDF_ExternalKeyDecryptInit` fails. This is misleading as the operation is symmetric decryption initialization, not hashing.",
+    "code": "if (ret != SDR_OK) {\n        THROW_SDF_EXCEPTION(env, ret, \"Failed to compute hash\");\n    }",
+    "fix": "if (ret != SDR_OK) {\n        THROW_SDF_EXCEPTION(env, ret, \"Failed to initialize symmetric decryption\");\n    }"
+  },
+  {
+    "source": "gemini",
+    "file": "sdf4j/src/main/native/src/sdf_jni_util.c",
+    "line": "612",
+    "severity": "low",
+    "title": "Incorrect Error Message in JNI_SDF_ExternalKeyHMACInit",
+    "problem": "The error message \"Failed to compute hash\" is used when `SDF_ExternalKeyHMACInit` fails. While HMAC is related to hash, the message should be more specific to the initialization failure.",
+    "code": "if (ret != SDR_OK) {\n        THROW_SDF_EXCEPTION(env, ret, \"Failed to compute hash\");\n    }",
+    "fix": "if (ret != SDR_OK) {\n        THROW_SDF_EXCEPTION(env, ret, \"Failed to initialize HMAC operation\");\n    }"
+  }
+]

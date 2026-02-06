@@ -1,0 +1,531 @@
+Now I have enough information to consolidate the findings. Let me output the validated issues:
+
+===ISSUE===
+FILE: sdf4j/src/main/native/include/type_conversion.h
+LINE: 37-41
+SEVERITY: high
+TITLE: THROW_SDF_EXCEPTION macro uses strrchr without including string.h
+REVIEWERS: CLAUDE, CODEX
+CONFIDENCE: trusted
+PROBLEM: The THROW_SDF_EXCEPTION macro uses strrchr() function on line 40 to extract the filename from __FILE__, but type_conversion.h does not include <string.h>. Files that include this header but don't include <string.h> before it will have compilation errors or undefined behavior.
+CODE:
+```
+#define THROW_SDF_EXCEPTION(env, error_code, ...) \
+    throw_sdf_exception_with_format(env, error_code, \
+        "Function: %s, File: %s, Line: %d, ErrorNum: 0x%08X, Message: " __VA_ARGS__, \
+        __func__, strrchr(__FILE__, '/') ? strrchr(__FILE__, '/') + 1 : __FILE__, __LINE__, \
+        (unsigned int)(error_code))
+```
+FIX:
+```
+#include <string.h>
+
+#define THROW_SDF_EXCEPTION(env, error_code, ...) \
+    throw_sdf_exception_with_format(env, error_code, \
+        "Function: %s, File: %s, Line: %d, ErrorNum: 0x%08X, Message: " __VA_ARGS__, \
+        __func__, strrchr(__FILE__, '/') ? strrchr(__FILE__, '/') + 1 : __FILE__, __LINE__, \
+        (unsigned int)(error_code))
+```
+===END===
+
+===ISSUE===
+FILE: sdf4j/src/main/native/include/type_conversion.h
+LINE: 29-41
+SEVERITY: high
+TITLE: THROW_SDF_EXCEPTION macro comment claims optional message but requires at least one vararg
+REVIEWERS: CLAUDE, CODEX
+CONFIDENCE: trusted
+PROBLEM: The macro documentation states "THROW_SDF_EXCEPTION(env, error_code) // 使用默认消息" suggesting it can be called with only 2 arguments. However, the macro uses `__VA_ARGS__` concatenated with the format string, requiring at least one additional argument (the message format string). Calling without a message will cause undefined behavior in vsnprintf.
+CODE:
+```
+/**
+ * 抛出SDF异常的便利宏（自动传递函数名、文件名、行号）
+ * 用法:
+ *   THROW_SDF_EXCEPTION(env, error_code, "message: %s", str)
+ *   THROW_SDF_EXCEPTION(env, error_code)  // 使用默认消息
+ *
+ * 异常消息格式: Function: xxx, File: xxx, Line: xxx, ErrorNum: 0xXXXXXXXX, Message: xxx
+ */
+#define THROW_SDF_EXCEPTION(env, error_code, ...) \
+```
+FIX:
+```
+/**
+ * 抛出SDF异常的便利宏（自动传递函数名、文件名、行号）
+ * 用法:
+ *   THROW_SDF_EXCEPTION(env, error_code, "message: %s", str)
+ *   THROW_SDF_EXCEPTION(env, error_code, "message")
+ *
+ * 异常消息格式: Function: xxx, File: xxx, Line: xxx, ErrorNum: 0xXXXXXXXX, Message: xxx
+ * 注意: 必须提供消息字符串参数
+ */
+#define THROW_SDF_EXCEPTION(env, error_code, ...) \
+```
+===END===
+
+===ISSUE===
+FILE: sdf4j/src/main/native/src/sdf_jni_util.c
+LINE: 46
+SEVERITY: medium
+TITLE: Misleading error message "Failed to compute hash" in RSA key pair generation
+REVIEWERS: CLAUDE, GEMINI
+CONFIDENCE: trusted
+PROBLEM: The function JNI_SDF_GenerateKeyPair_RSA generates RSA key pairs, but the error message when it fails says "Failed to compute hash", which is misleading and makes debugging difficult.
+CODE:
+```
+if (ret != SDR_OK) {
+        THROW_SDF_EXCEPTION(env, ret, "Failed to compute hash");
+        return NULL;
+    }
+```
+FIX:
+```
+if (ret != SDR_OK) {
+        THROW_SDF_EXCEPTION(env, ret, "Failed to generate RSA key pair");
+        return NULL;
+    }
+```
+===END===
+
+===ISSUE===
+FILE: sdf4j/src/main/native/src/sdf_jni_util.c
+LINE: 97
+SEVERITY: medium
+TITLE: Misleading error message "Failed to compute hash" in ECC key pair generation
+REVIEWERS: CLAUDE, GEMINI
+CONFIDENCE: trusted
+PROBLEM: The function JNI_SDF_GenerateKeyPair_ECC generates ECC key pairs, but the error message when it fails says "Failed to compute hash", which is misleading.
+CODE:
+```
+if (ret != SDR_OK) {
+        THROW_SDF_EXCEPTION(env, ret, "Failed to compute hash");
+        return NULL;
+    }
+```
+FIX:
+```
+if (ret != SDR_OK) {
+        THROW_SDF_EXCEPTION(env, ret, "Failed to generate ECC key pair");
+        return NULL;
+    }
+```
+===END===
+
+===ISSUE===
+FILE: sdf4j/src/main/native/src/sdf_jni_util.c
+LINE: 170
+SEVERITY: medium
+TITLE: Misleading error message "Failed to compute hash" in RSA private key operation
+REVIEWERS: CLAUDE, GEMINI
+CONFIDENCE: trusted
+PROBLEM: The function JNI_SDF_ExternalPrivateKeyOperation_RSA performs RSA private key operations, but the error message says "Failed to compute hash".
+CODE:
+```
+if (ret != SDR_OK) {
+        free(output_buf);
+        THROW_SDF_EXCEPTION(env, ret, "Failed to compute hash");
+        return NULL;
+    }
+```
+FIX:
+```
+if (ret != SDR_OK) {
+        free(output_buf);
+        THROW_SDF_EXCEPTION(env, ret, "Failed to perform RSA private key operation");
+        return NULL;
+    }
+```
+===END===
+
+===ISSUE===
+FILE: sdf4j/src/main/native/src/sdf_jni_util.c
+LINE: 225
+SEVERITY: medium
+TITLE: Misleading error message "Failed to compute hash" in ECC signing
+REVIEWERS: CLAUDE, GEMINI
+CONFIDENCE: trusted
+PROBLEM: The function JNI_SDF_ExternalSign_ECC performs ECC signing operations, but the error message says "Failed to compute hash".
+CODE:
+```
+if (ret != SDR_OK) {
+        THROW_SDF_EXCEPTION(env, ret, "Failed to compute hash");
+        return NULL;
+    }
+```
+FIX:
+```
+if (ret != SDR_OK) {
+        THROW_SDF_EXCEPTION(env, ret, "Failed to perform ECC signing");
+        return NULL;
+    }
+```
+===END===
+
+===ISSUE===
+FILE: sdf4j/src/main/native/src/sdf_jni_util.c
+LINE: 284
+SEVERITY: medium
+TITLE: Misleading error message "Failed to compute hash" in ECC decryption
+REVIEWERS: CLAUDE, GEMINI
+CONFIDENCE: trusted
+PROBLEM: The function JNI_SDF_ExternalDecrypt_ECC performs ECC decryption, but the error message says "Failed to compute hash".
+CODE:
+```
+if (ret != SDR_OK) {
+        free(ecc_cipher);
+        free(plaintext_buf);
+        THROW_SDF_EXCEPTION(env, ret, "Failed to compute hash");
+        return NULL;
+    }
+```
+FIX:
+```
+if (ret != SDR_OK) {
+        free(ecc_cipher);
+        free(plaintext_buf);
+        THROW_SDF_EXCEPTION(env, ret, "Failed to perform ECC decryption");
+        return NULL;
+    }
+```
+===END===
+
+===ISSUE===
+FILE: sdf4j/src/main/native/src/sdf_jni_util.c
+LINE: 375
+SEVERITY: medium
+TITLE: Misleading error message "Failed to compute hash" in symmetric encryption
+REVIEWERS: CLAUDE, GEMINI
+CONFIDENCE: trusted
+PROBLEM: The function JNI_SDF_ExternalKeyEncrypt performs symmetric encryption, but the error message says "Failed to compute hash".
+CODE:
+```
+if (ret != SDR_OK) {
+        free(enc_buf);
+        THROW_SDF_EXCEPTION(env, ret, "Failed to compute hash");
+        return NULL;
+    }
+```
+FIX:
+```
+if (ret != SDR_OK) {
+        free(enc_buf);
+        THROW_SDF_EXCEPTION(env, ret, "Failed to perform encryption");
+        return NULL;
+    }
+```
+===END===
+
+===ISSUE===
+FILE: sdf4j/src/main/native/src/sdf_jni_util.c
+LINE: 465
+SEVERITY: medium
+TITLE: Misleading error message "Failed to compute hash" in symmetric decryption
+REVIEWERS: CLAUDE, GEMINI
+CONFIDENCE: trusted
+PROBLEM: The function JNI_SDF_ExternalKeyDecrypt performs symmetric decryption, but the error message says "Failed to compute hash".
+CODE:
+```
+if (ret != SDR_OK) {
+        free(plaintext_buf);
+        THROW_SDF_EXCEPTION(env, ret, "Failed to compute hash");
+        return NULL;
+    }
+```
+FIX:
+```
+if (ret != SDR_OK) {
+        free(plaintext_buf);
+        THROW_SDF_EXCEPTION(env, ret, "Failed to perform decryption");
+        return NULL;
+    }
+```
+===END===
+
+===ISSUE===
+FILE: sdf4j/src/main/native/src/sdf_jni_util.c
+LINE: 524
+SEVERITY: medium
+TITLE: Misleading error message "Failed to compute hash" in encryption init
+REVIEWERS: CLAUDE, GEMINI
+CONFIDENCE: trusted
+PROBLEM: The function JNI_SDF_ExternalKeyEncryptInit initializes symmetric encryption, but the error message says "Failed to compute hash".
+CODE:
+```
+if (ret != SDR_OK) {
+        THROW_SDF_EXCEPTION(env, ret, "Failed to compute hash");
+    }
+```
+FIX:
+```
+if (ret != SDR_OK) {
+        THROW_SDF_EXCEPTION(env, ret, "Failed to initialize encryption");
+    }
+```
+===END===
+
+===ISSUE===
+FILE: sdf4j/src/main/native/src/sdf_jni_util.c
+LINE: 577
+SEVERITY: medium
+TITLE: Misleading error message "Failed to compute hash" in decryption init
+REVIEWERS: CLAUDE, GEMINI
+CONFIDENCE: trusted
+PROBLEM: The function JNI_SDF_ExternalKeyDecryptInit initializes symmetric decryption, but the error message says "Failed to compute hash".
+CODE:
+```
+if (ret != SDR_OK) {
+        THROW_SDF_EXCEPTION(env, ret, "Failed to compute hash");
+    }
+```
+FIX:
+```
+if (ret != SDR_OK) {
+        THROW_SDF_EXCEPTION(env, ret, "Failed to initialize decryption");
+    }
+```
+===END===
+
+===ISSUE===
+FILE: sdf4j/src/main/native/src/sdf_jni_util.c
+LINE: 612
+SEVERITY: medium
+TITLE: Misleading error message "Failed to compute hash" in HMAC init
+REVIEWERS: CLAUDE, GEMINI
+CONFIDENCE: trusted
+PROBLEM: The function JNI_SDF_ExternalKeyHMACInit initializes HMAC operation, but the error message says "Failed to compute hash".
+CODE:
+```
+if (ret != SDR_OK) {
+        THROW_SDF_EXCEPTION(env, ret, "Failed to compute hash");
+    }
+```
+FIX:
+```
+if (ret != SDR_OK) {
+        THROW_SDF_EXCEPTION(env, ret, "Failed to initialize HMAC");
+    }
+```
+===END===
+
+===ISSUE===
+FILE: sdf4j/src/main/native/src/sdf_jni_symmetric.c
+LINE: 1398
+SEVERITY: medium
+TITLE: Misleading error message "Failed to perform symmetric operation" in HashInit
+REVIEWERS: CLAUDE
+CONFIDENCE: likely
+PROBLEM: The function JNI_SDF_HashInit performs hash initialization, but the error message says "Failed to perform symmetric operation" which is misleading since hashing is not a symmetric operation.
+CODE:
+```
+if (ret != SDR_OK) {
+        THROW_SDF_EXCEPTION(env, ret, "Failed to perform symmetric operation");
+    }
+```
+FIX:
+```
+if (ret != SDR_OK) {
+        THROW_SDF_EXCEPTION(env, ret, "Failed to initialize hash");
+    }
+```
+===END===
+
+===ISSUE===
+FILE: sdf4j/src/main/native/src/sdf_jni_symmetric.c
+LINE: 1427
+SEVERITY: medium
+TITLE: Misleading error message "Failed to perform symmetric operation" in HashUpdate
+REVIEWERS: CLAUDE
+CONFIDENCE: likely
+PROBLEM: The function JNI_SDF_HashUpdate performs hash update, but the error message says "Failed to perform symmetric operation".
+CODE:
+```
+if (ret != SDR_OK) {
+        THROW_SDF_EXCEPTION(env, ret, "Failed to perform symmetric operation");
+    }
+```
+FIX:
+```
+if (ret != SDR_OK) {
+        THROW_SDF_EXCEPTION(env, ret, "Failed to update hash");
+    }
+```
+===END===
+
+===ISSUE===
+FILE: sdf4j/src/main/native/src/sdf_jni_symmetric.c
+LINE: 1445
+SEVERITY: medium
+TITLE: Misleading error message "Failed to perform symmetric operation" in HashFinal
+REVIEWERS: CLAUDE
+CONFIDENCE: likely
+PROBLEM: The function JNI_SDF_HashFinal performs hash finalization, but the error message says "Failed to perform symmetric operation".
+CODE:
+```
+if (ret != SDR_OK) {
+        THROW_SDF_EXCEPTION(env, ret, "Failed to perform symmetric operation");
+        return NULL;
+    }
+```
+FIX:
+```
+if (ret != SDR_OK) {
+        THROW_SDF_EXCEPTION(env, ret, "Failed to finalize hash");
+        return NULL;
+    }
+```
+===END===
+
+===ISSUE===
+FILE: sdf4j/src/main/native/src/sdf_jni_keygen.c
+LINE: 289
+SEVERITY: low
+TITLE: Duplicate comment "SDR_INARGERR" in error message
+REVIEWERS: CLAUDE
+CONFIDENCE: likely
+PROBLEM: The error message has a duplicate "/* SDR_INARGERR */" comment, which is a copy-paste error.
+CODE:
+```
+THROW_SDF_EXCEPTION(env, 0x0100001D, "Invalid argument"); /* SDR_INARGERR */  /* SDR_INARGERR */
+```
+FIX:
+```
+THROW_SDF_EXCEPTION(env, 0x0100001D, "Invalid argument"); /* SDR_INARGERR */
+```
+===END===
+
+===ISSUE===
+FILE: sdf4j/src/main/native/src/sdf_jni_keygen.c
+LINE: 295
+SEVERITY: low
+TITLE: Duplicate comment "SDR_INARGERR" in error message
+REVIEWERS: CLAUDE
+CONFIDENCE: likely
+PROBLEM: The error message has a duplicate "/* SDR_INARGERR */" comment.
+CODE:
+```
+THROW_SDF_EXCEPTION(env, 0x0100001D, "Invalid argument"); /* SDR_INARGERR */  /* SDR_INARGERR */
+```
+FIX:
+```
+THROW_SDF_EXCEPTION(env, 0x0100001D, "Invalid argument"); /* SDR_INARGERR */
+```
+===END===
+
+===ISSUE===
+FILE: sdf4j/src/main/native/src/sdf_jni_keygen.c
+LINE: 333
+SEVERITY: low
+TITLE: Duplicate comment "SDR_INARGERR" in error message
+REVIEWERS: CLAUDE
+CONFIDENCE: likely
+PROBLEM: The error message has a duplicate "/* SDR_INARGERR */" comment.
+CODE:
+```
+THROW_SDF_EXCEPTION(env, 0x0100001D, "Invalid argument"); /* SDR_INARGERR */  /* SDR_INARGERR */
+```
+FIX:
+```
+THROW_SDF_EXCEPTION(env, 0x0100001D, "Invalid argument"); /* SDR_INARGERR */
+```
+===END===
+
+===ISSUE===
+FILE: sdf4j/src/main/native/src/sdf_jni_keygen.c
+LINE: 392-394
+SEVERITY: low
+TITLE: Duplicate comment "SDR_INARGERR" in error message
+REVIEWERS: CLAUDE
+CONFIDENCE: likely
+PROBLEM: The error message has a duplicate "/* SDR_INARGERR */" comment at line 393.
+CODE:
+```
+THROW_SDF_EXCEPTION(env, 0x0100001D, "Invalid argument"); /* SDR_INARGERR */  /* SDR_INARGERR */
+```
+FIX:
+```
+THROW_SDF_EXCEPTION(env, 0x0100001D, "Invalid argument"); /* SDR_INARGERR */
+```
+===END===
+
+===ISSUE===
+FILE: sdf4j/src/main/native/src/sdf_jni_asymmetric.c
+LINE: 366-400
+SEVERITY: medium
+TITLE: Code duplication in RSA public key conversion
+REVIEWERS: GEMINI
+CONFIDENCE: likely
+PROBLEM: The function JNI_SDF_ExternalPublicKeyOperation_RSA manually converts the Java RSA public key to the native RSArefPublicKey structure. This duplicates the logic already implemented in java_to_native_RSAPublicKey() helper function (declared in type_conversion.h), increasing maintenance burden and risk of inconsistencies.
+CODE:
+```
+/* 转换公钥 */
+    RSArefPublicKey native_key;
+    memset(&native_key, 0, sizeof(RSArefPublicKey));
+
+    jclass key_class = (*env)->GetObjectClass(env, publicKey);
+    
+    /* 获取bits字段 */
+    jfieldID bits_fid = (*env)->GetFieldID(env, key_class, "bits", "I");
+    if (bits_fid == NULL) {
+        THROW_SDF_EXCEPTION(env, 0x01000001, "Cannot get bits field");
+        return NULL;
+    }
+    native_key.bits = (*env)->GetIntField(env, publicKey, bits_fid);
+    ...
+```
+FIX:
+```
+/* 转换公钥 */
+    RSArefPublicKey native_key;
+    if (!java_to_native_RSAPublicKey(env, publicKey, &native_key)) {
+        THROW_SDF_EXCEPTION(env, 0x0100001D, "Failed to convert public key");
+        return NULL;
+    }
+```
+===END===
+
+===ISSUE===
+FILE: docs/API_GUIDE.md
+LINE: 841
+SEVERITY: low
+TITLE: Documentation field name mismatch - "Error" vs "ErrorNum"
+REVIEWERS: CODEX
+CONFIDENCE: likely
+PROBLEM: The field table says "Error" but the documented and actual exception message format uses "ErrorNum". This inconsistency is misleading for users parsing exception text.
+CODE:
+```
+| Error | 十六进制错误码 |
+```
+FIX:
+```
+| ErrorNum | 十六进制错误码 |
+```
+===END===
+
+===ISSUE===
+FILE: examples/src/test/java/org/openhitls/sdf4j/examples/DeviceManagementTest.java
+LINE: 190-195
+SEVERITY: low
+TITLE: Negative-path test does not assert expected exception
+REVIEWERS: CODEX
+CONFIDENCE: likely
+PROBLEM: The test calls SDF_CloseSession(99999) to test invalid handle handling but never fails if no exception is thrown. Regressions in invalid-handle validation can pass silently.
+CODE:
+```
+try {
+    sdf.SDF_CloseSession(99999);
+} catch (SDFException e) {
+    System.err.println("[通过]关闭会话失败: " + e.getErrorCodeHex());
+    System.err.println("[通过]关闭会话失败: " + e.getMessage());
+}
+```
+FIX:
+```
+try {
+    sdf.SDF_CloseSession(99999);
+    fail("Expected SDFException for invalid session handle");
+} catch (SDFException e) {
+    System.err.println("[通过]关闭会话失败: " + e.getErrorCodeHex());
+    System.err.println("[通过]关闭会话失败: " + e.getMessage());
+}
+```
+===END===

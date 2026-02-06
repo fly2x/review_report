@@ -1,0 +1,412 @@
+===ISSUE===
+FILE: sdf4j/src/main/native/include/type_conversion.h
+LINE: 37-41
+SEVERITY: high
+TITLE: THROW_SDF_EXCEPTION macro missing string.h include for strrchr
+PROBLEM: The THROW_SDF_EXCEPTION macro uses strrchr() function on line 40, but type_conversion.h does not include <string.h>. This will cause a compilation error or undefined behavior when using the macro in files that don't include <string.h> before this header.
+CODE:
+```c
+#define THROW_SDF_EXCEPTION(env, error_code, ...) \
+    throw_sdf_exception_with_format(env, error_code, \
+        "Function: %s, File: %s, Line: %d, ErrorNum: 0x%08X, Message: " __VA_ARGS__, \
+        __func__, strrchr(__FILE__, '/') ? strrchr(__FILE__, '/') + 1 : __FILE__, __LINE__, \
+        (unsigned int)(error_code))
+```
+FIX:
+```c
+#include <string.h>
+
+#define THROW_SDF_EXCEPTION(env, error_code, ...) \
+    throw_sdf_exception_with_format(env, error_code, \
+        "Function: %s, File: %s, Line: %d, ErrorNum: 0x%08X, Message: " __VA_ARGS__, \
+        __func__, strrchr(__FILE__, '/') ? strrchr(__FILE__, '/') + 1 : __FILE__, __LINE__, \
+        (unsigned int)(error_code))
+```
+===END===
+
+===ISSUE===
+FILE: sdf4j/src/main/native/include/type_conversion.h
+LINE: 37-41
+SEVERITY: high
+TITLE: THROW_SDF_EXCEPTION macro requires at least one vararg but comment suggests it's optional
+PROBLEM: The macro comment states "THROW_SDF_EXCEPTION(env, error_code) // 使用默认消息" suggesting it can be called with only 2 arguments, but the macro uses `__VA_ARGS__` in a way that requires at least one additional argument (the message format string). Calling THROW_SDF_EXCEPTION(env, error_code) without any message would result in malformed string concatenation and compilation error.
+CODE:
+```c
+/**
+ * 抛出SDF异常的便利宏（自动传递函数名、文件名、行号）
+ * 用法:
+ *   THROW_SDF_EXCEPTION(env, error_code, "message: %s", str)
+ *   THROW_SDF_EXCEPTION(env, error_code)  // 使用默认消息
+ *
+ * 异常消息格式: Function: xxx, File: xxx, Line: xxx, ErrorNum: 0xXXXXXXXX, Message: xxx
+ */
+#define THROW_SDF_EXCEPTION(env, error_code, ...) \
+    throw_sdf_exception_with_format(env, error_code, \
+        "Function: %s, File: %s, Line: %d, ErrorNum: 0x%08X, Message: " __VA_ARGS__, \
+```
+FIX:
+```c
+/**
+ * 抛出SDF异常的便利宏（自动传递函数名、文件名、行号）
+ * 用法:
+ *   THROW_SDF_EXCEPTION(env, error_code, "message: %s", str)
+ *   THROW_SDF_EXCEPTION(env, error_code, "message")
+ *
+ * 异常消息格式: Function: xxx, File: xxx, Line: xxx, ErrorNum: 0xXXXXXXXX, Message: xxx
+ * 注意: 必须提供消息字符串参数
+ */
+#define THROW_SDF_EXCEPTION(env, error_code, ...) \
+    throw_sdf_exception_with_format(env, error_code, \
+        "Function: %s, File: %s, Line: %d, ErrorNum: 0x%08X, Message: " __VA_ARGS__, \
+```
+===END===
+
+===ISSUE===
+FILE: sdf4j/src/main/native/src/sdf_jni_util.c
+LINE: 43
+SEVERITY: medium
+TITLE: Misleading error message for RSA key pair generation
+PROBLEM: The error message says "Failed to compute hash" but the function is JNI_SDF_GenerateKeyPair_RSA which generates RSA key pairs, not hash computation.
+CODE:
+```c
+    if (ret != SDR_OK) {
+        THROW_SDF_EXCEPTION(env, ret, "Failed to compute hash");
+        return NULL;
+    }
+```
+FIX:
+```c
+    if (ret != SDR_OK) {
+        THROW_SDF_EXCEPTION(env, ret, "Failed to generate RSA key pair");
+        return NULL;
+    }
+```
+===END===
+
+===ISSUE===
+FILE: sdf4j/src/main/native/src/sdf_jni_util.c
+LINE: 94
+SEVERITY: medium
+TITLE: Misleading error message for ECC key pair generation
+PROBLEM: The error message says "Failed to compute hash" but the function is JNI_SDF_GenerateKeyPair_ECC which generates ECC key pairs.
+CODE:
+```c
+    if (ret != SDR_OK) {
+        THROW_SDF_EXCEPTION(env, ret, "Failed to compute hash");
+        return NULL;
+    }
+```
+FIX:
+```c
+    if (ret != SDR_OK) {
+        THROW_SDF_EXCEPTION(env, ret, "Failed to generate ECC key pair");
+        return NULL;
+    }
+```
+===END===
+
+===ISSUE===
+FILE: sdf4j/src/main/native/src/sdf_jni_util.c
+LINE: 167
+SEVERITY: medium
+TITLE: Misleading error message for RSA private key operation
+PROBLEM: The error message says "Failed to compute hash" but the function is JNI_SDF_ExternalPrivateKeyOperation_RSA which performs RSA private key operations.
+CODE:
+```c
+    if (ret != SDR_OK) {
+        free(output_buf);
+        THROW_SDF_EXCEPTION(env, ret, "Failed to compute hash");
+        return NULL;
+    }
+```
+FIX:
+```c
+    if (ret != SDR_OK) {
+        free(output_buf);
+        THROW_SDF_EXCEPTION(env, ret, "Failed to perform RSA private key operation");
+        return NULL;
+    }
+```
+===END===
+
+===ISSUE===
+FILE: sdf4j/src/main/native/src/sdf_jni_util.c
+LINE: 222
+SEVERITY: medium
+TITLE: Misleading error message for ECC external sign
+PROBLEM: The error message says "Failed to compute hash" but the function is JNI_SDF_ExternalSign_ECC which performs ECC signing operations.
+CODE:
+```c
+    if (ret != SDR_OK) {
+        THROW_SDF_EXCEPTION(env, ret, "Failed to compute hash");
+        return NULL;
+    }
+```
+FIX:
+```c
+    if (ret != SDR_OK) {
+        THROW_SDF_EXCEPTION(env, ret, "Failed to perform ECC signing");
+        return NULL;
+    }
+```
+===END===
+
+===ISSUE===
+FILE: sdf4j/src/main/native/src/sdf_jni_util.c
+LINE: 281
+SEVERITY: medium
+TITLE: Misleading error message for ECC external decrypt
+PROBLEM: The error message says "Failed to compute hash" but the function is JNI_SDF_ExternalDecrypt_ECC which performs ECC decryption operations.
+CODE:
+```c
+    if (ret != SDR_OK) {
+        free(ecc_cipher);
+        free(plaintext_buf);
+        THROW_SDF_EXCEPTION(env, ret, "Failed to compute hash");
+        return NULL;
+    }
+```
+FIX:
+```c
+    if (ret != SDR_OK) {
+        free(ecc_cipher);
+        free(plaintext_buf);
+        THROW_SDF_EXCEPTION(env, ret, "Failed to perform ECC decryption");
+        return NULL;
+    }
+```
+===END===
+
+===ISSUE===
+FILE: sdf4j/src/main/native/src/sdf_jni_util.c
+LINE: 372
+SEVERITY: medium
+TITLE: Misleading error message for symmetric encryption
+PROBLEM: The error message says "Failed to compute hash" but the function is JNI_SDF_ExternalKeyEncrypt which performs symmetric encryption operations.
+CODE:
+```c
+    if (ret != SDR_OK) {
+        free(enc_buf);
+        THROW_SDF_EXCEPTION(env, ret, "Failed to compute hash");
+        return NULL;
+    }
+```
+FIX:
+```c
+    if (ret != SDR_OK) {
+        free(enc_buf);
+        THROW_SDF_EXCEPTION(env, ret, "Failed to perform encryption");
+        return NULL;
+    }
+```
+===END===
+
+===ISSUE===
+FILE: sdf4j/src/main/native/src/sdf_jni_util.c
+LINE: 462
+SEVERITY: medium
+TITLE: Misleading error message for symmetric decryption
+PROBLEM: The error message says "Failed to compute hash" but the function is JNI_SDF_ExternalKeyDecrypt which performs symmetric decryption operations.
+CODE:
+```c
+    if (ret != SDR_OK) {
+        free(plaintext_buf);
+        THROW_SDF_EXCEPTION(env, ret, "Failed to compute hash");
+        return NULL;
+    }
+```
+FIX:
+```c
+    if (ret != SDR_OK) {
+        free(plaintext_buf);
+        THROW_SDF_EXCEPTION(env, ret, "Failed to perform decryption");
+        return NULL;
+    }
+```
+===END===
+
+===ISSUE===
+FILE: sdf4j/src/main/native/src/sdf_jni_util.c
+LINE: 521
+SEVERITY: medium
+TITLE: Misleading error message for encryption init
+PROBLEM: The error message says "Failed to compute hash" but the function is JNI_SDF_ExternalKeyEncryptInit which initializes symmetric encryption.
+CODE:
+```c
+    if (ret != SDR_OK) {
+        THROW_SDF_EXCEPTION(env, ret, "Failed to compute hash");
+    }
+```
+FIX:
+```c
+    if (ret != SDR_OK) {
+        THROW_SDF_EXCEPTION(env, ret, "Failed to initialize encryption");
+    }
+```
+===END===
+
+===ISSUE===
+FILE: sdf4j/src/main/native/src/sdf_jni_util.c
+LINE: 574
+SEVERITY: medium
+TITLE: Misleading error message for decryption init
+PROBLEM: The error message says "Failed to compute hash" but the function is JNI_SDF_ExternalKeyDecryptInit which initializes symmetric decryption.
+CODE:
+```c
+    if (ret != SDR_OK) {
+        THROW_SDF_EXCEPTION(env, ret, "Failed to compute hash");
+    }
+```
+FIX:
+```c
+    if (ret != SDR_OK) {
+        THROW_SDF_EXCEPTION(env, ret, "Failed to initialize decryption");
+    }
+```
+===END===
+
+===ISSUE===
+FILE: sdf4j/src/main/native/src/sdf_jni_util.c
+LINE: 609
+SEVERITY: medium
+TITLE: Misleading error message for HMAC init
+PROBLEM: The error message says "Failed to compute hash" but the function is JNI_SDF_ExternalKeyHMACInit which initializes HMAC operation.
+CODE:
+```c
+    if (ret != SDR_OK) {
+        THROW_SDF_EXCEPTION(env, ret, "Failed to compute hash");
+    }
+```
+FIX:
+```c
+    if (ret != SDR_OK) {
+        THROW_SDF_EXCEPTION(env, ret, "Failed to initialize HMAC");
+    }
+```
+===END===
+
+===ISSUE===
+FILE: sdf4j/src/main/native/src/sdf_jni_keygen.c
+LINE: 289
+SEVERITY: low
+TITLE: Duplicate comment in error message
+PROBLEM: The error message has a duplicate "/* SDR_INARGERR */" comment.
+CODE:
+```c
+        THROW_SDF_EXCEPTION(env, 0x0100001D, "Invalid argument"); /* SDR_INARGERR */  /* SDR_INARGERR */
+```
+FIX:
+```c
+        THROW_SDF_EXCEPTION(env, 0x0100001D, "Invalid argument"); /* SDR_INARGERR */
+```
+===END===
+
+===ISSUE===
+FILE: sdf4j/src/main/native/src/sdf_jni_keygen.c
+LINE: 295
+SEVERITY: low
+TITLE: Duplicate comment in error message
+PROBLEM: The error message has a duplicate "/* SDR_INARGERR */" comment.
+CODE:
+```c
+        THROW_SDF_EXCEPTION(env, 0x0100001D, "Invalid argument"); /* SDR_INARGERR */  /* SDR_INARGERR */
+```
+FIX:
+```c
+        THROW_SDF_EXCEPTION(env, 0x0100001D, "Invalid argument"); /* SDR_INARGERR */
+```
+===END===
+
+===ISSUE===
+FILE: sdf4j/src/main/native/src/sdf_jni_keygen.c
+LINE: 333
+SEVERITY: low
+TITLE: Duplicate comment in error message
+PROBLEM: The error message has a duplicate "/* SDR_INARGERR */" comment.
+CODE:
+```c
+        THROW_SDF_EXCEPTION(env, 0x0100001D, "Invalid argument"); /* SDR_INARGERR */  /* SDR_INARGERR */
+```
+FIX:
+```c
+        THROW_SDF_EXCEPTION(env, 0x0100001D, "Invalid argument"); /* SDR_INARGERR */
+```
+===END===
+
+===ISSUE===
+FILE: sdf4j/src/main/native/src/sdf_jni_keygen.c
+LINE: 394
+SEVERITY: low
+TITLE: Duplicate comment in error message
+PROBLEM: The error message has a duplicate "/* SDR_INARGERR */" comment.
+CODE:
+```c
+        THROW_SDF_EXCEPTION(env, 0x0100001D, "Invalid argument"); /* SDR_INARGERR */  /* SDR_INARGERR */
+```
+FIX:
+```c
+        THROW_SDF_EXCEPTION(env, 0x0100001D, "Invalid argument"); /* SDR_INARGERR */
+```
+===END===
+
+===ISSUE===
+FILE: sdf4j/src/main/native/src/sdf_jni_symmetric.c
+LINE: 1395 (original line 1963 in context)
+SEVERITY: medium
+TITLE: Misleading error message for HashInit
+PROBLEM: The error message says "Failed to perform symmetric operation" but the function is JNI_SDF_HashInit which performs hash initialization, not symmetric encryption.
+CODE:
+```c
+    if (ret != SDR_OK) {
+        THROW_SDF_EXCEPTION(env, ret, "Failed to perform symmetric operation");
+    }
+```
+FIX:
+```c
+    if (ret != SDR_OK) {
+        THROW_SDF_EXCEPTION(env, ret, "Failed to initialize hash");
+    }
+```
+===END===
+
+===ISSUE===
+FILE: sdf4j/src/main/native/src/sdf_jni_symmetric.c
+LINE: 1424 (original line 1995 in context)
+SEVERITY: medium
+TITLE: Misleading error message for HashUpdate
+PROBLEM: The error message says "Failed to perform symmetric operation" but the function is JNI_SDF_HashUpdate which performs hash update, not symmetric encryption.
+CODE:
+```c
+    if (ret != SDR_OK) {
+        THROW_SDF_EXCEPTION(env, ret, "Failed to perform symmetric operation");
+    }
+```
+FIX:
+```c
+    if (ret != SDR_OK) {
+        THROW_SDF_EXCEPTION(env, ret, "Failed to update hash");
+    }
+```
+===END===
+
+===ISSUE===
+FILE: sdf4j/src/main/native/src/sdf_jni_symmetric.c
+LINE: 1442 (original line 1012 in context)
+SEVERITY: medium
+TITLE: Misleading error message for HashFinal
+PROBLEM: The error message says "Failed to perform symmetric operation" but the function is JNI_SDF_HashFinal which performs hash finalization, not symmetric encryption.
+CODE:
+```c
+    if (ret != SDR_OK) {
+        THROW_SDF_EXCEPTION(env, ret, "Failed to perform symmetric operation");
+        return NULL;
+    }
+```
+FIX:
+```c
+    if (ret != SDR_OK) {
+        THROW_SDF_EXCEPTION(env, ret, "Failed to finalize hash");
+        return NULL;
+    }
+```
+===END===

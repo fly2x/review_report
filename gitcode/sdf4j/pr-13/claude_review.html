@@ -1,0 +1,301 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Code Review: openHiTLS/sdf4j#13 - CLAUDE</title>
+    <style>
+        :root { --critical: #dc2626; --high: #ea580c; --medium: #ca8a04; --low: #65a30d; }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: system-ui, sans-serif; background: #f8fafc; color: #1e293b; padding: 2rem; line-height: 1.6; }
+        .container { max-width: 900px; margin: 0 auto; }
+        h1 { font-size: 1.5rem; margin-bottom: 0.5rem; }
+        .subtitle { color: #64748b; margin-bottom: 2rem; }
+        .section { margin-bottom: 2rem; }
+        .section-title { font-size: 1.1rem; font-weight: 600; padding: 0.5rem 1rem; border-radius: 0.5rem 0.5rem 0 0; color: white; }
+        .section-title.critical { background: var(--critical); }
+        .section-title.high { background: var(--high); }
+        .section-title.medium { background: var(--medium); }
+        .section-title.low { background: var(--low); }
+        .issue { background: white; border: 1px solid #e2e8f0; border-top: none; padding: 1rem; }
+        .issue:last-child { border-radius: 0 0 0.5rem 0.5rem; }
+        .issue-title { font-weight: 600; margin-bottom: 0.25rem; }
+        .issue-location { font-family: monospace; font-size: 0.875rem; color: #64748b; margin-bottom: 0.75rem; }
+        .issue-source { font-size: 0.75rem; color: #94a3b8; margin-top: 0.5rem; }
+        pre { background: #1e293b; color: #e2e8f0; padding: 0.75rem; border-radius: 0.375rem; overflow-x: auto; font-size: 0.875rem; margin: 0.5rem 0; }
+        .problem { margin: 0.75rem 0; }
+        .fix-label { font-weight: 600; margin-top: 0.75rem; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Code Review: openHiTLS/sdf4j#13 - CLAUDE</h1>
+        <div class="subtitle"></div>
+<div class="section"><div class="section-title high">High</div>
+<div class="issue">
+                <div class="issue-title">THROW_SDF_EXCEPTION macro missing string.h include for strrchr</div>
+                <div class="issue-location">sdf4j/src/main/native/include/type_conversion.h:37-41</div>
+                <pre>#define THROW_SDF_EXCEPTION(env, error_code, ...) \
+    throw_sdf_exception_with_format(env, error_code, \
+        "Function: %s, File: %s, Line: %d, ErrorNum: 0x%08X, Message: " __VA_ARGS__, \
+        __func__, strrchr(__FILE__, '/') ? strrchr(__FILE__, '/') + 1 : __FILE__, __LINE__, \
+        (unsigned int)(error_code))</pre>
+                <div class="problem"><strong>Issue:</strong> The THROW_SDF_EXCEPTION macro uses strrchr() function on line 40, but type_conversion.h does not include <string.h>. This will cause a compilation error or undefined behavior when using the macro in files that don't include <string.h> before this header.</div>
+                <div class="fix-label">Fix:</div><pre>#include &lt;string.h&gt;
+
+#define THROW_SDF_EXCEPTION(env, error_code, ...) \
+    throw_sdf_exception_with_format(env, error_code, \
+        "Function: %s, File: %s, Line: %d, ErrorNum: 0x%08X, Message: " __VA_ARGS__, \
+        __func__, strrchr(__FILE__, '/') ? strrchr(__FILE__, '/') + 1 : __FILE__, __LINE__, \
+        (unsigned int)(error_code))</pre>
+                <div class="issue-source">Reviewer: claude</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">THROW_SDF_EXCEPTION macro requires at least one vararg but comment suggests it's optional</div>
+                <div class="issue-location">sdf4j/src/main/native/include/type_conversion.h:37-41</div>
+                <pre>/**
+ * 抛出SDF异常的便利宏（自动传递函数名、文件名、行号）
+ * 用法:
+ *   THROW_SDF_EXCEPTION(env, error_code, "message: %s", str)
+ *   THROW_SDF_EXCEPTION(env, error_code)  // 使用默认消息
+ *
+ * 异常消息格式: Function: xxx, File: xxx, Line: xxx, ErrorNum: 0xXXXXXXXX, Message: xxx
+ */
+#define THROW_SDF_EXCEPTION(env, error_code, ...) \
+    throw_sdf_exception_with_format(env, error_code, \
+        "Function: %s, File: %s, Line: %d, ErrorNum: 0x%08X, Message: " __VA_ARGS__, \</pre>
+                <div class="problem"><strong>Issue:</strong> The macro comment states "THROW_SDF_EXCEPTION(env, error_code) // 使用默认消息" suggesting it can be called with only 2 arguments, but the macro uses `__VA_ARGS__` in a way that requires at least one additional argument (the message format string). Calling THROW_SDF_EXCEPTION(env, error_code) without any message would result in malformed string concatenation and compilation error.</div>
+                <div class="fix-label">Fix:</div><pre>/**
+ * 抛出SDF异常的便利宏（自动传递函数名、文件名、行号）
+ * 用法:
+ *   THROW_SDF_EXCEPTION(env, error_code, "message: %s", str)
+ *   THROW_SDF_EXCEPTION(env, error_code, "message")
+ *
+ * 异常消息格式: Function: xxx, File: xxx, Line: xxx, ErrorNum: 0xXXXXXXXX, Message: xxx
+ * 注意: 必须提供消息字符串参数
+ */
+#define THROW_SDF_EXCEPTION(env, error_code, ...) \
+    throw_sdf_exception_with_format(env, error_code, \
+        "Function: %s, File: %s, Line: %d, ErrorNum: 0x%08X, Message: " __VA_ARGS__, \</pre>
+                <div class="issue-source">Reviewer: claude</div>
+            </div>
+</div>
+<div class="section"><div class="section-title medium">Medium</div>
+<div class="issue">
+                <div class="issue-title">Misleading error message for RSA key pair generation</div>
+                <div class="issue-location">sdf4j/src/main/native/src/sdf_jni_util.c:43</div>
+                <pre>if (ret != SDR_OK) {
+        THROW_SDF_EXCEPTION(env, ret, "Failed to compute hash");
+        return NULL;
+    }</pre>
+                <div class="problem"><strong>Issue:</strong> The error message says "Failed to compute hash" but the function is JNI_SDF_GenerateKeyPair_RSA which generates RSA key pairs, not hash computation.</div>
+                <div class="fix-label">Fix:</div><pre>if (ret != SDR_OK) {
+        THROW_SDF_EXCEPTION(env, ret, "Failed to generate RSA key pair");
+        return NULL;
+    }</pre>
+                <div class="issue-source">Reviewer: claude</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">Misleading error message for ECC key pair generation</div>
+                <div class="issue-location">sdf4j/src/main/native/src/sdf_jni_util.c:94</div>
+                <pre>if (ret != SDR_OK) {
+        THROW_SDF_EXCEPTION(env, ret, "Failed to compute hash");
+        return NULL;
+    }</pre>
+                <div class="problem"><strong>Issue:</strong> The error message says "Failed to compute hash" but the function is JNI_SDF_GenerateKeyPair_ECC which generates ECC key pairs.</div>
+                <div class="fix-label">Fix:</div><pre>if (ret != SDR_OK) {
+        THROW_SDF_EXCEPTION(env, ret, "Failed to generate ECC key pair");
+        return NULL;
+    }</pre>
+                <div class="issue-source">Reviewer: claude</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">Misleading error message for RSA private key operation</div>
+                <div class="issue-location">sdf4j/src/main/native/src/sdf_jni_util.c:167</div>
+                <pre>if (ret != SDR_OK) {
+        free(output_buf);
+        THROW_SDF_EXCEPTION(env, ret, "Failed to compute hash");
+        return NULL;
+    }</pre>
+                <div class="problem"><strong>Issue:</strong> The error message says "Failed to compute hash" but the function is JNI_SDF_ExternalPrivateKeyOperation_RSA which performs RSA private key operations.</div>
+                <div class="fix-label">Fix:</div><pre>if (ret != SDR_OK) {
+        free(output_buf);
+        THROW_SDF_EXCEPTION(env, ret, "Failed to perform RSA private key operation");
+        return NULL;
+    }</pre>
+                <div class="issue-source">Reviewer: claude</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">Misleading error message for ECC external sign</div>
+                <div class="issue-location">sdf4j/src/main/native/src/sdf_jni_util.c:222</div>
+                <pre>if (ret != SDR_OK) {
+        THROW_SDF_EXCEPTION(env, ret, "Failed to compute hash");
+        return NULL;
+    }</pre>
+                <div class="problem"><strong>Issue:</strong> The error message says "Failed to compute hash" but the function is JNI_SDF_ExternalSign_ECC which performs ECC signing operations.</div>
+                <div class="fix-label">Fix:</div><pre>if (ret != SDR_OK) {
+        THROW_SDF_EXCEPTION(env, ret, "Failed to perform ECC signing");
+        return NULL;
+    }</pre>
+                <div class="issue-source">Reviewer: claude</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">Misleading error message for ECC external decrypt</div>
+                <div class="issue-location">sdf4j/src/main/native/src/sdf_jni_util.c:281</div>
+                <pre>if (ret != SDR_OK) {
+        free(ecc_cipher);
+        free(plaintext_buf);
+        THROW_SDF_EXCEPTION(env, ret, "Failed to compute hash");
+        return NULL;
+    }</pre>
+                <div class="problem"><strong>Issue:</strong> The error message says "Failed to compute hash" but the function is JNI_SDF_ExternalDecrypt_ECC which performs ECC decryption operations.</div>
+                <div class="fix-label">Fix:</div><pre>if (ret != SDR_OK) {
+        free(ecc_cipher);
+        free(plaintext_buf);
+        THROW_SDF_EXCEPTION(env, ret, "Failed to perform ECC decryption");
+        return NULL;
+    }</pre>
+                <div class="issue-source">Reviewer: claude</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">Misleading error message for symmetric encryption</div>
+                <div class="issue-location">sdf4j/src/main/native/src/sdf_jni_util.c:372</div>
+                <pre>if (ret != SDR_OK) {
+        free(enc_buf);
+        THROW_SDF_EXCEPTION(env, ret, "Failed to compute hash");
+        return NULL;
+    }</pre>
+                <div class="problem"><strong>Issue:</strong> The error message says "Failed to compute hash" but the function is JNI_SDF_ExternalKeyEncrypt which performs symmetric encryption operations.</div>
+                <div class="fix-label">Fix:</div><pre>if (ret != SDR_OK) {
+        free(enc_buf);
+        THROW_SDF_EXCEPTION(env, ret, "Failed to perform encryption");
+        return NULL;
+    }</pre>
+                <div class="issue-source">Reviewer: claude</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">Misleading error message for symmetric decryption</div>
+                <div class="issue-location">sdf4j/src/main/native/src/sdf_jni_util.c:462</div>
+                <pre>if (ret != SDR_OK) {
+        free(plaintext_buf);
+        THROW_SDF_EXCEPTION(env, ret, "Failed to compute hash");
+        return NULL;
+    }</pre>
+                <div class="problem"><strong>Issue:</strong> The error message says "Failed to compute hash" but the function is JNI_SDF_ExternalKeyDecrypt which performs symmetric decryption operations.</div>
+                <div class="fix-label">Fix:</div><pre>if (ret != SDR_OK) {
+        free(plaintext_buf);
+        THROW_SDF_EXCEPTION(env, ret, "Failed to perform decryption");
+        return NULL;
+    }</pre>
+                <div class="issue-source">Reviewer: claude</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">Misleading error message for encryption init</div>
+                <div class="issue-location">sdf4j/src/main/native/src/sdf_jni_util.c:521</div>
+                <pre>if (ret != SDR_OK) {
+        THROW_SDF_EXCEPTION(env, ret, "Failed to compute hash");
+    }</pre>
+                <div class="problem"><strong>Issue:</strong> The error message says "Failed to compute hash" but the function is JNI_SDF_ExternalKeyEncryptInit which initializes symmetric encryption.</div>
+                <div class="fix-label">Fix:</div><pre>if (ret != SDR_OK) {
+        THROW_SDF_EXCEPTION(env, ret, "Failed to initialize encryption");
+    }</pre>
+                <div class="issue-source">Reviewer: claude</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">Misleading error message for decryption init</div>
+                <div class="issue-location">sdf4j/src/main/native/src/sdf_jni_util.c:574</div>
+                <pre>if (ret != SDR_OK) {
+        THROW_SDF_EXCEPTION(env, ret, "Failed to compute hash");
+    }</pre>
+                <div class="problem"><strong>Issue:</strong> The error message says "Failed to compute hash" but the function is JNI_SDF_ExternalKeyDecryptInit which initializes symmetric decryption.</div>
+                <div class="fix-label">Fix:</div><pre>if (ret != SDR_OK) {
+        THROW_SDF_EXCEPTION(env, ret, "Failed to initialize decryption");
+    }</pre>
+                <div class="issue-source">Reviewer: claude</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">Misleading error message for HMAC init</div>
+                <div class="issue-location">sdf4j/src/main/native/src/sdf_jni_util.c:609</div>
+                <pre>if (ret != SDR_OK) {
+        THROW_SDF_EXCEPTION(env, ret, "Failed to compute hash");
+    }</pre>
+                <div class="problem"><strong>Issue:</strong> The error message says "Failed to compute hash" but the function is JNI_SDF_ExternalKeyHMACInit which initializes HMAC operation.</div>
+                <div class="fix-label">Fix:</div><pre>if (ret != SDR_OK) {
+        THROW_SDF_EXCEPTION(env, ret, "Failed to initialize HMAC");
+    }</pre>
+                <div class="issue-source">Reviewer: claude</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">Misleading error message for HashInit</div>
+                <div class="issue-location">sdf4j/src/main/native/src/sdf_jni_symmetric.c:1395</div>
+                <pre>if (ret != SDR_OK) {
+        THROW_SDF_EXCEPTION(env, ret, "Failed to perform symmetric operation");
+    }</pre>
+                <div class="problem"><strong>Issue:</strong> The error message says "Failed to perform symmetric operation" but the function is JNI_SDF_HashInit which performs hash initialization, not symmetric encryption.</div>
+                <div class="fix-label">Fix:</div><pre>if (ret != SDR_OK) {
+        THROW_SDF_EXCEPTION(env, ret, "Failed to initialize hash");
+    }</pre>
+                <div class="issue-source">Reviewer: claude</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">Misleading error message for HashUpdate</div>
+                <div class="issue-location">sdf4j/src/main/native/src/sdf_jni_symmetric.c:1424</div>
+                <pre>if (ret != SDR_OK) {
+        THROW_SDF_EXCEPTION(env, ret, "Failed to perform symmetric operation");
+    }</pre>
+                <div class="problem"><strong>Issue:</strong> The error message says "Failed to perform symmetric operation" but the function is JNI_SDF_HashUpdate which performs hash update, not symmetric encryption.</div>
+                <div class="fix-label">Fix:</div><pre>if (ret != SDR_OK) {
+        THROW_SDF_EXCEPTION(env, ret, "Failed to update hash");
+    }</pre>
+                <div class="issue-source">Reviewer: claude</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">Misleading error message for HashFinal</div>
+                <div class="issue-location">sdf4j/src/main/native/src/sdf_jni_symmetric.c:1442</div>
+                <pre>if (ret != SDR_OK) {
+        THROW_SDF_EXCEPTION(env, ret, "Failed to perform symmetric operation");
+        return NULL;
+    }</pre>
+                <div class="problem"><strong>Issue:</strong> The error message says "Failed to perform symmetric operation" but the function is JNI_SDF_HashFinal which performs hash finalization, not symmetric encryption.</div>
+                <div class="fix-label">Fix:</div><pre>if (ret != SDR_OK) {
+        THROW_SDF_EXCEPTION(env, ret, "Failed to finalize hash");
+        return NULL;
+    }</pre>
+                <div class="issue-source">Reviewer: claude</div>
+            </div>
+</div>
+<div class="section"><div class="section-title low">Low</div>
+<div class="issue">
+                <div class="issue-title">Duplicate comment in error message</div>
+                <div class="issue-location">sdf4j/src/main/native/src/sdf_jni_keygen.c:289</div>
+                <pre>THROW_SDF_EXCEPTION(env, 0x0100001D, "Invalid argument"); /* SDR_INARGERR */  /* SDR_INARGERR */</pre>
+                <div class="problem"><strong>Issue:</strong> The error message has a duplicate "/* SDR_INARGERR */" comment.</div>
+                <div class="fix-label">Fix:</div><pre>THROW_SDF_EXCEPTION(env, 0x0100001D, "Invalid argument"); /* SDR_INARGERR */</pre>
+                <div class="issue-source">Reviewer: claude</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">Duplicate comment in error message</div>
+                <div class="issue-location">sdf4j/src/main/native/src/sdf_jni_keygen.c:295</div>
+                <pre>THROW_SDF_EXCEPTION(env, 0x0100001D, "Invalid argument"); /* SDR_INARGERR */  /* SDR_INARGERR */</pre>
+                <div class="problem"><strong>Issue:</strong> The error message has a duplicate "/* SDR_INARGERR */" comment.</div>
+                <div class="fix-label">Fix:</div><pre>THROW_SDF_EXCEPTION(env, 0x0100001D, "Invalid argument"); /* SDR_INARGERR */</pre>
+                <div class="issue-source">Reviewer: claude</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">Duplicate comment in error message</div>
+                <div class="issue-location">sdf4j/src/main/native/src/sdf_jni_keygen.c:333</div>
+                <pre>THROW_SDF_EXCEPTION(env, 0x0100001D, "Invalid argument"); /* SDR_INARGERR */  /* SDR_INARGERR */</pre>
+                <div class="problem"><strong>Issue:</strong> The error message has a duplicate "/* SDR_INARGERR */" comment.</div>
+                <div class="fix-label">Fix:</div><pre>THROW_SDF_EXCEPTION(env, 0x0100001D, "Invalid argument"); /* SDR_INARGERR */</pre>
+                <div class="issue-source">Reviewer: claude</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">Duplicate comment in error message</div>
+                <div class="issue-location">sdf4j/src/main/native/src/sdf_jni_keygen.c:394</div>
+                <pre>THROW_SDF_EXCEPTION(env, 0x0100001D, "Invalid argument"); /* SDR_INARGERR */  /* SDR_INARGERR */</pre>
+                <div class="problem"><strong>Issue:</strong> The error message has a duplicate "/* SDR_INARGERR */" comment.</div>
+                <div class="fix-label">Fix:</div><pre>THROW_SDF_EXCEPTION(env, 0x0100001D, "Invalid argument"); /* SDR_INARGERR */</pre>
+                <div class="issue-source">Reviewer: claude</div>
+            </div>
+</div>
+</div></body></html>

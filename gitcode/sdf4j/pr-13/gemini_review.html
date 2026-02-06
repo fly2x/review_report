@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Code Review: openHiTLS/sdf4j#13 - GEMINI</title>
+    <style>
+        :root { --critical: #dc2626; --high: #ea580c; --medium: #ca8a04; --low: #65a30d; }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: system-ui, sans-serif; background: #f8fafc; color: #1e293b; padding: 2rem; line-height: 1.6; }
+        .container { max-width: 900px; margin: 0 auto; }
+        h1 { font-size: 1.5rem; margin-bottom: 0.5rem; }
+        .subtitle { color: #64748b; margin-bottom: 2rem; }
+        .section { margin-bottom: 2rem; }
+        .section-title { font-size: 1.1rem; font-weight: 600; padding: 0.5rem 1rem; border-radius: 0.5rem 0.5rem 0 0; color: white; }
+        .section-title.critical { background: var(--critical); }
+        .section-title.high { background: var(--high); }
+        .section-title.medium { background: var(--medium); }
+        .section-title.low { background: var(--low); }
+        .issue { background: white; border: 1px solid #e2e8f0; border-top: none; padding: 1rem; }
+        .issue:last-child { border-radius: 0 0 0.5rem 0.5rem; }
+        .issue-title { font-weight: 600; margin-bottom: 0.25rem; }
+        .issue-location { font-family: monospace; font-size: 0.875rem; color: #64748b; margin-bottom: 0.75rem; }
+        .issue-source { font-size: 0.75rem; color: #94a3b8; margin-top: 0.5rem; }
+        pre { background: #1e293b; color: #e2e8f0; padding: 0.75rem; border-radius: 0.375rem; overflow-x: auto; font-size: 0.875rem; margin: 0.5rem 0; }
+        .problem { margin: 0.75rem 0; }
+        .fix-label { font-weight: 600; margin-top: 0.75rem; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Code Review: openHiTLS/sdf4j#13 - GEMINI</h1>
+        <div class="subtitle"></div>
+<div class="section"><div class="section-title medium">Medium</div>
+<div class="issue">
+                <div class="issue-title">Code Duplication in RSA Public Key Conversion</div>
+                <div class="issue-location">sdf4j/src/main/native/src/sdf_jni_asymmetric.c:366</div>
+                <pre>/* 转换公钥 */
+    RSArefPublicKey native_key;
+    memset(&amp;native_key, 0, sizeof(RSArefPublicKey));
+
+    jclass key_class = (*env)-&gt;GetObjectClass(env, publicKey);
+    
+    /* 获取bits字段 */
+    jfieldID bits_fid = (*env)-&gt;GetFieldID(env, key_class, "bits", "I");
+    if (bits_fid == NULL) {
+        THROW_SDF_EXCEPTION(env, 0x01000001, "Cannot get bits field");
+        return NULL;
+    }
+    native_key.bits = (*env)-&gt;GetIntField(env, publicKey, bits_fid);
+
+    /* 获取m字段 */
+    jfieldID m_fid = (*env)-&gt;GetFieldID(env, key_class, "m", "[B");
+    if (m_fid != NULL) {
+        jbyteArray m_array = (jbyteArray)(*env)-&gt;GetObjectField(env, publicKey, m_fid);
+        if (m_array != NULL) {
+            jsize m_len = (*env)-&gt;GetArrayLength(env, m_array);
+            if (m_len &gt; RSAref_MAX_LEN) m_len = RSAref_MAX_LEN;
+            (*env)-&gt;GetByteArrayRegion(env, m_array, 0, m_len, (jbyte*)native_key.m);
+        }
+    }
+
+    /* 获取e字段 */
+    jfieldID e_fid = (*env)-&gt;GetFieldID(env, key_class, "e", "[B");
+    if (e_fid != NULL) {
+        jbyteArray e_array = (jbyteArray)(*env)-&gt;GetObjectField(env, publicKey, e_fid);
+        if (e_array != NULL) {
+            jsize e_len = (*env)-&gt;GetArrayLength(env, e_array);
+            if (e_len &gt; RSAref_MAX_LEN) e_len = RSAref_MAX_LEN;
+            (*env)-&gt;GetByteArrayRegion(env, e_array, 0, e_len, (jbyte*)native_key.e);
+        }
+    }</pre>
+                <div class="problem"><strong>Issue:</strong> The function `JNI_SDF_ExternalPublicKeyOperation_RSA` manually converts the Java RSA public key to the native `RSArefPublicKey` structure. This duplicates the logic already implemented in `java_to_native_RSAPublicKey` (declared in `type_conversion.h`), increasing maintenance burden and the risk of inconsistencies (e.g., if the helper function is updated to handle edge cases).</div>
+                <div class="fix-label">Fix:</div><pre>/* 转换公钥 */
+    RSArefPublicKey native_key;
+    if (!java_to_native_RSAPublicKey(env, publicKey, &amp;native_key)) {
+        THROW_SDF_EXCEPTION(env, 0x0100001D, "Failed to convert public key");
+        return NULL;
+    }</pre>
+                <div class="issue-source">Reviewer: gemini</div>
+            </div>
+</div>
+<div class="section"><div class="section-title low">Low</div>
+<div class="issue">
+                <div class="issue-title">Incorrect Error Message in JNI_SDF_GenerateKeyPair_RSA</div>
+                <div class="issue-location">sdf4j/src/main/native/src/sdf_jni_util.c:46</div>
+                <pre>if (ret != SDR_OK) {
+        THROW_SDF_EXCEPTION(env, ret, "Failed to compute hash");
+        return NULL;
+    }</pre>
+                <div class="problem"><strong>Issue:</strong> The error message "Failed to compute hash" is used when `SDF_GenerateKeyPair_RSA` fails. This is misleading as the operation is key generation, not hashing.</div>
+                <div class="fix-label">Fix:</div><pre>if (ret != SDR_OK) {
+        THROW_SDF_EXCEPTION(env, ret, "Failed to generate RSA key pair");
+        return NULL;
+    }</pre>
+                <div class="issue-source">Reviewer: gemini</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">Incorrect Error Message in JNI_SDF_GenerateKeyPair_ECC</div>
+                <div class="issue-location">sdf4j/src/main/native/src/sdf_jni_util.c:97</div>
+                <pre>if (ret != SDR_OK) {
+        THROW_SDF_EXCEPTION(env, ret, "Failed to compute hash");
+        return NULL;
+    }</pre>
+                <div class="problem"><strong>Issue:</strong> The error message "Failed to compute hash" is used when `SDF_GenerateKeyPair_ECC` fails. This is misleading as the operation is key generation, not hashing.</div>
+                <div class="fix-label">Fix:</div><pre>if (ret != SDR_OK) {
+        THROW_SDF_EXCEPTION(env, ret, "Failed to generate ECC key pair");
+        return NULL;
+    }</pre>
+                <div class="issue-source">Reviewer: gemini</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">Incorrect Error Message in JNI_SDF_ExternalPrivateKeyOperation_RSA</div>
+                <div class="issue-location">sdf4j/src/main/native/src/sdf_jni_util.c:170</div>
+                <pre>if (ret != SDR_OK) {
+        free(output_buf);
+        THROW_SDF_EXCEPTION(env, ret, "Failed to compute hash");
+        return NULL;
+    }</pre>
+                <div class="problem"><strong>Issue:</strong> The error message "Failed to compute hash" is used when `SDF_ExternalPrivateKeyOperation_RSA` fails. This is misleading as the operation is RSA private key operation, not hashing.</div>
+                <div class="fix-label">Fix:</div><pre>if (ret != SDR_OK) {
+        free(output_buf);
+        THROW_SDF_EXCEPTION(env, ret, "Failed to perform RSA private key operation");
+        return NULL;
+    }</pre>
+                <div class="issue-source">Reviewer: gemini</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">Incorrect Error Message in JNI_SDF_ExternalSign_ECC</div>
+                <div class="issue-location">sdf4j/src/main/native/src/sdf_jni_util.c:225</div>
+                <pre>if (ret != SDR_OK) {
+        THROW_SDF_EXCEPTION(env, ret, "Failed to compute hash");
+        return NULL;
+    }</pre>
+                <div class="problem"><strong>Issue:</strong> The error message "Failed to compute hash" is used when `SDF_ExternalSign_ECC` fails. This is misleading as the operation is ECC signing, not hashing.</div>
+                <div class="fix-label">Fix:</div><pre>if (ret != SDR_OK) {
+        THROW_SDF_EXCEPTION(env, ret, "Failed to sign with external private key");
+        return NULL;
+    }</pre>
+                <div class="issue-source">Reviewer: gemini</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">Incorrect Error Message in JNI_SDF_ExternalDecrypt_ECC</div>
+                <div class="issue-location">sdf4j/src/main/native/src/sdf_jni_util.c:284</div>
+                <pre>if (ret != SDR_OK) {
+        free(ecc_cipher);
+        free(plaintext_buf);
+        THROW_SDF_EXCEPTION(env, ret, "Failed to compute hash");
+        return NULL;
+    }</pre>
+                <div class="problem"><strong>Issue:</strong> The error message "Failed to compute hash" is used when `SDF_ExternalDecrypt_ECC` fails. This is misleading as the operation is ECC decryption, not hashing.</div>
+                <div class="fix-label">Fix:</div><pre>if (ret != SDR_OK) {
+        free(ecc_cipher);
+        free(plaintext_buf);
+        THROW_SDF_EXCEPTION(env, ret, "Failed to decrypt with external private key");
+        return NULL;
+    }</pre>
+                <div class="issue-source">Reviewer: gemini</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">Incorrect Error Message in JNI_SDF_ExternalKeyEncrypt</div>
+                <div class="issue-location">sdf4j/src/main/native/src/sdf_jni_util.c:375</div>
+                <pre>if (ret != SDR_OK) {
+        free(enc_buf);
+        THROW_SDF_EXCEPTION(env, ret, "Failed to compute hash");
+        return NULL;
+    }</pre>
+                <div class="problem"><strong>Issue:</strong> The error message "Failed to compute hash" is used when `SDF_ExternalKeyEncrypt` fails. This is misleading as the operation is symmetric encryption, not hashing.</div>
+                <div class="fix-label">Fix:</div><pre>if (ret != SDR_OK) {
+        free(enc_buf);
+        THROW_SDF_EXCEPTION(env, ret, "Failed to perform symmetric encryption");
+        return NULL;
+    }</pre>
+                <div class="issue-source">Reviewer: gemini</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">Incorrect Error Message in JNI_SDF_ExternalKeyDecrypt</div>
+                <div class="issue-location">sdf4j/src/main/native/src/sdf_jni_util.c:465</div>
+                <pre>if (ret != SDR_OK) {
+        free(plaintext_buf);
+        THROW_SDF_EXCEPTION(env, ret, "Failed to compute hash");
+        return NULL;
+    }</pre>
+                <div class="problem"><strong>Issue:</strong> The error message "Failed to compute hash" is used when `SDF_ExternalKeyDecrypt` fails. This is misleading as the operation is symmetric decryption, not hashing.</div>
+                <div class="fix-label">Fix:</div><pre>if (ret != SDR_OK) {
+        free(plaintext_buf);
+        THROW_SDF_EXCEPTION(env, ret, "Failed to perform symmetric decryption");
+        return NULL;
+    }</pre>
+                <div class="issue-source">Reviewer: gemini</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">Incorrect Error Message in JNI_SDF_ExternalKeyEncryptInit</div>
+                <div class="issue-location">sdf4j/src/main/native/src/sdf_jni_util.c:524</div>
+                <pre>if (ret != SDR_OK) {
+        THROW_SDF_EXCEPTION(env, ret, "Failed to compute hash");
+    }</pre>
+                <div class="problem"><strong>Issue:</strong> The error message "Failed to compute hash" is used when `SDF_ExternalKeyEncryptInit` fails. This is misleading as the operation is symmetric encryption initialization, not hashing.</div>
+                <div class="fix-label">Fix:</div><pre>if (ret != SDR_OK) {
+        THROW_SDF_EXCEPTION(env, ret, "Failed to initialize symmetric encryption");
+    }</pre>
+                <div class="issue-source">Reviewer: gemini</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">Incorrect Error Message in JNI_SDF_ExternalKeyDecryptInit</div>
+                <div class="issue-location">sdf4j/src/main/native/src/sdf_jni_util.c:577</div>
+                <pre>if (ret != SDR_OK) {
+        THROW_SDF_EXCEPTION(env, ret, "Failed to compute hash");
+    }</pre>
+                <div class="problem"><strong>Issue:</strong> The error message "Failed to compute hash" is used when `SDF_ExternalKeyDecryptInit` fails. This is misleading as the operation is symmetric decryption initialization, not hashing.</div>
+                <div class="fix-label">Fix:</div><pre>if (ret != SDR_OK) {
+        THROW_SDF_EXCEPTION(env, ret, "Failed to initialize symmetric decryption");
+    }</pre>
+                <div class="issue-source">Reviewer: gemini</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">Incorrect Error Message in JNI_SDF_ExternalKeyHMACInit</div>
+                <div class="issue-location">sdf4j/src/main/native/src/sdf_jni_util.c:612</div>
+                <pre>if (ret != SDR_OK) {
+        THROW_SDF_EXCEPTION(env, ret, "Failed to compute hash");
+    }</pre>
+                <div class="problem"><strong>Issue:</strong> The error message "Failed to compute hash" is used when `SDF_ExternalKeyHMACInit` fails. While HMAC is related to hash, the message should be more specific to the initialization failure.</div>
+                <div class="fix-label">Fix:</div><pre>if (ret != SDR_OK) {
+        THROW_SDF_EXCEPTION(env, ret, "Failed to initialize HMAC operation");
+    }</pre>
+                <div class="issue-source">Reviewer: gemini</div>
+            </div>
+</div>
+</div></body></html>

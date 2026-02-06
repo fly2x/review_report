@@ -1,0 +1,312 @@
+I will start by listing the changed files and their statistics to understand the scope of the PR.
+I will read the changes in `sdf4j/src/main/java/org/openhitls/sdf4j/SDF.java` to understand how the logging functionality was modified or removed.
+I will read the changes in `sdf4j/src/main/native/src/sdf_jni_register.c` to verify that the native JNI registration has been updated to reflect the removal of the logging functionality and that no dangling method registrations remain.
+I will examine the changes in `sdf4j/src/main/native/src/sdf_jni_symmetric.c` to understand the implementation of the `ExternalKey` functions and other modifications, ensuring they are consistent with the recent JNI registration updates.
+I will read `sdf4j/src/main/native/src/sdf_jni_key.c` to locate the implementation of `JNI_SDF_ExternalKeyDecryptInit` and `JNI_SDF_ExternalKeyHMACInit`, ensuring they match the registration in `sdf_jni_register.c`.
+I will search for the definition of `JNI_SDF_ExternalKeyDecryptInit` and `JNI_SDF_ExternalKeyHMACInit` in `sdf4j/src/main/native/src/` to confirm their location and implementation.
+I will read `sdf4j/src/main/native/src/sdf_jni_util.c` to examine the implementation of the `ExternalKey` encryption and decryption functions and verify their correctness.
+I will verify if `sdf4j/src/main/native/include/sdf_log.h` is still included in any file and check for any remaining references to the removed `sdf4j/src/main/native/src/sdf_jni_log.c`.
+I will read `sdf4j/src/main/native/src/sdf_jni_device.c` to examine the changes made in that file.
+I will read `sdf4j/src/main/native/include/sdf_jni_common.h` to inspect the definitions of `VALIDATE_SESSION_HANDLE` and `THROW_SDF_EXCEPTION`, ensuring they function correctly after the logging cleanup.
+I will search for the definition of `throw_sdf_exception_with_format` in `sdf4j/src/main/native/src/sdf_jni_util.c` to verify its implementation.
+I will search the entire `sdf4j/src/main/native/` directory for `throw_sdf_exception_with_format` to locate its definition, as previous searches were unsuccessful.
+I will read `sdf4j/src/main/native/src/type_conversion.c` to examine the implementation of `throw_sdf_exception_with_format` and ensure it is correct.
+I will read `sdf4j/src/main/java/org/openhitls/sdf4j/SDFException.java` to verify that it has a constructor matching the signature `(ILjava/lang/String;)V` used in the JNI code.
+I will read the changes in `sdf4j/src/main/native/src/jni_cache.c` to verify that `ctor_int_string` is correctly initialized, ensuring the JNI cache remains consistent.
+I will run `git diff --stat` again to verify the changes in `sdf4j/src/main/native/src/jni_cache.c`, as my previous attempt yielded unexpected results.
+I will read the changes in `docs/API_GUIDE.md` to ensure the documentation accurately reflects the removal of logging and potentially includes the new `ExternalKey` functions.
+I will read `sdf4j/src/main/native/src/sdf_jni_asymmetric.c` to check for any incorrect error messages or copy-paste errors, similar to those found in `sdf_jni_util.c`.
+I will read `sdf4j/src/main/native/include/sdf.h` to compare the structure definitions of `ECCrefPublicKey` and `RSArefPublicKey`, determining if the use of `ECCrefPublicKey` in the RSA function is indeed a bug.
+I will read the content of `sdf4j/src/main/native/include/sdf.h` to inspect the structure definitions of `ECCrefPublicKey` and `RSArefPublicKey`.
+I will read `sdf4j/src/main/native/src/sdf_jni_asymmetric.c` again to verify if `JNI_SDF_ExternalPublicKeyOperation_RSA` incorrectly uses `ECCrefPublicKey` instead of `RSArefPublicKey`.
+I will read `sdf4j/src/main/native/include/type_conversion.h` to check if `java_to_native_RSAPublicKey` is available and should be used instead of manual conversion in `JNI_SDF_ExternalPublicKeyOperation_RSA`.
+I will read the content of `sdf4j/src/main/native/include/type_conversion.h` to see if `java_to_native_RSAPublicKey` is declared.
+I will search the `sdf4j/src/main/native/src/` directory for any remaining instances of `throw_sdf_exception` to ensure all calls have been updated to the new `THROW_SDF_EXCEPTION` macro, preventing potential compilation or linking errors.
+I will search the `sdf4j/src/main/native/src/` directory for any remaining instances of `SDF_LOG_ERROR` or `SDF_JNI_LOG` to ensure all logging calls have been removed or updated.
+I will search the `sdf4j/src/main/native/src/` directory for any remaining instances of `SDF_JNI_LOG` to ensure complete removal of the logging functionality.
+I will read `sdf4j/src/main/native/src/sdf_jni_asymmetric.c` around line 386 to verify if the manual RSA key conversion in `JNI_SDF_ExternalPublicKeyOperation_RSA` correctly handles the public exponent `e`.
+I will read the complete content of `sdf4j/src/main/native/src/sdf_jni_asymmetric.c` to verify the manual RSA key conversion logic, specifically ensuring that the public exponent `e` is correctly handled.
+I will read the entire content of `sdf4j/src/main/native/src/sdf_jni_util.c` to identify any additional copy-paste errors or code duplications, particularly in functions like `JNI_SDF_ExternalPrivateKeyOperation_RSA`.
+I will read `examples/src/test/java/org/openhitls/sdf4j/examples/AsymmetricOperationTest.java` to verify that the test updates are valid and consistent with the recent changes.
+I will search `sdf4j/src/main/native/src/sdf_jni_util.c` for "Failed to compute hash" with line numbers to identify all occurrences of the incorrect error message.
+I will search `sdf4j/src/main/native/src/sdf_jni_asymmetric.c` for "JNI_SDF_ExternalPublicKeyOperation_RSA" with line numbers to verify the starting line of the function.
+I will search `sdf4j/src/main/native/src/sdf_jni_symmetric.c` for "throw_sdf_exception" with line numbers to confirm the exact location of the deprecated function usage.
+I will read lines 448 to 463 of `sdf4j/src/main/native/src/sdf_jni_util.c` to definitively verify the parameters passed to `SDF_ExternalKeyDecrypt`.
+===ISSUE===
+FILE: sdf4j/src/main/native/src/sdf_jni_asymmetric.c
+LINE: 366
+SEVERITY: medium
+TITLE: Code Duplication in RSA Public Key Conversion
+PROBLEM: The function `JNI_SDF_ExternalPublicKeyOperation_RSA` manually converts the Java RSA public key to the native `RSArefPublicKey` structure. This duplicates the logic already implemented in `java_to_native_RSAPublicKey` (declared in `type_conversion.h`), increasing maintenance burden and the risk of inconsistencies (e.g., if the helper function is updated to handle edge cases).
+CODE:
+```c
+    /* 转换公钥 */
+    RSArefPublicKey native_key;
+    memset(&native_key, 0, sizeof(RSArefPublicKey));
+
+    jclass key_class = (*env)->GetObjectClass(env, publicKey);
+    
+    /* 获取bits字段 */
+    jfieldID bits_fid = (*env)->GetFieldID(env, key_class, "bits", "I");
+    if (bits_fid == NULL) {
+        THROW_SDF_EXCEPTION(env, 0x01000001, "Cannot get bits field");
+        return NULL;
+    }
+    native_key.bits = (*env)->GetIntField(env, publicKey, bits_fid);
+
+    /* 获取m字段 */
+    jfieldID m_fid = (*env)->GetFieldID(env, key_class, "m", "[B");
+    if (m_fid != NULL) {
+        jbyteArray m_array = (jbyteArray)(*env)->GetObjectField(env, publicKey, m_fid);
+        if (m_array != NULL) {
+            jsize m_len = (*env)->GetArrayLength(env, m_array);
+            if (m_len > RSAref_MAX_LEN) m_len = RSAref_MAX_LEN;
+            (*env)->GetByteArrayRegion(env, m_array, 0, m_len, (jbyte*)native_key.m);
+        }
+    }
+
+    /* 获取e字段 */
+    jfieldID e_fid = (*env)->GetFieldID(env, key_class, "e", "[B");
+    if (e_fid != NULL) {
+        jbyteArray e_array = (jbyteArray)(*env)->GetObjectField(env, publicKey, e_fid);
+        if (e_array != NULL) {
+            jsize e_len = (*env)->GetArrayLength(env, e_array);
+            if (e_len > RSAref_MAX_LEN) e_len = RSAref_MAX_LEN;
+            (*env)->GetByteArrayRegion(env, e_array, 0, e_len, (jbyte*)native_key.e);
+        }
+    }
+```
+FIX:
+```c
+    /* 转换公钥 */
+    RSArefPublicKey native_key;
+    if (!java_to_native_RSAPublicKey(env, publicKey, &native_key)) {
+        THROW_SDF_EXCEPTION(env, 0x0100001D, "Failed to convert public key");
+        return NULL;
+    }
+```
+===END===
+
+===ISSUE===
+FILE: sdf4j/src/main/native/src/sdf_jni_util.c
+LINE: 46
+SEVERITY: low
+TITLE: Incorrect Error Message in JNI_SDF_GenerateKeyPair_RSA
+PROBLEM: The error message "Failed to compute hash" is used when `SDF_GenerateKeyPair_RSA` fails. This is misleading as the operation is key generation, not hashing.
+CODE:
+```c
+    if (ret != SDR_OK) {
+        THROW_SDF_EXCEPTION(env, ret, "Failed to compute hash");
+        return NULL;
+    }
+```
+FIX:
+```c
+    if (ret != SDR_OK) {
+        THROW_SDF_EXCEPTION(env, ret, "Failed to generate RSA key pair");
+        return NULL;
+    }
+```
+===END===
+
+===ISSUE===
+FILE: sdf4j/src/main/native/src/sdf_jni_util.c
+LINE: 97
+SEVERITY: low
+TITLE: Incorrect Error Message in JNI_SDF_GenerateKeyPair_ECC
+PROBLEM: The error message "Failed to compute hash" is used when `SDF_GenerateKeyPair_ECC` fails. This is misleading as the operation is key generation, not hashing.
+CODE:
+```c
+    if (ret != SDR_OK) {
+        THROW_SDF_EXCEPTION(env, ret, "Failed to compute hash");
+        return NULL;
+    }
+```
+FIX:
+```c
+    if (ret != SDR_OK) {
+        THROW_SDF_EXCEPTION(env, ret, "Failed to generate ECC key pair");
+        return NULL;
+    }
+```
+===END===
+
+===ISSUE===
+FILE: sdf4j/src/main/native/src/sdf_jni_util.c
+LINE: 170
+SEVERITY: low
+TITLE: Incorrect Error Message in JNI_SDF_ExternalPrivateKeyOperation_RSA
+PROBLEM: The error message "Failed to compute hash" is used when `SDF_ExternalPrivateKeyOperation_RSA` fails. This is misleading as the operation is RSA private key operation, not hashing.
+CODE:
+```c
+    if (ret != SDR_OK) {
+        free(output_buf);
+        THROW_SDF_EXCEPTION(env, ret, "Failed to compute hash");
+        return NULL;
+    }
+```
+FIX:
+```c
+    if (ret != SDR_OK) {
+        free(output_buf);
+        THROW_SDF_EXCEPTION(env, ret, "Failed to perform RSA private key operation");
+        return NULL;
+    }
+```
+===END===
+
+===ISSUE===
+FILE: sdf4j/src/main/native/src/sdf_jni_util.c
+LINE: 225
+SEVERITY: low
+TITLE: Incorrect Error Message in JNI_SDF_ExternalSign_ECC
+PROBLEM: The error message "Failed to compute hash" is used when `SDF_ExternalSign_ECC` fails. This is misleading as the operation is ECC signing, not hashing.
+CODE:
+```c
+    if (ret != SDR_OK) {
+        THROW_SDF_EXCEPTION(env, ret, "Failed to compute hash");
+        return NULL;
+    }
+```
+FIX:
+```c
+    if (ret != SDR_OK) {
+        THROW_SDF_EXCEPTION(env, ret, "Failed to sign with external private key");
+        return NULL;
+    }
+```
+===END===
+
+===ISSUE===
+FILE: sdf4j/src/main/native/src/sdf_jni_util.c
+LINE: 284
+SEVERITY: low
+TITLE: Incorrect Error Message in JNI_SDF_ExternalDecrypt_ECC
+PROBLEM: The error message "Failed to compute hash" is used when `SDF_ExternalDecrypt_ECC` fails. This is misleading as the operation is ECC decryption, not hashing.
+CODE:
+```c
+    if (ret != SDR_OK) {
+        free(ecc_cipher);
+        free(plaintext_buf);
+        THROW_SDF_EXCEPTION(env, ret, "Failed to compute hash");
+        return NULL;
+    }
+```
+FIX:
+```c
+    if (ret != SDR_OK) {
+        free(ecc_cipher);
+        free(plaintext_buf);
+        THROW_SDF_EXCEPTION(env, ret, "Failed to decrypt with external private key");
+        return NULL;
+    }
+```
+===END===
+
+===ISSUE===
+FILE: sdf4j/src/main/native/src/sdf_jni_util.c
+LINE: 375
+SEVERITY: low
+TITLE: Incorrect Error Message in JNI_SDF_ExternalKeyEncrypt
+PROBLEM: The error message "Failed to compute hash" is used when `SDF_ExternalKeyEncrypt` fails. This is misleading as the operation is symmetric encryption, not hashing.
+CODE:
+```c
+    if (ret != SDR_OK) {
+        free(enc_buf);
+        THROW_SDF_EXCEPTION(env, ret, "Failed to compute hash");
+        return NULL;
+    }
+```
+FIX:
+```c
+    if (ret != SDR_OK) {
+        free(enc_buf);
+        THROW_SDF_EXCEPTION(env, ret, "Failed to perform symmetric encryption");
+        return NULL;
+    }
+```
+===END===
+
+===ISSUE===
+FILE: sdf4j/src/main/native/src/sdf_jni_util.c
+LINE: 465
+SEVERITY: low
+TITLE: Incorrect Error Message in JNI_SDF_ExternalKeyDecrypt
+PROBLEM: The error message "Failed to compute hash" is used when `SDF_ExternalKeyDecrypt` fails. This is misleading as the operation is symmetric decryption, not hashing.
+CODE:
+```c
+    if (ret != SDR_OK) {
+        free(plaintext_buf);
+        THROW_SDF_EXCEPTION(env, ret, "Failed to compute hash");
+        return NULL;
+    }
+```
+FIX:
+```c
+    if (ret != SDR_OK) {
+        free(plaintext_buf);
+        THROW_SDF_EXCEPTION(env, ret, "Failed to perform symmetric decryption");
+        return NULL;
+    }
+```
+===END===
+
+===ISSUE===
+FILE: sdf4j/src/main/native/src/sdf_jni_util.c
+LINE: 524
+SEVERITY: low
+TITLE: Incorrect Error Message in JNI_SDF_ExternalKeyEncryptInit
+PROBLEM: The error message "Failed to compute hash" is used when `SDF_ExternalKeyEncryptInit` fails. This is misleading as the operation is symmetric encryption initialization, not hashing.
+CODE:
+```c
+    if (ret != SDR_OK) {
+        THROW_SDF_EXCEPTION(env, ret, "Failed to compute hash");
+    }
+```
+FIX:
+```c
+    if (ret != SDR_OK) {
+        THROW_SDF_EXCEPTION(env, ret, "Failed to initialize symmetric encryption");
+    }
+```
+===END===
+
+===ISSUE===
+FILE: sdf4j/src/main/native/src/sdf_jni_util.c
+LINE: 577
+SEVERITY: low
+TITLE: Incorrect Error Message in JNI_SDF_ExternalKeyDecryptInit
+PROBLEM: The error message "Failed to compute hash" is used when `SDF_ExternalKeyDecryptInit` fails. This is misleading as the operation is symmetric decryption initialization, not hashing.
+CODE:
+```c
+    if (ret != SDR_OK) {
+        THROW_SDF_EXCEPTION(env, ret, "Failed to compute hash");
+    }
+```
+FIX:
+```c
+    if (ret != SDR_OK) {
+        THROW_SDF_EXCEPTION(env, ret, "Failed to initialize symmetric decryption");
+    }
+```
+===END===
+
+===ISSUE===
+FILE: sdf4j/src/main/native/src/sdf_jni_util.c
+LINE: 612
+SEVERITY: low
+TITLE: Incorrect Error Message in JNI_SDF_ExternalKeyHMACInit
+PROBLEM: The error message "Failed to compute hash" is used when `SDF_ExternalKeyHMACInit` fails. While HMAC is related to hash, the message should be more specific to the initialization failure.
+CODE:
+```c
+    if (ret != SDR_OK) {
+        THROW_SDF_EXCEPTION(env, ret, "Failed to compute hash");
+    }
+```
+FIX:
+```c
+    if (ret != SDR_OK) {
+        THROW_SDF_EXCEPTION(env, ret, "Failed to initialize HMAC operation");
+    }
+```
+===END===

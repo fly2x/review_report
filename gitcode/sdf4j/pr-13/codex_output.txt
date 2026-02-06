@@ -1,0 +1,103 @@
+===ISSUE===
+FILE: sdf4j/src/main/native/include/type_conversion.h
+LINE: 37-41
+SEVERITY: critical
+TITLE: Variadic exception macro corrupts vararg ordering
+PROBLEM: `THROW_SDF_EXCEPTION` concatenates `__VA_ARGS__` into the format string but always appends fixed metadata arguments after it. Calls with formatted message args (for example `THROW_SDF_EXCEPTION(..., "%s", error)` in `sdf_jni_loader.c:46`) shift argument positions and produce undefined behavior in `vsnprintf`, which can crash the JVM on library-load failure paths.
+CODE:
+```c
+#define THROW_SDF_EXCEPTION(env, error_code, ...) \
+    throw_sdf_exception_with_format(env, error_code, \
+        "Function: %s, File: %s, Line: %d, ErrorNum: 0x%08X, Message: " __VA_ARGS__, \
+        __func__, strrchr(__FILE__, '/') ? strrchr(__FILE__, '/') + 1 : __FILE__, __LINE__, \
+        (unsigned int)(error_code))
+```
+FIX:
+```c
+#define THROW_SDF_EXCEPTION(env, error_code, msg_fmt, ...) \
+    throw_sdf_exception_with_format(env, error_code, \
+        "Function: %s, File: %s, Line: %d, ErrorNum: 0x%08X, Message: " msg_fmt, \
+        __func__, strrchr(__FILE__, '/') ? strrchr(__FILE__, '/') + 1 : __FILE__, __LINE__, \
+        (unsigned int)(error_code), ##__VA_ARGS__)
+```
+===END===
+
+===ISSUE===
+FILE: sdf4j/src/main/java/org/openhitls/sdf4j/SDF.java
+LINE: 1321-1404
+SEVERITY: high
+TITLE: Public logging API removed without compatibility shim
+PROBLEM: The PR removes `SDF.setLogger`, `SDF.getLogger`, `SDF.setFileLoggingEnabled`, and `SDF.setJavaLoggingEnabled` (and also deletes `SDFLogger` / `DefaultSDFLogger`). This is a source/binary breaking change for existing consumers and will fail upgrades without migration support.
+CODE:
+```java
+public static void setLogger(SDFLogger logger) { ... }
+public static SDFLogger getLogger() { ... }
+public static native void setFileLoggingEnabled(boolean enable);
+public static native void setJavaLoggingEnabled(boolean enable);
+```
+FIX:
+```java
+@Deprecated
+public static void setLogger(SDFLogger logger) {
+    // Compatibility no-op: native logger callback removed.
+}
+
+@Deprecated
+public static SDFLogger getLogger() {
+    return message -> { };
+}
+
+@Deprecated
+public static void setFileLoggingEnabled(boolean enable) {
+    // Compatibility no-op.
+}
+
+@Deprecated
+public static void setJavaLoggingEnabled(boolean enable) {
+    // Compatibility no-op.
+}
+```
+===END===
+
+===ISSUE===
+FILE: docs/API_GUIDE.md
+LINE: 841
+SEVERITY: low
+TITLE: Error field name does not match documented exception format
+PROBLEM: The field table says `Error`, but the documented/actual message key is `ErrorNum`. This inconsistency is misleading for users parsing exception text.
+CODE:
+```md
+| Error | 十六进制错误码 |
+```
+FIX:
+```md
+| ErrorNum | 十六进制错误码 |
+```
+===END===
+
+===ISSUE===
+FILE: examples/src/test/java/org/openhitls/sdf4j/examples/DeviceManagementTest.java
+LINE: 190-195
+SEVERITY: low
+TITLE: Negative-path test does not assert expected exception
+PROBLEM: The test calls `SDF_CloseSession(99999)` but never fails if no exception is thrown, so regressions in invalid-handle validation can pass silently.
+CODE:
+```java
+try {
+    sdf.SDF_CloseSession(99999);
+} catch (SDFException e) {
+    System.err.println("[通过]关闭会话失败: " + e.getErrorCodeHex());
+    System.err.println("[通过]关闭会话失败: " + e.getMessage());
+}
+```
+FIX:
+```java
+try {
+    sdf.SDF_CloseSession(99999);
+    fail("Expected SDFException for invalid session handle");
+} catch (SDFException e) {
+    System.err.println("[通过]关闭会话失败: " + e.getErrorCodeHex());
+    System.err.println("[通过]关闭会话失败: " + e.getMessage());
+}
+```
+===END===
