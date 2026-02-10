@@ -1,78 +1,54 @@
-# Code Review: openhitls/pqcp#33
+# Code Review: openHiTLS/pqcp#33
 **Reviewer**: CLAUDE
 
 
 ## High
 
-### Missing break statement in switch case leads to fallthrough
-`src/provider/pqcp_pkey.c:44-46`
+### PolarLAC Ctrl function uses undefined CRYPT_CTRL_* constants
+`src/polarlac/src/polarlac.c:263-291`
 ```
-case CRYPT_PKEY_COMPOSITE_SIGN:
-            pkeyCtx = CRYPT_COMPOSITE_NewCtx();
-        default:
-            break;
+int32_t PQCP_LAC2_Ctrl(CRYPT_POLAR_LAC_Ctx *ctx, int32_t cmd, void *val, uint32_t valLen)
+{
+    if (ctx == NULL || val == NULL) {
+        return PQCP_NULL_INPUT;
+    }
+    switch (cmd) {
+        case CRYPT_CTRL_SET_PARA_BY_ID:  // Was PQCP_POLAR_LAC_SET_PARAMS_BY_ID
+            return PolarLacSetAlgInfo(ctx, val, valLen);
+        case CRYPT_CTRL_GET_CIPHERTEXT_LEN:  // Was PQCP_POLAR_LAC_GET_CIPHER_LEN
+        ...
 ```
-**Issue**: In CRYPT_PQCP_PkeyMgmtNewCtx(), the case for CRYPT_PKEY_COMPOSITE_SIGN is missing a break statement. This causes a fallthrough to the default case, which doesn't set pkeyCtx, leaving it as NULL for the COMPOSITE_SIGN algorithm.
+**Issue**: The PQCP_LAC2_Ctrl function was changed to use CRYPT_CTRL_SET_PARA_BY_ID, CRYPT_CTRL_GET_CIPHERTEXT_LEN, CRYPT_CTRL_GET_PRVKEY_LEN, and CRYPT_CTRL_GET_PUBKEY_LEN instead of the PQCP_POLAR_LAC_* constants. However, these CRYPT_CTRL_* constants are not defined in the pqcp codebase and are expected to come from OpenHiTLS. If OpenHiTLS doesn't define these constants with the same values, this will cause compilation errors or runtime issues. The test/demo/polarlac_demo.c still uses PQCP_POLAR_LAC_SET_PARAMS_BY_ID which creates inconsistency.
 **Fix**:
 ```
-case CRYPT_PKEY_COMPOSITE_SIGN:
-            pkeyCtx = CRYPT_COMPOSITE_NewCtx();
-            break;
-        default:
-            break;
+Either:
+1. Keep using PQCP_POLAR_LAC_* constants defined in pqcp_types.h for internal consistency
+2. Or ensure CRYPT_CTRL_* constants are properly defined/included from OpenHiTLS with appropriate compatibility layer
+3. Update test/demo/polarlac_demo.c to use CRYPT_CTRL_* constants if that's the intended API
 ```
 
 ---
 
-### CRYPT_COMPOSITE_DupCtx does not check if ctx->info is NULL before dereferencing
-`src/composite_sign/src/crypt_composite_sign.c:116-143`
+### CMakeLists.txt references non-existent hybrid_env include directory
+`CMakeLists.txt:98`
 ```
-CRYPT_CompositeCtx *CRYPT_COMPOSITE_DupCtx(CRYPT_CompositeCtx *ctx)
-{
-    if (ctx == NULL) {
-        BSL_ERR_PUSH_ERROR(CRYPT_NULL_INPUT);
-        return NULL;
-    }
-    CRYPT_CompositeCtx *newCtx = CRYPT_COMPOSITE_NewCtx();
-    if (newCtx == NULL) {
-        BSL_ERR_PUSH_ERROR(CRYPT_MEM_ALLOC_FAIL);
-        return NULL;
-    }
-    newCtx->info = ctx->info;  // No NULL check on ctx->info
-    if (ctx->pqcMethod != NULL && ctx->tradMethod != NULL) {
+target_include_directories(pqcp_provider
+    PUBLIC
+        ${CMAKE_CURRENT_SOURCE_DIR}/include
+    PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/provider
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/scloudplus/include
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/classic_mceliece/include
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/frodokem/include
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/polarlac/include
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/hybrid_env/include    // <- Does not exist
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/composite_sign/include
 ```
-**Issue**: The function assigns ctx->info to newCtx->info without checking if ctx->info is NULL. If a context is duplicated before setting algorithm info, the duplicated context will have NULL info, leading to potential crashes when used.
+**Issue**: Line 98 adds `${CMAKE_CURRENT_SOURCE_DIR}/src/hybrid_env/include` to the include directories, but this directory does not exist in the repository. Based on commit messages like "移除hybrid_env相关代码" (Remove hybrid_env related code), the hybrid_env was removed but this CMakeLists.txt reference was not cleaned up. This will cause build failures.
 **Fix**:
 ```
-CRYPT_CompositeCtx *CRYPT_COMPOSITE_DupCtx(CRYPT_CompositeCtx *ctx)
-{
-    if (ctx == NULL) {
-        BSL_ERR_PUSH_ERROR(CRYPT_NULL_INPUT);
-        return NULL;
-    }
-    if (ctx->info == NULL) {
-        BSL_ERR_PUSH_ERROR(CRYPT_COMPOSITE_KEYINFO_NOT_SET);
-        return NULL;
-    }
-    CRYPT_CompositeCtx *newCtx = CRYPT_COMPOSITE_NewCtx();
-    if (newCtx == NULL) {
-        BSL_ERR_PUSH_ERROR(CRYPT_MEM_ALLOC_FAIL);
-        return NULL;
-    }
-    newCtx->info = ctx->info;
-```
-
----
-
-### Wrong memcpy size parameter in CompositeMsgEncode
-`src/composite_sign/src/crypt_composite_sign.c:506`
-```
-(void)memcpy_s(ptr, digestLen, digest, digestLen);
-```
-**Issue**: The last memcpy_s call uses digestLen as the size parameter instead of the actual destination buffer size. This is incorrect because memcpy_s expects the destination buffer size, not the source length.
-**Fix**:
-```
-(void)memcpy_s(ptr, msg->len - (prefixLen + labelLen + 1 + ctx->ctxLen), digest, digestLen);
+Remove the line:
+${CMAKE_CURRENT_SOURCE_DIR}/src/hybrid_env/include
 ```
 
 ---
@@ -80,141 +56,8 @@ CRYPT_CompositeCtx *CRYPT_COMPOSITE_DupCtx(CRYPT_CompositeCtx *ctx)
 
 ## Medium
 
-### Duplicate algorithm labels in g_composite_info array
-`src/composite_sign/src/crypt_composite_sign.c:50-59`
-```
-static const COMPOSITE_ALG_INFO g_composite_info[] = {
-    {CRYPT_COMPOSITE_MLDSA44_SM2, "COMPSIG-MLDSA44-SM2", CRYPT_PKEY_ML_DSA, CRYPT_MLDSA_TYPE_MLDSA_44,
-        CRYPT_PKEY_SM2, 0, CRYPT_MD_SM3, CRYPT_MD_SM3, 0, 1377, 64, 1312, 32, 2420,
-    },
-    {CRYPT_COMPOSITE_MLDSA65_SM2, "COMPSIG-MLDSA44-SM2", CRYPT_PKEY_ML_DSA, CRYPT_MLDSA_TYPE_MLDSA_65,
-        CRYPT_PKEY_SM2, 0, CRYPT_MD_SM3, CRYPT_MD_SM3, 0, 2017, 64, 1952, 32, 3309,
-    },
-    {CRYPT_COMPOSITE_MLDSA87_SM2, "COMPSIG-MLDSA44-SM2", CRYPT_PKEY_ML_DSA, CRYPT_MLDSA_TYPE_MLDSA_87,
-        CRYPT_PKEY_SM2, 0, CRYPT_MD_SM3, CRYPT_MD_SM3, 0, 2657, 64, 2592, 32, 4627,
-    }
-};
-```
-**Issue**: All three entries in g_composite_info have the same label "COMPSIG-MLDSA44-SM2". The labels should be unique and match their algorithm IDs (MLDSA65, MLDSA87).
-**Fix**:
-```
-static const COMPOSITE_ALG_INFO g_composite_info[] = {
-    {CRYPT_COMPOSITE_MLDSA44_SM2, "COMPSIG-MLDSA44-SM2", CRYPT_PKEY_ML_DSA, CRYPT_MLDSA_TYPE_MLDSA_44,
-        CRYPT_PKEY_SM2, 0, CRYPT_MD_SM3, CRYPT_MD_SM3, 0, 1377, 64, 1312, 32, 2420,
-    },
-    {CRYPT_COMPOSITE_MLDSA65_SM2, "COMPSIG-MLDSA65-SM2", CRYPT_PKEY_ML_DSA, CRYPT_MLDSA_TYPE_MLDSA_65,
-        CRYPT_PKEY_SM2, 0, CRYPT_MD_SM3, CRYPT_MD_SM3, 0, 2017, 64, 1952, 32, 3309,
-    },
-    {CRYPT_COMPOSITE_MLDSA87_SM2, "COMPSIG-MLDSA87-SM2", CRYPT_PKEY_ML_DSA, CRYPT_MLDSA_TYPE_MLDSA_87,
-        CRYPT_PKEY_SM2, 0, CRYPT_MD_SM3, CRYPT_MD_SM3, 0, 2657, 64, 2592, 32, 4627,
-    }
-};
-```
-
----
-
-### GetConstParamValue return value ignored in CRYPT_COMPOSITE_SetPrvKeyEx
-`src/composite_sign/src/crypt_composite_sign.c:446`
-```
-CRYPT_CompositePrv prv = {0};
-    (void)GetConstParamValue(para, CRYPT_PARAM_COMPOSITE_PRVKEY, &prv.data, &prv.len);
-    return CRYPT_COMPOSITE_SetPrvKey(ctx, &prv);
-```
-**Issue**: The return value of GetConstParamValue is cast to void and ignored. If the parameter is not found, prv.data and prv.len remain uninitialized (zero), which will cause CRYPT_COMPOSITE_SetPrvKey to fail with a misleading error.
-**Fix**:
-```
-CRYPT_CompositePrv prv = {0};
-    if (GetConstParamValue(para, CRYPT_PARAM_COMPOSITE_PRVKEY, &prv.data, &prv.len) == NULL) {
-        BSL_ERR_PUSH_ERROR(CRYPT_INVALID_ARG);
-        return CRYPT_INVALID_ARG;
-    }
-    return CRYPT_COMPOSITE_SetPrvKey(ctx, &prv);
-```
-
----
-
-### GetConstParamValue return value ignored in CRYPT_COMPOSITE_SetPubKeyEx
-`src/composite_sign/src/crypt_composite_sign.c:457`
-```
-CRYPT_CompositePub pub = {0};
-    (void)GetConstParamValue(para, CRYPT_PARAM_COMPOSITE_PUBKEY, &pub.data, &pub.len);
-    return CRYPT_COMPOSITE_SetPubKey(ctx, &pub);
-```
-**Issue**: Same issue as SetPrvKeyEx - the return value is ignored, leading to potential uninitialized data being passed to SetPubKey.
-**Fix**:
-```
-CRYPT_CompositePub pub = {0};
-    if (GetConstParamValue(para, CRYPT_PARAM_COMPOSITE_PUBKEY, &pub.data, &pub.len) == NULL) {
-        BSL_ERR_PUSH_ERROR(CRYPT_INVALID_ARG);
-        return CRYPT_INVALID_ARG;
-    }
-    return CRYPT_COMPOSITE_SetPubKey(ctx, &pub);
-```
-
----
-
-### GetParamValue return value not checked in Ex functions
-`src/composite_sign/src/crypt_composite_sign.c:414`
-```
-BSL_Param *paramPrv = GetParamValue(para, CRYPT_PARAM_COMPOSITE_PRVKEY, &prv.data, &(prv.len));
-    int32_t ret = CRYPT_COMPOSITE_GetPrvKey(ctx, &prv);
-```
-**Issue**: In GetPrvKeyEx and GetPubKeyEx, the return value of GetParamValue is not checked. If the parameter is not found, the behavior is undefined.
-**Fix**:
-```
-BSL_Param *paramPrv = GetParamValue(para, CRYPT_PARAM_COMPOSITE_PRVKEY, &prv.data, &(prv.len));
-    if (paramPrv == NULL) {
-        BSL_ERR_PUSH_ERROR(CRYPT_INVALID_ARG);
-        return CRYPT_INVALID_ARG;
-    }
-    int32_t ret = CRYPT_COMPOSITE_GetPrvKey(ctx, &prv);
-```
-
----
-
-### Duplicate const qualifier is non-standard
-`src/provider/pqcp_pkey.c:145`
-```
-const const CRYPT_EAL_Func g_pqcpKeyMgmtCompositeSign[] = {
-```
-**Issue**: The declaration uses "const const" which is not valid C. The extra const qualifier should be removed.
-**Fix**:
-```
-const CRYPT_EAL_Func g_pqcpKeyMgmtCompositeSign[] = {
-```
-
----
-
-
-## Low
-
-### Missing null check after malloc before use
-`src/composite_sign/src/crypt_composite_sign_encdec.c:44-47`
-```
-uint8_t *prv = (uint8_t *)BSL_SAL_Malloc(prvLen);
-    RETURN_RET_IF(prv == NULL, CRYPT_MEM_ALLOC_FAIL);
-    GOTO_ERR_IF(ctx->pqcMethod->ctrl(ctx->pqcCtx, CRYPT_CTRL_GET_MLDSA_SEED, prv, prvLen), ret);
-    encode->data = prv;
-    encode->dataLen = prvLen;
-```
-**Issue**: In CRYPT_CompositeGetMldsaPrvKey, the return value of the ctrl call is not checked before using the result in encode->dataLen. If the ctrl call fails, the allocated memory leaks.
-**Fix**:
-```
-uint8_t *prv = (uint8_t *)BSL_SAL_Malloc(prvLen);
-    RETURN_RET_IF(prv == NULL, CRYPT_MEM_ALLOC_FAIL);
-    ret = ctx->pqcMethod->ctrl(ctx->pqcCtx, CRYPT_CTRL_GET_MLDSA_SEED, prv, prvLen);
-    if (ret != CRYPT_SUCCESS) {
-        BSL_SAL_Free(prv);
-        return ret;
-    }
-    encode->data = prv;
-    encode->dataLen = prvLen;
-```
-
----
-
-### CRYPT_COMPOSITE_GetPrvKeyEx does not validate ctx or ctx->info
-`src/composite_sign/src/crypt_composite_sign.c:407-421`
+### GetPrvKeyEx doesn't validate GetParamValue return value
+`src/composite_sign/src/crypt_composite_sign.c:379-393`
 ```
 int32_t CRYPT_COMPOSITE_GetPrvKeyEx(const CRYPT_CompositeCtx *ctx, BSL_Param *para)
 {
@@ -223,42 +66,246 @@ int32_t CRYPT_COMPOSITE_GetPrvKeyEx(const CRYPT_CompositeCtx *ctx, BSL_Param *pa
         return CRYPT_NULL_INPUT;
     }
     CRYPT_CompositePrv prv = {0};
-    BSL_Param *paramPrv = GetParamValue(para, CRYPT_PARAM_COMPOSITE_PRVKEY, &prv.data, &(prv.len));
+    BSL_Param *paramPrv = GetParamValue(para, PQCP_PARAM_COMPOSITE_PRVKEY, &prv.data, &(prv.len));
     int32_t ret = CRYPT_COMPOSITE_GetPrvKey(ctx, &prv);
+    if (ret != CRYPT_SUCCESS) {
+        return ret;
+    }
+    paramPrv->useLen = prv.len;  // paramPrv could be NULL
+    return CRYPT_SUCCESS;
+}
 ```
-**Issue**: The function only checks if para is NULL but doesn't validate ctx or ctx->info before calling CRYPT_COMPOSITE_GetPrvKey. This means error messages may be misleading.
+**Issue**: The CRYPT_COMPOSITE_GetPrvKeyEx function calls GetParamValue but doesn't check if it returns NULL before using paramPrv. If GetParamValue fails or the parameter isn't found, paramPrv will be NULL and the subsequent assignment to paramPrv->useLen will cause a NULL pointer dereference.
 **Fix**:
 ```
 int32_t CRYPT_COMPOSITE_GetPrvKeyEx(const CRYPT_CompositeCtx *ctx, BSL_Param *para)
 {
-    if (para == NULL || ctx == NULL) {
+    if (para == NULL) {
         BSL_ERR_PUSH_ERROR(CRYPT_NULL_INPUT);
         return CRYPT_NULL_INPUT;
     }
     CRYPT_CompositePrv prv = {0};
-    BSL_Param *paramPrv = GetParamValue(para, CRYPT_PARAM_COMPOSITE_PRVKEY, &prv.data, &(prv.len));
+    BSL_Param *paramPrv = GetParamValue(para, PQCP_PARAM_COMPOSITE_PRVKEY, &prv.data, &(prv.len));
+    if (paramPrv == NULL) {
+        BSL_ERR_PUSH_ERROR(CRYPT_INVALID_ARG);
+        return CRYPT_INVALID_ARG;
+    }
     int32_t ret = CRYPT_COMPOSITE_GetPrvKey(ctx, &prv);
+    if (ret != CRYPT_SUCCESS) {
+        return ret;
+    }
+    paramPrv->useLen = prv.len;
+    return CRYPT_SUCCESS;
+}
 ```
 
 ---
 
-### Missing NULL checks for pqcMethod and tradMethod before calling ctrl
-`src/composite_sign/src/crypt_composite_sign.c:278-279`
+### GetPubKeyEx doesn't validate GetParamValue return value
+`src/composite_sign/src/crypt_composite_sign.c:395-409`
 ```
-case CRYPT_CTRL_HYBRID_GET_PQC_PUBKEY_LEN:
-            CHECK_UINT32_LEN_AND_INFO(ctx, len);
-            return ctx->pqcMethod->ctrl(ctx->pqcCtx, CRYPT_CTRL_GET_PUBKEY_LEN, val, len);
+int32_t CRYPT_COMPOSITE_GetPubKeyEx(const CRYPT_CompositeCtx *ctx, BSL_Param *para)
+{
+    if (para == NULL) {
+        BSL_ERR_PUSH_ERROR(CRYPT_NULL_INPUT);
+        return CRYPT_NULL_INPUT;
+    }
+    CRYPT_CompositePub pub = {0};
+    BSL_Param *paramPub = GetParamValue(para, PQCP_PARAM_COMPOSITE_PUBKEY, &pub.data, &(pub.len));
+    int32_t ret = CRYPT_COMPOSITE_GetPubKey(ctx, &pub);
+    if (ret != CRYPT_SUCCESS) {
+        return ret;
+    }
+    paramPub->useLen = pub.len;  // paramPub could be NULL
+    return CRYPT_SUCCESS;
+}
 ```
-**Issue**: In CRYPT_COMPOSITE_Ctrl, the cases for CRYPT_CTRL_HYBRID_GET_* call ctrl on pqcMethod/tradMethod without checking if the method pointers are NULL first.
+**Issue**: The CRYPT_COMPOSITE_GetPubKeyEx function has the same issue as GetPrvKeyEx - it doesn't check if GetParamValue returns NULL before using paramPub.
 **Fix**:
 ```
-case CRYPT_CTRL_HYBRID_GET_PQC_PUBKEY_LEN:
-            CHECK_UINT32_LEN_AND_INFO(ctx, len);
-            if (ctx->pqcMethod == NULL || ctx->pqcCtx == NULL) {
-                BSL_ERR_PUSH_ERROR(CRYPT_COMPOSITE_KEYINFO_NOT_SET);
-                return CRYPT_COMPOSITE_KEYINFO_NOT_SET;
-            }
-            return ctx->pqcMethod->ctrl(ctx->pqcCtx, CRYPT_CTRL_GET_PUBKEY_LEN, val, len);
+int32_t CRYPT_COMPOSITE_GetPubKeyEx(const CRYPT_CompositeCtx *ctx, BSL_Param *para)
+{
+    if (para == NULL) {
+        BSL_ERR_PUSH_ERROR(CRYPT_NULL_INPUT);
+        return CRYPT_NULL_INPUT;
+    }
+    CRYPT_CompositePub pub = {0};
+    BSL_Param *paramPub = GetParamValue(para, PQCP_PARAM_COMPOSITE_PUBKEY, &pub.data, &(pub.len));
+    if (paramPub == NULL) {
+        BSL_ERR_PUSH_ERROR(CRYPT_INVALID_ARG);
+        return CRYPT_INVALID_ARG;
+    }
+    int32_t ret = CRYPT_COMPOSITE_GetPubKey(ctx, &pub);
+    if (ret != CRYPT_SUCCESS) {
+        return ret;
+    }
+    paramPub->useLen = pub.len;
+    return CRYPT_SUCCESS;
+}
+```
+
+---
+
+### SetPrvKeyEx doesn't validate GetConstParamValue return value
+`src/composite_sign/src/crypt_composite_sign.c:411-420`
+```
+int32_t CRYPT_COMPOSITE_SetPrvKeyEx(CRYPT_CompositeCtx *ctx, const BSL_Param *para)
+{
+    if (para == NULL) {
+        BSL_ERR_PUSH_ERROR(CRYPT_NULL_INPUT);
+        return CRYPT_NULL_INPUT;
+    }
+    CRYPT_CompositePrv prv = {0};
+    (void)GetConstParamValue(para, PQCP_PARAM_COMPOSITE_PRVKEY, &prv.data, &prv.len);
+    return CRYPT_COMPOSITE_SetPrvKey(ctx, &prv);
+}
+```
+**Issue**: The CRYPT_COMPOSITE_SetPrvKeyEx function calls GetConstParamValue but doesn't validate its return before using the result. If the parameter isn't found, prv.data and prv.len will remain uninitialized (zero), which could lead to incorrect behavior.
+**Fix**:
+```
+int32_t CRYPT_COMPOSITE_SetPrvKeyEx(CRYPT_CompositeCtx *ctx, const BSL_Param *para)
+{
+    if (para == NULL) {
+        BSL_ERR_PUSH_ERROR(CRYPT_NULL_INPUT);
+        return CRYPT_NULL_INPUT;
+    }
+    CRYPT_CompositePrv prv = {0};
+    int32_t ret = GetConstParamValue(para, PQCP_PARAM_COMPOSITE_PRVKEY, &prv.data, &prv.len);
+    if (ret != CRYPT_SUCCESS) {
+        BSL_ERR_PUSH_ERROR(CRYPT_INVALID_ARG);
+        return CRYPT_INVALID_ARG;
+    }
+    return CRYPT_COMPOSITE_SetPrvKey(ctx, &prv);
+}
+```
+
+---
+
+### SetPubKeyEx doesn't validate GetConstParamValue return value
+`src/composite_sign/src/crypt_composite_sign.c:422-431`
+```
+int32_t CRYPT_COMPOSITE_SetPubKeyEx(CRYPT_CompositeCtx *ctx, const BSL_Param *para)
+{
+    if (para == NULL) {
+        BSL_ERR_PUSH_ERROR(CRYPT_NULL_INPUT);
+        return CRYPT_NULL_INPUT;
+    }
+    CRYPT_CompositePub pub = {0};
+    (void)GetConstParamValue(para, PQCP_PARAM_COMPOSITE_PUBKEY, &pub.data, &pub.len);
+    return CRYPT_COMPOSITE_SetPubKey(ctx, &pub);
+}
+```
+**Issue**: The CRYPT_COMPOSITE_SetPubKeyEx function has the same issue - it doesn't validate GetConstParamValue return before using the result.
+**Fix**:
+```
+int32_t CRYPT_COMPOSITE_SetPubKeyEx(CRYPT_CompositeCtx *ctx, const BSL_Param *para)
+{
+    if (para == NULL) {
+        BSL_ERR_PUSH_ERROR(CRYPT_NULL_INPUT);
+        return CRYPT_NULL_INPUT;
+    }
+    CRYPT_CompositePub pub = {0};
+    int32_t ret = GetConstParamValue(para, PQCP_PARAM_COMPOSITE_PUBKEY, &pub.data, &pub.len);
+    if (ret != CRYPT_SUCCESS) {
+        BSL_ERR_PUSH_ERROR(CRYPT_INVALID_ARG);
+        return CRYPT_INVALID_ARG;
+    }
+    return CRYPT_COMPOSITE_SetPubKey(ctx, &pub);
+}
+```
+
+---
+
+
+## Low
+
+### CompositeMsgEncode has potential buffer overflow on memcpy_s
+`src/composite_sign/src/crypt_composite_sign.c:452-477`
+```
+(void)memcpy_s(ptr, msg->len - (prefixLen + labelLen + 1), ctx->ctxInfo, ctx->ctxLen);
+    ptr += ctx->ctxLen;
+    }
+    (void)memcpy_s(ptr, digestLen, digest, digestLen);  // Should use remaining buffer size
+```
+**Issue**: In CompositeMsgEncode, the third memcpy_s uses digestLen as the size parameter instead of the actual destination buffer size. The destination buffer size should be `msg->len - (prefixLen + labelLen + 1 + ctx->ctxLen)` not `digestLen`. While this happens to work because digestLen equals the remaining space, it's fragile and could break if the logic changes.
+**Fix**:
+```
+(void)memcpy_s(ptr, msg->len - (prefixLen + labelLen + 1 + ctx->ctxLen), ctx->ctxInfo, ctx->ctxLen);
+    ptr += ctx->ctxLen;
+    }
+    (void)memcpy_s(ptr, msg->len - (prefixLen + labelLen + 1 + ctx->ctxLen), digest, digestLen);
+```
+
+---
+
+### Missing newline at end of file
+`src/provider/pqcp_pkey.c:163`
+```
+const CRYPT_EAL_Func g_pqcpCompositeSign[] = {
+    {CRYPT_EAL_IMPLPKEYSIGN_SIGN, (CRYPT_EAL_ImplPkeySign)CRYPT_COMPOSITE_Sign},
+    {CRYPT_EAL_IMPLPKEYSIGN_VERIFY, (CRYPT_EAL_ImplPkeyVerify)CRYPT_COMPOSITE_Verify},
+    CRYPT_EAL_FUNC_END,
+};  // <- No newline at end of file
+```
+**Issue**: The pqcp_pkey.c file is missing a trailing newline. This is a minor issue but can cause warnings with some compilers and doesn't follow standard Unix text file conventions.
+**Fix**:
+```
+Add a newline character at the end of the file.
+```
+
+---
+
+### Missing newline at end of file
+`src/composite_sign/include/crypt_composite_sign.h:59`
+```
+#endif// CRYPT_COMPOSITE_H  // <- No newline at end of file
+```
+**Issue**: The crypt_composite_sign.h file is missing a trailing newline.
+**Fix**:
+```
+Add a newline character at the end of the file.
+```
+
+---
+
+### Extra blank line in enum definition
+`include/pqcp_types.h:99-100`
+```
+PQCP_ALG_ID_MCELIECE_8192128_F,
+    PQCP_ALG_ID_MCELIECE_8192128_PC,
+    PQCP_ALG_ID_MCELIECE_8192128_PCF
+
+    
+} PQCP_MCELIECE_ALG_ID;
+```
+**Issue**: There's an extra blank line in the PQCP_MCELIECE_ALG_ID enum definition which is inconsistent with the coding style.
+**Fix**:
+```
+PQCP_ALG_ID_MCELIECE_8192128_F,
+    PQCP_ALG_ID_MCELIECE_8192128_PC,
+    PQCP_ALG_ID_MCELIECE_8192128_PCF
+} PQCP_MCELIECE_ALG_ID;
+```
+
+---
+
+### clean-all custom target has dangerous recursive delete
+`CMakeLists.txt:163-168`
+```
+add_custom_target(clean-all
+    COMMAND ${CMAKE_COMMAND} --build ${CMAKE_BINARY_DIR} --target clean
+    COMMAND ${CMAKE_COMMAND} -E remove_directory ${CMAKE_BINARY_DIR}  # <- Removes entire build dir
+    COMMAND ${CMAKE_COMMAND} -E remove
+        *.log
+        *.tmp
+        *.bak
+    COMMENT "Cleaning all build artifacts and temporary files"
+)
+```
+**Issue**: The clean-all custom target uses `CMAKE_COMMAND -E remove_directory ${CMAKE_BINARY_DIR}` which removes the entire build directory. This could be dangerous if run accidentally and could remove important build artifacts that the user wants to keep.
+**Fix**:
+```
+Either remove the remove_directory line or add a warning comment about the destructive nature of this target.
 ```
 
 ---

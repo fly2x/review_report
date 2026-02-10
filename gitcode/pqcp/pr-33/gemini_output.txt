@@ -1,114 +1,48 @@
-I will start by verifying the repository state and the specific changes introduced in PR #33 by running the `git diff --stat` command as requested.
-I will examine the API changes by reading the diffs for `include/pqcp_types.h` and `include/pqcp_provider.h`.
-I will now read the diffs for the composite signature implementation files, specifically `src/composite_sign/src/crypt_composite_sign.c` and `src/composite_sign/include/crypt_composite_sign.h`, to check for memory management, error handling, input validation, and correct hybrid key usage.
-I'll now examine `src/composite_sign/src/crypt_composite_sign_local.h` to confirm the value of `COMPOSITE_MAX_CTX_BYTES` and `src/composite_sign/src/crypt_composite_sign_encdec.c` to review the key encoding and decoding functions like `CRYPT_CompositeGetPqcPrvKey`.
-I'll now examine `src/provider/pqcp_provider.c` to understand how the new algorithm is registered, and `src/provider/pqcp_pkey.c` to see how the renaming and expansion to general Public Key operations are implemented.
-I will now review the changes in the `classic_mceliece` directory, specifically `src/classic_mceliece/include/internal/mceliece_params.h`, `src/classic_mceliece/src/mceliece_params.c`, and `src/classic_mceliece/src/mceliece_api.c`.
-I will now review the new test files `test/sdv/sign/composite_sign_test.c` and `test/demo/composite_sign_demo.c` to understand how the code is being tested and exercised.
-I will now examine the `CMakeLists.txt` file to check for any changes, while also noting the typo in `src/composite_sign/src/crypt_composite_sign_local.h` and the buffer size issue in `test/demo/composite_sign_demo.c` for later reporting.
-I will list the contents of the `src` directory to verify the existence of `hybrid_env`.
-I will verify the line numbers for `memcpy_s` calls in `src/composite_sign/src/crypt_composite_sign.c` and check the `CMakeLists.txt` include lines using `grep -n` to accurately report the identified issues.
+I will start by checking the diff statistics to understand the scope of the changes between the specified commits.
+I will examine the diffs for the core API and provider implementation files to understand the architectural changes and error handling updates.
+I'll proceed to review the implementation of the Composite Sign feature by examining the relevant header and source files.
+I will now review the parameter handling and API changes across the `mceliece`, `frodokem`, `polarlac`, and `scloudplus` implementations to verify consistency and identify any potential regressions or ignored parameters, specifically checking `mceliece_params.c` and related files.
+I will now examine the composite sign test files and the demo file to verify if the tests adequately cover potential issues such as invalid lengths and to understand how the composite sign functionality is being utilized.
+I have gathered all the necessary information and identified several critical and medium severity issues, including potential crashes, secure coding violations, incomplete validations, commented-out error handling, and breaking API changes. I will now proceed to generate the issue blocks as per the specified format.
+
 ===ISSUE===
-FILE: CMakeLists.txt
-LINE: 98
+FILE: src/composite_sign/src/crypt_composite_sign.c
+LINE: 228
 SEVERITY: high
-TITLE: Inclusion of non-existent directory
-PROBLEM: The build configuration includes `${CMAKE_CURRENT_SOURCE_DIR}/src/hybrid_env/include`, but this directory does not exist in the source tree. This causes build errors or warnings.
+TITLE: Missing NULL Check for Input Parameter
+PROBLEM: The function `CRYPT_CompositeSetctxInfo` does not check if `val` is NULL before passing it to `BSL_SAL_Dump` (which presumably copies from it). If `len > 0` but `val` is NULL, this will likely cause a segmentation fault.
 CODE:
-```cmake
-target_include_directories(pqcp_provider
-        ${CMAKE_CURRENT_SOURCE_DIR}/src/classic_mceliece/include
-        ${CMAKE_CURRENT_SOURCE_DIR}/src/frodokem/include
-        ${CMAKE_CURRENT_SOURCE_DIR}/src/polarlac/include
-        ${CMAKE_CURRENT_SOURCE_DIR}/src/hybrid_env/include
-        ${CMAKE_CURRENT_SOURCE_DIR}/src/composite_sign/include
-        ${OPENHITLS_INCLUDE_DIRS}
+```c
+static int32_t CRYPT_CompositeSetctxInfo(CRYPT_CompositeCtx *ctx, void *val, uint32_t len)
+{
+    if (len > COMPOSITE_MAX_CTX_BYTES) {
+        BSL_ERR_PUSH_ERROR(PQCP_COMPOSITE_KEYLEN_ERROR);
+        return PQCP_COMPOSITE_KEYLEN_ERROR;
+    }
+    if (ctx->ctxInfo != NULL) {
 ```
 FIX:
-```cmake
-target_include_directories(pqcp_provider
-        ${CMAKE_CURRENT_SOURCE_DIR}/src/classic_mceliece/include
-        ${CMAKE_CURRENT_SOURCE_DIR}/src/frodokem/include
-        ${CMAKE_CURRENT_SOURCE_DIR}/src/polarlac/include
-        ${CMAKE_CURRENT_SOURCE_DIR}/src/composite_sign/include
-        ${OPENHITLS_INCLUDE_DIRS}
+```c
+static int32_t CRYPT_CompositeSetctxInfo(CRYPT_CompositeCtx *ctx, void *val, uint32_t len)
+{
+    if (len > COMPOSITE_MAX_CTX_BYTES) {
+        BSL_ERR_PUSH_ERROR(PQCP_COMPOSITE_KEYLEN_ERROR);
+        return PQCP_COMPOSITE_KEYLEN_ERROR;
+    }
+    if (val == NULL && len > 0) {
+        BSL_ERR_PUSH_ERROR(CRYPT_NULL_INPUT);
+        return CRYPT_NULL_INPUT;
+    }
+    if (ctx->ctxInfo != NULL) {
 ```
 ===END===
 
 ===ISSUE===
-FILE: test/CMakeLists.txt
-LINE: 92-93
+FILE: src/composite_sign/src/crypt_composite_sign.c
+LINE: 541-546
 SEVERITY: high
-TITLE: Inclusion of non-existent directory
-PROBLEM: The test build configuration includes `hybrid_env` directories that do not exist.
-CODE:
-```cmake
-    ${CMAKE_SOURCE_DIR}/../platform/openhitls/platform/Secure_C/include
-    ${CMAKE_SOURCE_DIR}/../src/hybrid_env/include
-    ${CMAKE_SOURCE_DIR}/../src/hybrid_env/src
-    ${CMAKE_SOURCE_DIR}/../src/composite_sign/include
-```
-FIX:
-```cmake
-    ${CMAKE_SOURCE_DIR}/../platform/openhitls/platform/Secure_C/include
-    ${CMAKE_SOURCE_DIR}/../src/composite_sign/include
-```
-===END===
-
-===ISSUE===
-FILE: src/composite_sign/src/crypt_composite_sign.c
-LINE: 320-321
-SEVERITY: medium
-TITLE: Ignored return value of secure memory copy
-PROBLEM: The return values of `memcpy_s` are explicitly cast to `void`. Ignoring the error code hides potential failures (e.g. invalid arguments) and violates secure coding standards.
-CODE:
-```c
-    (void)memcpy_s(prv->data, prv->len, pqcPrv.data, pqcPrv.dataLen);
-    (void)memcpy_s(prv->data + pqcPrv.dataLen, prv->len - pqcPrv.dataLen, tradPrv.data, tradPrv.dataLen);
-```
-FIX:
-```c
-    if (memcpy_s(prv->data, prv->len, pqcPrv.data, pqcPrv.dataLen) != EOK) {
-        ret = CRYPT_MEM_ALLOC_FAIL; // Or appropriate error code
-        goto ERR;
-    }
-    if (memcpy_s(prv->data + pqcPrv.dataLen, prv->len - pqcPrv.dataLen, tradPrv.data, tradPrv.dataLen) != EOK) {
-        ret = CRYPT_MEM_ALLOC_FAIL;
-        goto ERR;
-    }
-```
-===END===
-
-===ISSUE===
-FILE: src/composite_sign/src/crypt_composite_sign.c
-LINE: 343-344
-SEVERITY: medium
-TITLE: Ignored return value of secure memory copy
-PROBLEM: The return values of `memcpy_s` are explicitly cast to `void`.
-CODE:
-```c
-    (void)memcpy_s(pub->data, pub->len, pqcPub.data, pqcPub.dataLen);
-    (void)memcpy_s(pub->data + pqcPub.dataLen, pub->len - pqcPub.dataLen, tradPub.data, tradPub.dataLen);
-```
-FIX:
-```c
-    if (memcpy_s(pub->data, pub->len, pqcPub.data, pqcPub.dataLen) != EOK) {
-        ret = CRYPT_MEM_ALLOC_FAIL;
-        goto ERR;
-    }
-    if (memcpy_s(pub->data + pqcPub.dataLen, pub->len - pqcPub.dataLen, tradPub.data, tradPub.dataLen) != EOK) {
-        ret = CRYPT_MEM_ALLOC_FAIL;
-        goto ERR;
-    }
-```
-===END===
-
-===ISSUE===
-FILE: src/composite_sign/src/crypt_composite_sign.c
-LINE: 466-476
-SEVERITY: medium
-TITLE: Ignored return value of secure memory copy
-PROBLEM: Multiple `memcpy_s` calls in `CompositeMsgEncode` ignore the return value.
+TITLE: Ignored Return Value of Secure Memory Copy
+PROBLEM: The return value of `memcpy_s` is explicitly ignored (`(void)memcpy_s(...)`) in `CompositeMsgEncode`. If `memcpy_s` fails (e.g., due to invalid overlap or size parameters), the destination buffer `msg->data` will contain uninitialized or partial data. The function then returns `CRYPT_SUCCESS`, causing the caller to sign/verify this invalid data.
 CODE:
 ```c
     (void)memcpy_s(ptr, msg->len, PREFIX, prefixLen);
@@ -121,68 +55,113 @@ CODE:
         (void)memcpy_s(ptr, msg->len - (prefixLen + labelLen + 1), ctx->ctxInfo, ctx->ctxLen);
         ptr += ctx->ctxLen;
     }
-    (void)memcpy_s(ptr, digestLen, digest, digestLen);
 ```
 FIX:
 ```c
-    if (memcpy_s(ptr, msg->len, PREFIX, prefixLen) != EOK) return CRYPT_MEM_ALLOC_FAIL;
+    if (memcpy_s(ptr, msg->len, PREFIX, prefixLen) != EOK) {
+        BSL_SAL_FREE(msg->data);
+        return CRYPT_MEM_CPY_FAIL;
+    }
     ptr += prefixLen;
-    if (memcpy_s(ptr, msg->len - prefixLen, label, labelLen) != EOK) return CRYPT_MEM_ALLOC_FAIL;
+    if (memcpy_s(ptr, msg->len - prefixLen, label, labelLen) != EOK) {
+        BSL_SAL_FREE(msg->data);
+        return CRYPT_MEM_CPY_FAIL;
+    }
     ptr += labelLen;
     *ptr = ctx->ctxLen;
     ptr++;
     if (ctx->ctxInfo != NULL && ctx->ctxLen > 0) {
-        if (memcpy_s(ptr, msg->len - (prefixLen + labelLen + 1), ctx->ctxInfo, ctx->ctxLen) != EOK) return CRYPT_MEM_ALLOC_FAIL;
+        if (memcpy_s(ptr, msg->len - (prefixLen + labelLen + 1), ctx->ctxInfo, ctx->ctxLen) != EOK) {
+            BSL_SAL_FREE(msg->data);
+            return CRYPT_MEM_CPY_FAIL;
+        }
         ptr += ctx->ctxLen;
     }
-    if (memcpy_s(ptr, digestLen, digest, digestLen) != EOK) return CRYPT_MEM_ALLOC_FAIL;
 ```
 ===END===
 
 ===ISSUE===
 FILE: src/composite_sign/src/crypt_composite_sign.c
-LINE: 211
-SEVERITY: low
-TITLE: Function naming inconsistency
-PROBLEM: `CRYPT_CompositeSetctxInfo` uses lowercase `ctx` in the name, inconsistent with `CRYPT_CompositeSetAlgInfo` and standard CamelCase convention.
-CODE:
-```c
-static int32_t CRYPT_CompositeSetctxInfo(CRYPT_CompositeCtx *ctx, void *val, uint32_t len)
-```
-FIX:
-```c
-static int32_t CRYPT_CompositeSetCtxInfo(CRYPT_CompositeCtx *ctx, void *val, uint32_t len)
-```
-===END===
-
-===ISSUE===
-FILE: src/composite_sign/src/crypt_composite_sign_local.h
-LINE: 43
-SEVERITY: low
-TITLE: Typo in comment
-PROBLEM: `composiet` is misspelled.
-CODE:
-```c
-    uint32_t compPrvKeyLen; // composiet prvkey len
-```
-FIX:
-```c
-    uint32_t compPrvKeyLen; // composite prvkey len
-```
-===END===
-
-===ISSUE===
-FILE: test/demo/composite_sign_demo.c
-LINE: 27
+LINE: 366
 SEVERITY: medium
-TITLE: Insufficient buffer size for MLDSA-87 signatures
-PROBLEM: `signData` buffer is 4096 bytes. MLDSA-87 composite signatures require > 4600 bytes. If the algorithm is changed to MLDSA-87, this buffer will overflow.
+TITLE: Incomplete Public Key Length Validation
+PROBLEM: `CRYPT_COMPOSITE_SetPubKey` checks if `pub->len` is greater than `pqcPubkeyLen`, but it does not check if `pub->len` exactly matches the expected composite public key length (`ctx->info->compPubKeyLen`). Excessively large `pub->len` will result in a larger-than-expected `tradPub` buffer being passed to the traditional method, relying on that method's validation which may be insufficient.
 CODE:
 ```c
-    uint8_t signData[4096];
+    RETURN_RET_IF(pub->len <= ctx->info->pqcPubkeyLen, PQCP_COMPOSITE_KEYLEN_ERROR);
+
+    BSL_Buffer pqcPub = {pub->data, ctx->info->pqcPubkeyLen};
+    BSL_Buffer tradPub = {pub->data + ctx->info->pqcPubkeyLen, pub->len - ctx->info->pqcPubkeyLen};
 ```
 FIX:
 ```c
-    uint8_t signData[5000];
+    RETURN_RET_IF(pub->len != ctx->info->compPubKeyLen, PQCP_COMPOSITE_KEYLEN_ERROR);
+
+    BSL_Buffer pqcPub = {pub->data, ctx->info->pqcPubkeyLen};
+    BSL_Buffer tradPub = {pub->data + ctx->info->pqcPubkeyLen, pub->len - ctx->info->pqcPubkeyLen};
+```
+===END===
+
+===ISSUE===
+FILE: src/composite_sign/src/crypt_composite_sign.c
+LINE: 351
+SEVERITY: medium
+TITLE: Incomplete Private Key Length Validation
+PROBLEM: `CRYPT_COMPOSITE_SetPrvKey` checks if `prv->len` is greater than `pqcPrvkeyLen`, but does not enforce that `prv->len` matches `ctx->info->compPrvKeyLen`. This allows passing arbitrarily large buffers as the private key, potentially causing issues in the underlying traditional key setter.
+CODE:
+```c
+    RETURN_RET_IF(prv->len <= ctx->info->pqcPrvkeyLen, PQCP_COMPOSITE_KEYLEN_ERROR);
+    BSL_Buffer pqcPrv = {prv->data, ctx->info->pqcPrvkeyLen};
+    BSL_Buffer tradPrv = {prv->data + ctx->info->pqcPrvkeyLen, prv->len - ctx->info->pqcPrvkeyLen};
+```
+FIX:
+```c
+    RETURN_RET_IF(prv->len != ctx->info->compPrvKeyLen, PQCP_COMPOSITE_KEYLEN_ERROR);
+    BSL_Buffer pqcPrv = {prv->data, ctx->info->pqcPrvkeyLen};
+    BSL_Buffer tradPrv = {prv->data + ctx->info->pqcPrvkeyLen, prv->len - ctx->info->pqcPrvkeyLen};
+```
+===END===
+
+===ISSUE===
+FILE: src/provider/pqcp_pkey.c
+LINE: 51
+SEVERITY: low
+TITLE: Commented Out Error Handling
+PROBLEM: The error reporting macro `BSL_ERR_PUSH_ERROR` is commented out. If context creation fails (e.g., unsupported algorithm), the function returns NULL without pushing an error code to the stack, making diagnostics difficult.
+CODE:
+```c
+    if (pkeyCtx == NULL) {
+        // BSL_ERR_PUSH_ERROR(CRYPT_PROVIDER_NOT_SUPPORT);
+        return NULL;
+    }
+```
+FIX:
+```c
+    if (pkeyCtx == NULL) {
+        BSL_ERR_PUSH_ERROR(CRYPT_PROVIDER_NOT_SUPPORT);
+        return NULL;
+    }
+```
+===END===
+
+===ISSUE===
+FILE: include/pqcp_types.h
+LINE: 22-42
+SEVERITY: high
+TITLE: Breaking API Change in Parameter IDs
+PROBLEM: The parameter ID base values have changed significantly (e.g., `CRYPT_PARAM_SCLOUDPLUS_BASE` 900 -> `PQCP_PARAM_SCLOUDPLUS_BASE` 5100). This is a binary and source incompatibility for any external application relying on the old values. While the rename suggests an API refactor, changing the underlying integer values breaks ABI with existing compiled code.
+CODE:
+```c
+#define PQCP_PARAM_BASE 5000
+#define PQCP_PARAM_SCLOUDPLUS_BASE (PQCP_PARAM_BASE + 100)
+// ...
+#define PQCP_PARAM_FRODOKEM_BASE (PQCP_PARAM_BASE + 200)
+```
+FIX:
+```c
+/* Ensure these values align with external expectations or version the API explicitly. 
+   If backward compatibility is required, restore original values: */
+#define PQCP_PARAM_BASE 900 // Adjusted base if necessary
+// Or map specific bases back to 900, 1000, 1100, 1200 as before.
 ```
 ===END===

@@ -33,7 +33,53 @@
         <div class="subtitle"></div>
 <div class="section"><div class="section-title high">High</div>
 <div class="issue">
-                <div class="issue-title">Partial initialization left behind on allocation failure</div>
+                <div class="issue-title">Hybrid length controls can dereference NULL `val`</div>
+                <div class="issue-location">src/composite_sign/src/crypt_composite_sign.c:29-42</div>
+                <pre>#define CHECK_UINT32_LEN_AND_INFO(ctx, len)                      \
+    do                                                           \
+    {                                                            \
+        if (len != sizeof(uint32_t))                             \
+        {                                                        \
+            BSL_ERR_PUSH_ERROR(CRYPT_INVALID_ARG);               \
+            return CRYPT_INVALID_ARG;                            \
+        }                                                        \
+        if (ctx-&gt;info == NULL)                                   \
+        {                                                        \
+            BSL_ERR_PUSH_ERROR(PQCP_COMPOSITE_KEYINFO_NOT_SET); \
+            return PQCP_COMPOSITE_KEYINFO_NOT_SET;              \
+        }                                                        \
+    } while (0)
+
+case PQCP_CTRL_HYBRID_GET_PQC_PRVKEY_LEN:
+    CHECK_UINT32_LEN_AND_INFO(ctx, len);
+    *(uint32_t *)val = MLDSA_SEED_LEN;
+    return CRYPT_SUCCESS;</pre>
+                <div class="problem"><strong>Issue:</strong> `CHECK_UINT32_LEN_AND_INFO` validates `len` and `ctx->info` but never validates `val`. In `PQCP_CTRL_HYBRID_GET_PQC_PRVKEY_LEN`, `val` is dereferenced unconditionally, which can crash on `CRYPT_COMPOSITE_Ctrl(ctx, ..., NULL, sizeof(uint32_t))`.</div>
+                <div class="fix-label">Fix:</div><pre>#define CHECK_UINT32_LEN_AND_INFO(ctx, val, len)                        \
+    do                                                                   \
+    {                                                                    \
+        if ((val) == NULL || (len) != sizeof(uint32_t))                 \
+        {                                                                \
+            BSL_ERR_PUSH_ERROR(CRYPT_INVALID_ARG);                       \
+            return CRYPT_INVALID_ARG;                                    \
+        }                                                                \
+        if ((ctx)-&gt;info == NULL || (ctx)-&gt;pqcCtx == NULL || (ctx)-&gt;tradCtx == NULL) \
+        {                                                                \
+            BSL_ERR_PUSH_ERROR(PQCP_COMPOSITE_KEYINFO_NOT_SET);         \
+            return PQCP_COMPOSITE_KEYINFO_NOT_SET;                      \
+        }                                                                \
+    } while (0)
+
+case PQCP_CTRL_HYBRID_GET_PQC_PRVKEY_LEN:
+    CHECK_UINT32_LEN_AND_INFO(ctx, val, len);
+    *(uint32_t *)val = MLDSA_SEED_LEN;
+    return CRYPT_SUCCESS;</pre>
+                <div class="issue-source">Reviewer: codex</div>
+            </div>
+</div>
+<div class="section"><div class="section-title medium">Medium</div>
+<div class="issue">
+                <div class="issue-title">Failed `SET_PARA_BY_ID` leaves context in partially initialized state</div>
                 <div class="issue-location">src/composite_sign/src/crypt_composite_sign.c:190-199</div>
                 <pre>ctx-&gt;pqcMethod = pqcMethod;
 ctx-&gt;tradMethod = tradMethod;
@@ -45,24 +91,22 @@ if (ctx-&gt;tradCtx == NULL) {
     ctx-&gt;pqcCtx = NULL;
     return CRYPT_MEM_ALLOC_FAIL;
 }</pre>
-                <div class="problem"><strong>Issue:</strong> `CRYPT_CompositeSetAlgInfo` sets `ctx->info` and method pointers before allocating subcontexts. If `newCtx()` fails, the function returns with `ctx->info` still set and `ctx->pqcCtx`/`ctx->tradCtx` null. This makes the context unrecoverable (`SET_PARA_BY_ID` returns “already set”) and can later hit null subcontext paths.</div>
-                <div class="fix-label">Fix:</div><pre>const COMPOSITE_ALG_INFO *info = CRYPT_COMPOSITE_GetInfo(*(int32_t *)val);
-if (info == NULL) {
-    BSL_ERR_PUSH_ERROR(CRYPT_INVALID_ARG);
-    return CRYPT_INVALID_ARG;
+                <div class="problem"><strong>Issue:</strong> On `pqcMethod->newCtx()` or `tradMethod->newCtx()` failure, the function returns early after already setting `ctx->info`, `ctx->pqcMethod`, and `ctx->tradMethod`. This leaves the context unusable (`KEY_INFO_ALREADY_SET` on retry) and inconsistent.</div>
+                <div class="fix-label">Fix:</div><pre>void *pqcCtx = pqcMethod-&gt;newCtx();
+if (pqcCtx == NULL) {
+    return CRYPT_MEM_ALLOC_FAIL;
 }
-
-const EAL_PkeyMethod *pqcMethod = CRYPT_EAL_PkeyFindMethod(info-&gt;pqcAlg);
-const EAL_PkeyMethod *tradMethod = CRYPT_EAL_PkeyFindMethod(info-&gt;tradAlg);
-RETURN_RET_IF((pqcMethod == NULL || tradMethod == NULL), CRYPT_NOT_SUPPORT);
-
-void *pqcCtx = pqcMethod-&gt;newCtx();
-RETURN_RET_IF(pqcCtx == NULL, CRYPT_MEM_ALLOC_FAIL);
-
 void *tradCtx = tradMethod-&gt;newCtx();
 if (tradCtx == NULL) {
     pqcMethod-&gt;freeCtx(pqcCtx);
     return CRYPT_MEM_ALLOC_FAIL;
+}
+int32_t pqcParam = info-&gt;pqcParam;
+ret = pqcMethod-&gt;ctrl(pqcCtx, CRYPT_CTRL_SET_PARA_BY_ID, &amp;pqcParam, sizeof(pqcParam));
+if (ret != CRYPT_SUCCESS) {
+    pqcMethod-&gt;freeCtx(pqcCtx);
+    tradMethod-&gt;freeCtx(tradCtx);
+    return ret;
 }
 
 ctx-&gt;info = info;
@@ -73,8 +117,70 @@ ctx-&gt;tradCtx = tradCtx;</pre>
                 <div class="issue-source">Reviewer: codex</div>
             </div>
 <div class="issue">
-                <div class="issue-title">Public PolarLAC control IDs no longer handled</div>
-                <div class="issue-location">src/polarlac/src/polarlac.c:263-290</div>
+                <div class="issue-title">`DupCtx` leaks duplicated sub-context on partial failure</div>
+                <div class="issue-location">src/composite_sign/src/crypt_composite_sign.c:125-139</div>
+                <pre>newCtx-&gt;info = ctx-&gt;info;
+if (ctx-&gt;pqcMethod != NULL &amp;&amp; ctx-&gt;tradMethod != NULL) {
+    newCtx-&gt;pqcCtx = ctx-&gt;pqcMethod-&gt;dupCtx(ctx-&gt;pqcCtx);
+    newCtx-&gt;tradCtx = ctx-&gt;tradMethod-&gt;dupCtx(ctx-&gt;tradCtx);
+    if (newCtx-&gt;pqcCtx == NULL || newCtx-&gt;tradCtx == NULL) {
+        BSL_ERR_PUSH_ERROR(CRYPT_MEM_ALLOC_FAIL);
+        goto ERR;
+    }
+}
+newCtx-&gt;pqcMethod = ctx-&gt;pqcMethod;
+newCtx-&gt;tradMethod = ctx-&gt;tradMethod;</pre>
+                <div class="problem"><strong>Issue:</strong> `newCtx->pqcMethod`/`tradMethod` are assigned only after duplication. If one duplication succeeds and the other fails, `CRYPT_COMPOSITE_FreeCtx(newCtx)` cannot free the already duplicated sub-context because method pointers are still NULL.</div>
+                <div class="fix-label">Fix:</div><pre>newCtx-&gt;info = ctx-&gt;info;
+newCtx-&gt;pqcMethod = ctx-&gt;pqcMethod;
+newCtx-&gt;tradMethod = ctx-&gt;tradMethod;
+
+if (newCtx-&gt;pqcMethod != NULL &amp;&amp; newCtx-&gt;tradMethod != NULL) {
+    newCtx-&gt;pqcCtx = newCtx-&gt;pqcMethod-&gt;dupCtx(ctx-&gt;pqcCtx);
+    newCtx-&gt;tradCtx = newCtx-&gt;tradMethod-&gt;dupCtx(ctx-&gt;tradCtx);
+    if (newCtx-&gt;pqcCtx == NULL || newCtx-&gt;tradCtx == NULL) {
+        if (newCtx-&gt;pqcCtx != NULL) {
+            newCtx-&gt;pqcMethod-&gt;freeCtx(newCtx-&gt;pqcCtx);
+            newCtx-&gt;pqcCtx = NULL;
+        }
+        if (newCtx-&gt;tradCtx != NULL) {
+            newCtx-&gt;tradMethod-&gt;freeCtx(newCtx-&gt;tradCtx);
+            newCtx-&gt;tradCtx = NULL;
+        }
+        BSL_ERR_PUSH_ERROR(CRYPT_MEM_ALLOC_FAIL);
+        goto ERR;
+    }
+}</pre>
+                <div class="issue-source">Reviewer: codex</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">`DupCtx` does not copy context-binding data (`ctxInfo`)</div>
+                <div class="issue-location">src/composite_sign/src/crypt_composite_sign.c:125-137</div>
+                <pre>newCtx-&gt;info = ctx-&gt;info;
+...
+newCtx-&gt;pqcMethod = ctx-&gt;pqcMethod;
+newCtx-&gt;tradMethod = ctx-&gt;tradMethod;
+newCtx-&gt;libCtx = ctx-&gt;libCtx;
+return newCtx;</pre>
+                <div class="problem"><strong>Issue:</strong> `CRYPT_COMPOSITE_DupCtx` copies key contexts but not `ctxInfo`/`ctxLen`. Sign/verify encoding uses `ctxInfo`, so duplicated contexts can produce different signatures from the original when context info is set.</div>
+                <div class="fix-label">Fix:</div><pre>newCtx-&gt;info = ctx-&gt;info;
+newCtx-&gt;pqcMethod = ctx-&gt;pqcMethod;
+newCtx-&gt;tradMethod = ctx-&gt;tradMethod;
+newCtx-&gt;libCtx = ctx-&gt;libCtx;
+newCtx-&gt;ctxLen = ctx-&gt;ctxLen;
+
+if (ctx-&gt;ctxLen &gt; 0) {
+    newCtx-&gt;ctxInfo = BSL_SAL_Dump(ctx-&gt;ctxInfo, ctx-&gt;ctxLen);
+    if (newCtx-&gt;ctxInfo == NULL) {
+        BSL_ERR_PUSH_ERROR(CRYPT_MEM_ALLOC_FAIL);
+        goto ERR;
+    }
+}</pre>
+                <div class="issue-source">Reviewer: codex</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">Control command compatibility regression for PolarLAC</div>
+                <div class="issue-location">src/polarlac/src/polarlac.c:263-284</div>
                 <pre>switch (cmd) {
     case CRYPT_CTRL_SET_PARA_BY_ID:
         return PolarLacSetAlgInfo(ctx, val, valLen);
@@ -83,110 +189,45 @@ ctx-&gt;tradCtx = tradCtx;</pre>
     case CRYPT_CTRL_GET_PRVKEY_LEN:
         ...
     case CRYPT_CTRL_GET_PUBKEY_LEN:
-        ...</pre>
-                <div class="problem"><strong>Issue:</strong> The control switch now accepts only generic `CRYPT_CTRL_*` IDs, but `include/pqcp_types.h` still exposes `PQCP_POLAR_LAC_*` IDs and existing callers use them. This is a runtime compatibility break (`PQCP_INVALID_ARG`) for existing API users.</div>
+        ...
+    default:
+        return PQCP_INVALID_ARG;
+}</pre>
+                <div class="problem"><strong>Issue:</strong> The control switch dropped support for existing `PQCP_POLAR_LAC_*` command IDs and only accepts `CRYPT_CTRL_*`. Existing callers using documented PQCP command IDs now get `PQCP_INVALID_ARG`.</div>
                 <div class="fix-label">Fix:</div><pre>switch (cmd) {
-    case PQCP_POLAR_LAC_SET_PARAMS_BY_ID:
     case CRYPT_CTRL_SET_PARA_BY_ID:
+    case PQCP_POLAR_LAC_SET_PARAMS_BY_ID:
         return PolarLacSetAlgInfo(ctx, val, valLen);
 
-    case PQCP_POLAR_LAC_GET_CIPHER_LEN:
     case CRYPT_CTRL_GET_CIPHERTEXT_LEN:
+    case PQCP_POLAR_LAC_GET_CIPHER_LEN:
         ...
 
-    case PQCP_POLAR_LAC_GET_PRVKEY_LEN:
     case CRYPT_CTRL_GET_PRVKEY_LEN:
+    case PQCP_POLAR_LAC_GET_PRVKEY_LEN:
         ...
 
-    case PQCP_POLAR_LAC_GET_PUBKEY_LEN:
     case CRYPT_CTRL_GET_PUBKEY_LEN:
-        ...</pre>
-                <div class="issue-source">Reviewer: codex</div>
-            </div>
-</div>
-<div class="section"><div class="section-title medium">Medium</div>
-<div class="issue">
-                <div class="issue-title">DupCtx does not copy signing context info</div>
-                <div class="issue-location">src/composite_sign/src/crypt_composite_sign.c:125-137</div>
-                <pre>newCtx-&gt;info = ctx-&gt;info;
-...
-newCtx-&gt;pqcMethod = ctx-&gt;pqcMethod;
-newCtx-&gt;tradMethod = ctx-&gt;tradMethod;
-newCtx-&gt;libCtx = ctx-&gt;libCtx;
-return newCtx;</pre>
-                <div class="problem"><strong>Issue:</strong> `CRYPT_COMPOSITE_DupCtx` duplicates keys/methods but drops `ctxInfo`/`ctxLen`. Any context string set via `CRYPT_CTRL_SET_CTX_INFO` is lost in the duplicate, so signatures from original and duplicate can diverge unexpectedly.</div>
-                <div class="fix-label">Fix:</div><pre>newCtx-&gt;info = ctx-&gt;info;
-newCtx-&gt;pqcMethod = ctx-&gt;pqcMethod;
-newCtx-&gt;tradMethod = ctx-&gt;tradMethod;
-newCtx-&gt;libCtx = ctx-&gt;libCtx;
-
-if (ctx-&gt;ctxLen &gt; 0) {
-    newCtx-&gt;ctxInfo = BSL_SAL_Dump(ctx-&gt;ctxInfo, ctx-&gt;ctxLen);
-    if (newCtx-&gt;ctxInfo == NULL) {
-        BSL_ERR_PUSH_ERROR(CRYPT_MEM_ALLOC_FAIL);
-        goto ERR;
-    }
-    newCtx-&gt;ctxLen = ctx-&gt;ctxLen;
-}
-return newCtx;</pre>
-                <div class="issue-source">Reviewer: codex</div>
-            </div>
-<div class="issue">
-                <div class="issue-title">SetCtxInfo rejects valid clear operation and misclassifies null input</div>
-                <div class="issue-location">src/composite_sign/src/crypt_composite_sign.c:212-227</div>
-                <pre>if (len &gt; COMPOSITE_MAX_CTX_BYTES) {
-    ...
-}
-if (ctx-&gt;ctxInfo != NULL) {
-    BSL_SAL_FREE(ctx-&gt;ctxInfo);
-    ctx-&gt;ctxLen = 0;
-}
-ctx-&gt;ctxInfo = BSL_SAL_Dump((uint8_t *)val, len);
-if (ctx-&gt;ctxInfo == NULL) {
-    BSL_ERR_PUSH_ERROR(CRYPT_MEM_ALLOC_FAIL);
-    return CRYPT_MEM_ALLOC_FAIL;
-}
-ctx-&gt;ctxLen = len;</pre>
-                <div class="problem"><strong>Issue:</strong> `CRYPT_CompositeSetctxInfo` always calls `BSL_SAL_Dump(val, len)`. With `len == 0`, `BSL_SAL_Dump` returns null and this path returns `CRYPT_MEM_ALLOC_FAIL`, so callers cannot clear context info. Also `val == NULL && len > 0` is treated as allocation failure instead of null input.</div>
-                <div class="fix-label">Fix:</div><pre>if (len &gt; COMPOSITE_MAX_CTX_BYTES) {
-    BSL_ERR_PUSH_ERROR(PQCP_COMPOSITE_KEYLEN_ERROR);
-    return PQCP_COMPOSITE_KEYLEN_ERROR;
-}
-
-if (len == 0) {
-    BSL_SAL_FREE(ctx-&gt;ctxInfo);
-    ctx-&gt;ctxInfo = NULL;
-    ctx-&gt;ctxLen = 0;
-    return CRYPT_SUCCESS;
-}
-
-if (val == NULL) {
-    BSL_ERR_PUSH_ERROR(CRYPT_NULL_INPUT);
-    return CRYPT_NULL_INPUT;
-}
-
-BSL_SAL_FREE(ctx-&gt;ctxInfo);
-ctx-&gt;ctxInfo = BSL_SAL_Dump(val, len);
-if (ctx-&gt;ctxInfo == NULL) {
-    BSL_ERR_PUSH_ERROR(CRYPT_MEM_ALLOC_FAIL);
-    return CRYPT_MEM_ALLOC_FAIL;
-}
-ctx-&gt;ctxLen = len;</pre>
+    case PQCP_POLAR_LAC_GET_PUBKEY_LEN:
+        ...
+}</pre>
                 <div class="issue-source">Reviewer: codex</div>
             </div>
 </div>
 <div class="section"><div class="section-title low">Low</div>
 <div class="issue">
-                <div class="issue-title">Uninitialized context pointers freed on error path</div>
+                <div class="issue-title">Uninitialized pointer may be freed on early error path</div>
                 <div class="issue-location">test/demo/composite_sign_demo.c:22-23</div>
-                <pre>CRYPT_EAL_PkeyCtx *signCtx;
+                <pre>int32_t ret = -1;
+CRYPT_EAL_PkeyCtx *signCtx;
 CRYPT_EAL_PkeyCtx *verifyCtx;
 ...
 EXIT:
     CRYPT_EAL_PkeyFreeCtx(signCtx);
     CRYPT_EAL_PkeyFreeCtx(verifyCtx);</pre>
-                <div class="problem"><strong>Issue:</strong> `signCtx` and `verifyCtx` are uninitialized. If context creation fails and execution jumps to `EXIT`, `CRYPT_EAL_PkeyFreeCtx` may be called on garbage pointers.</div>
-                <div class="fix-label">Fix:</div><pre>CRYPT_EAL_PkeyCtx *signCtx = NULL;
+                <div class="problem"><strong>Issue:</strong> `verifyCtx` is not initialized before possible `goto EXIT`, but `CRYPT_EAL_PkeyFreeCtx(verifyCtx)` is always called in `EXIT`. If `signCtx` creation fails, `verifyCtx` is indeterminate and freeing it is undefined behavior.</div>
+                <div class="fix-label">Fix:</div><pre>int32_t ret = -1;
+CRYPT_EAL_PkeyCtx *signCtx = NULL;
 CRYPT_EAL_PkeyCtx *verifyCtx = NULL;
 ...
 EXIT:

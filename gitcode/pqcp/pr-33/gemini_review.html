@@ -33,73 +33,32 @@
         <div class="subtitle"></div>
 <div class="section"><div class="section-title high">High</div>
 <div class="issue">
-                <div class="issue-title">Inclusion of non-existent directory</div>
-                <div class="issue-location">CMakeLists.txt:98</div>
-                <pre>target_include_directories(pqcp_provider
-        ${CMAKE_CURRENT_SOURCE_DIR}/src/classic_mceliece/include
-        ${CMAKE_CURRENT_SOURCE_DIR}/src/frodokem/include
-        ${CMAKE_CURRENT_SOURCE_DIR}/src/polarlac/include
-        ${CMAKE_CURRENT_SOURCE_DIR}/src/hybrid_env/include
-        ${CMAKE_CURRENT_SOURCE_DIR}/src/composite_sign/include
-        ${OPENHITLS_INCLUDE_DIRS}</pre>
-                <div class="problem"><strong>Issue:</strong> The build configuration includes `${CMAKE_CURRENT_SOURCE_DIR}/src/hybrid_env/include`, but this directory does not exist in the source tree. This causes build errors or warnings.</div>
-                <div class="fix-label">Fix:</div><pre>target_include_directories(pqcp_provider
-        ${CMAKE_CURRENT_SOURCE_DIR}/src/classic_mceliece/include
-        ${CMAKE_CURRENT_SOURCE_DIR}/src/frodokem/include
-        ${CMAKE_CURRENT_SOURCE_DIR}/src/polarlac/include
-        ${CMAKE_CURRENT_SOURCE_DIR}/src/composite_sign/include
-        ${OPENHITLS_INCLUDE_DIRS}</pre>
-                <div class="issue-source">Reviewer: gemini</div>
-            </div>
-<div class="issue">
-                <div class="issue-title">Inclusion of non-existent directory</div>
-                <div class="issue-location">test/CMakeLists.txt:92-93</div>
-                <pre>${CMAKE_SOURCE_DIR}/../platform/openhitls/platform/Secure_C/include
-    ${CMAKE_SOURCE_DIR}/../src/hybrid_env/include
-    ${CMAKE_SOURCE_DIR}/../src/hybrid_env/src
-    ${CMAKE_SOURCE_DIR}/../src/composite_sign/include</pre>
-                <div class="problem"><strong>Issue:</strong> The test build configuration includes `hybrid_env` directories that do not exist.</div>
-                <div class="fix-label">Fix:</div><pre>${CMAKE_SOURCE_DIR}/../platform/openhitls/platform/Secure_C/include
-    ${CMAKE_SOURCE_DIR}/../src/composite_sign/include</pre>
-                <div class="issue-source">Reviewer: gemini</div>
-            </div>
-</div>
-<div class="section"><div class="section-title medium">Medium</div>
-<div class="issue">
-                <div class="issue-title">Ignored return value of secure memory copy</div>
-                <div class="issue-location">src/composite_sign/src/crypt_composite_sign.c:320-321</div>
-                <pre>(void)memcpy_s(prv-&gt;data, prv-&gt;len, pqcPrv.data, pqcPrv.dataLen);
-    (void)memcpy_s(prv-&gt;data + pqcPrv.dataLen, prv-&gt;len - pqcPrv.dataLen, tradPrv.data, tradPrv.dataLen);</pre>
-                <div class="problem"><strong>Issue:</strong> The return values of `memcpy_s` are explicitly cast to `void`. Ignoring the error code hides potential failures (e.g. invalid arguments) and violates secure coding standards.</div>
-                <div class="fix-label">Fix:</div><pre>if (memcpy_s(prv-&gt;data, prv-&gt;len, pqcPrv.data, pqcPrv.dataLen) != EOK) {
-        ret = CRYPT_MEM_ALLOC_FAIL; // Or appropriate error code
-        goto ERR;
+                <div class="issue-title">Missing NULL Check for Input Parameter</div>
+                <div class="issue-location">src/composite_sign/src/crypt_composite_sign.c:228</div>
+                <pre>static int32_t CRYPT_CompositeSetctxInfo(CRYPT_CompositeCtx *ctx, void *val, uint32_t len)
+{
+    if (len &gt; COMPOSITE_MAX_CTX_BYTES) {
+        BSL_ERR_PUSH_ERROR(PQCP_COMPOSITE_KEYLEN_ERROR);
+        return PQCP_COMPOSITE_KEYLEN_ERROR;
     }
-    if (memcpy_s(prv-&gt;data + pqcPrv.dataLen, prv-&gt;len - pqcPrv.dataLen, tradPrv.data, tradPrv.dataLen) != EOK) {
-        ret = CRYPT_MEM_ALLOC_FAIL;
-        goto ERR;
-    }</pre>
-                <div class="issue-source">Reviewer: gemini</div>
-            </div>
-<div class="issue">
-                <div class="issue-title">Ignored return value of secure memory copy</div>
-                <div class="issue-location">src/composite_sign/src/crypt_composite_sign.c:343-344</div>
-                <pre>(void)memcpy_s(pub-&gt;data, pub-&gt;len, pqcPub.data, pqcPub.dataLen);
-    (void)memcpy_s(pub-&gt;data + pqcPub.dataLen, pub-&gt;len - pqcPub.dataLen, tradPub.data, tradPub.dataLen);</pre>
-                <div class="problem"><strong>Issue:</strong> The return values of `memcpy_s` are explicitly cast to `void`.</div>
-                <div class="fix-label">Fix:</div><pre>if (memcpy_s(pub-&gt;data, pub-&gt;len, pqcPub.data, pqcPub.dataLen) != EOK) {
-        ret = CRYPT_MEM_ALLOC_FAIL;
-        goto ERR;
+    if (ctx-&gt;ctxInfo != NULL) {</pre>
+                <div class="problem"><strong>Issue:</strong> The function `CRYPT_CompositeSetctxInfo` does not check if `val` is NULL before passing it to `BSL_SAL_Dump` (which presumably copies from it). If `len > 0` but `val` is NULL, this will likely cause a segmentation fault.</div>
+                <div class="fix-label">Fix:</div><pre>static int32_t CRYPT_CompositeSetctxInfo(CRYPT_CompositeCtx *ctx, void *val, uint32_t len)
+{
+    if (len &gt; COMPOSITE_MAX_CTX_BYTES) {
+        BSL_ERR_PUSH_ERROR(PQCP_COMPOSITE_KEYLEN_ERROR);
+        return PQCP_COMPOSITE_KEYLEN_ERROR;
     }
-    if (memcpy_s(pub-&gt;data + pqcPub.dataLen, pub-&gt;len - pqcPub.dataLen, tradPub.data, tradPub.dataLen) != EOK) {
-        ret = CRYPT_MEM_ALLOC_FAIL;
-        goto ERR;
-    }</pre>
+    if (val == NULL &amp;&amp; len &gt; 0) {
+        BSL_ERR_PUSH_ERROR(CRYPT_NULL_INPUT);
+        return CRYPT_NULL_INPUT;
+    }
+    if (ctx-&gt;ctxInfo != NULL) {</pre>
                 <div class="issue-source">Reviewer: gemini</div>
             </div>
 <div class="issue">
-                <div class="issue-title">Ignored return value of secure memory copy</div>
-                <div class="issue-location">src/composite_sign/src/crypt_composite_sign.c:466-476</div>
+                <div class="issue-title">Ignored Return Value of Secure Memory Copy</div>
+                <div class="issue-location">src/composite_sign/src/crypt_composite_sign.c:541-546</div>
                 <pre>(void)memcpy_s(ptr, msg-&gt;len, PREFIX, prefixLen);
     ptr += prefixLen;
     (void)memcpy_s(ptr, msg-&gt;len - prefixLen, label, labelLen);
@@ -109,46 +68,85 @@
     if (ctx-&gt;ctxInfo != NULL &amp;&amp; ctx-&gt;ctxLen &gt; 0) {
         (void)memcpy_s(ptr, msg-&gt;len - (prefixLen + labelLen + 1), ctx-&gt;ctxInfo, ctx-&gt;ctxLen);
         ptr += ctx-&gt;ctxLen;
+    }</pre>
+                <div class="problem"><strong>Issue:</strong> The return value of `memcpy_s` is explicitly ignored (`(void)memcpy_s(...)`) in `CompositeMsgEncode`. If `memcpy_s` fails (e.g., due to invalid overlap or size parameters), the destination buffer `msg->data` will contain uninitialized or partial data. The function then returns `CRYPT_SUCCESS`, causing the caller to sign/verify this invalid data.</div>
+                <div class="fix-label">Fix:</div><pre>if (memcpy_s(ptr, msg-&gt;len, PREFIX, prefixLen) != EOK) {
+        BSL_SAL_FREE(msg-&gt;data);
+        return CRYPT_MEM_CPY_FAIL;
     }
-    (void)memcpy_s(ptr, digestLen, digest, digestLen);</pre>
-                <div class="problem"><strong>Issue:</strong> Multiple `memcpy_s` calls in `CompositeMsgEncode` ignore the return value.</div>
-                <div class="fix-label">Fix:</div><pre>if (memcpy_s(ptr, msg-&gt;len, PREFIX, prefixLen) != EOK) return CRYPT_MEM_ALLOC_FAIL;
     ptr += prefixLen;
-    if (memcpy_s(ptr, msg-&gt;len - prefixLen, label, labelLen) != EOK) return CRYPT_MEM_ALLOC_FAIL;
+    if (memcpy_s(ptr, msg-&gt;len - prefixLen, label, labelLen) != EOK) {
+        BSL_SAL_FREE(msg-&gt;data);
+        return CRYPT_MEM_CPY_FAIL;
+    }
     ptr += labelLen;
     *ptr = ctx-&gt;ctxLen;
     ptr++;
     if (ctx-&gt;ctxInfo != NULL &amp;&amp; ctx-&gt;ctxLen &gt; 0) {
-        if (memcpy_s(ptr, msg-&gt;len - (prefixLen + labelLen + 1), ctx-&gt;ctxInfo, ctx-&gt;ctxLen) != EOK) return CRYPT_MEM_ALLOC_FAIL;
+        if (memcpy_s(ptr, msg-&gt;len - (prefixLen + labelLen + 1), ctx-&gt;ctxInfo, ctx-&gt;ctxLen) != EOK) {
+            BSL_SAL_FREE(msg-&gt;data);
+            return CRYPT_MEM_CPY_FAIL;
+        }
         ptr += ctx-&gt;ctxLen;
-    }
-    if (memcpy_s(ptr, digestLen, digest, digestLen) != EOK) return CRYPT_MEM_ALLOC_FAIL;</pre>
+    }</pre>
                 <div class="issue-source">Reviewer: gemini</div>
             </div>
 <div class="issue">
-                <div class="issue-title">Insufficient buffer size for MLDSA-87 signatures</div>
-                <div class="issue-location">test/demo/composite_sign_demo.c:27</div>
-                <pre>uint8_t signData[4096];</pre>
-                <div class="problem"><strong>Issue:</strong> `signData` buffer is 4096 bytes. MLDSA-87 composite signatures require > 4600 bytes. If the algorithm is changed to MLDSA-87, this buffer will overflow.</div>
-                <div class="fix-label">Fix:</div><pre>uint8_t signData[5000];</pre>
+                <div class="issue-title">Breaking API Change in Parameter IDs</div>
+                <div class="issue-location">include/pqcp_types.h:22-42</div>
+                <pre>#define PQCP_PARAM_BASE 5000
+#define PQCP_PARAM_SCLOUDPLUS_BASE (PQCP_PARAM_BASE + 100)
+// ...
+#define PQCP_PARAM_FRODOKEM_BASE (PQCP_PARAM_BASE + 200)</pre>
+                <div class="problem"><strong>Issue:</strong> The parameter ID base values have changed significantly (e.g., `CRYPT_PARAM_SCLOUDPLUS_BASE` 900 -> `PQCP_PARAM_SCLOUDPLUS_BASE` 5100). This is a binary and source incompatibility for any external application relying on the old values. While the rename suggests an API refactor, changing the underlying integer values breaks ABI with existing compiled code.</div>
+                <div class="fix-label">Fix:</div><pre>/* Ensure these values align with external expectations or version the API explicitly. 
+   If backward compatibility is required, restore original values: */
+#define PQCP_PARAM_BASE 900 // Adjusted base if necessary
+// Or map specific bases back to 900, 1000, 1100, 1200 as before.</pre>
+                <div class="issue-source">Reviewer: gemini</div>
+            </div>
+</div>
+<div class="section"><div class="section-title medium">Medium</div>
+<div class="issue">
+                <div class="issue-title">Incomplete Public Key Length Validation</div>
+                <div class="issue-location">src/composite_sign/src/crypt_composite_sign.c:366</div>
+                <pre>RETURN_RET_IF(pub-&gt;len &lt;= ctx-&gt;info-&gt;pqcPubkeyLen, PQCP_COMPOSITE_KEYLEN_ERROR);
+
+    BSL_Buffer pqcPub = {pub-&gt;data, ctx-&gt;info-&gt;pqcPubkeyLen};
+    BSL_Buffer tradPub = {pub-&gt;data + ctx-&gt;info-&gt;pqcPubkeyLen, pub-&gt;len - ctx-&gt;info-&gt;pqcPubkeyLen};</pre>
+                <div class="problem"><strong>Issue:</strong> `CRYPT_COMPOSITE_SetPubKey` checks if `pub->len` is greater than `pqcPubkeyLen`, but it does not check if `pub->len` exactly matches the expected composite public key length (`ctx->info->compPubKeyLen`). Excessively large `pub->len` will result in a larger-than-expected `tradPub` buffer being passed to the traditional method, relying on that method's validation which may be insufficient.</div>
+                <div class="fix-label">Fix:</div><pre>RETURN_RET_IF(pub-&gt;len != ctx-&gt;info-&gt;compPubKeyLen, PQCP_COMPOSITE_KEYLEN_ERROR);
+
+    BSL_Buffer pqcPub = {pub-&gt;data, ctx-&gt;info-&gt;pqcPubkeyLen};
+    BSL_Buffer tradPub = {pub-&gt;data + ctx-&gt;info-&gt;pqcPubkeyLen, pub-&gt;len - ctx-&gt;info-&gt;pqcPubkeyLen};</pre>
+                <div class="issue-source">Reviewer: gemini</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">Incomplete Private Key Length Validation</div>
+                <div class="issue-location">src/composite_sign/src/crypt_composite_sign.c:351</div>
+                <pre>RETURN_RET_IF(prv-&gt;len &lt;= ctx-&gt;info-&gt;pqcPrvkeyLen, PQCP_COMPOSITE_KEYLEN_ERROR);
+    BSL_Buffer pqcPrv = {prv-&gt;data, ctx-&gt;info-&gt;pqcPrvkeyLen};
+    BSL_Buffer tradPrv = {prv-&gt;data + ctx-&gt;info-&gt;pqcPrvkeyLen, prv-&gt;len - ctx-&gt;info-&gt;pqcPrvkeyLen};</pre>
+                <div class="problem"><strong>Issue:</strong> `CRYPT_COMPOSITE_SetPrvKey` checks if `prv->len` is greater than `pqcPrvkeyLen`, but does not enforce that `prv->len` matches `ctx->info->compPrvKeyLen`. This allows passing arbitrarily large buffers as the private key, potentially causing issues in the underlying traditional key setter.</div>
+                <div class="fix-label">Fix:</div><pre>RETURN_RET_IF(prv-&gt;len != ctx-&gt;info-&gt;compPrvKeyLen, PQCP_COMPOSITE_KEYLEN_ERROR);
+    BSL_Buffer pqcPrv = {prv-&gt;data, ctx-&gt;info-&gt;pqcPrvkeyLen};
+    BSL_Buffer tradPrv = {prv-&gt;data + ctx-&gt;info-&gt;pqcPrvkeyLen, prv-&gt;len - ctx-&gt;info-&gt;pqcPrvkeyLen};</pre>
                 <div class="issue-source">Reviewer: gemini</div>
             </div>
 </div>
 <div class="section"><div class="section-title low">Low</div>
 <div class="issue">
-                <div class="issue-title">Function naming inconsistency</div>
-                <div class="issue-location">src/composite_sign/src/crypt_composite_sign.c:211</div>
-                <pre>static int32_t CRYPT_CompositeSetctxInfo(CRYPT_CompositeCtx *ctx, void *val, uint32_t len)</pre>
-                <div class="problem"><strong>Issue:</strong> `CRYPT_CompositeSetctxInfo` uses lowercase `ctx` in the name, inconsistent with `CRYPT_CompositeSetAlgInfo` and standard CamelCase convention.</div>
-                <div class="fix-label">Fix:</div><pre>static int32_t CRYPT_CompositeSetCtxInfo(CRYPT_CompositeCtx *ctx, void *val, uint32_t len)</pre>
-                <div class="issue-source">Reviewer: gemini</div>
-            </div>
-<div class="issue">
-                <div class="issue-title">Typo in comment</div>
-                <div class="issue-location">src/composite_sign/src/crypt_composite_sign_local.h:43</div>
-                <pre>uint32_t compPrvKeyLen; // composiet prvkey len</pre>
-                <div class="problem"><strong>Issue:</strong> `composiet` is misspelled.</div>
-                <div class="fix-label">Fix:</div><pre>uint32_t compPrvKeyLen; // composite prvkey len</pre>
+                <div class="issue-title">Commented Out Error Handling</div>
+                <div class="issue-location">src/provider/pqcp_pkey.c:51</div>
+                <pre>if (pkeyCtx == NULL) {
+        // BSL_ERR_PUSH_ERROR(CRYPT_PROVIDER_NOT_SUPPORT);
+        return NULL;
+    }</pre>
+                <div class="problem"><strong>Issue:</strong> The error reporting macro `BSL_ERR_PUSH_ERROR` is commented out. If context creation fails (e.g., unsupported algorithm), the function returns NULL without pushing an error code to the stack, making diagnostics difficult.</div>
+                <div class="fix-label">Fix:</div><pre>if (pkeyCtx == NULL) {
+        BSL_ERR_PUSH_ERROR(CRYPT_PROVIDER_NOT_SUPPORT);
+        return NULL;
+    }</pre>
                 <div class="issue-source">Reviewer: gemini</div>
             </div>
 </div>

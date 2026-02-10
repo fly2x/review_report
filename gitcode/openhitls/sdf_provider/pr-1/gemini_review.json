@@ -1,0 +1,102 @@
+[
+  {
+    "source": "gemini",
+    "file": "src/log.c",
+    "line": "20",
+    "severity": "critical",
+    "title": "Buffer overflow vulnerability in LOG_ERROR",
+    "problem": "The function uses `vsprintf` to write to a fixed-size buffer `log_buf` of 1024 bytes. If the formatted log message exceeds this length, it will cause a buffer overflow, which can lead to crashes or arbitrary code execution.",
+    "code": "va_start(args, lpFormat);\n    vsprintf(log_buf, lpFormat, args);\n    va_end(args);",
+    "fix": "va_start(args, lpFormat);\n    vsnprintf(log_buf, sizeof(log_buf), lpFormat, args);\n    va_end(args);"
+  },
+  {
+    "source": "gemini",
+    "file": "src/sm2_keymgmt.c",
+    "line": "421",
+    "severity": "high",
+    "title": "Insufficient buffer size for SM2 public key export",
+    "problem": "In `CRYPT_SM2_Export`, the `pubkey` buffer is allocated with 32 bytes, but an uncompressed SM2 public key (0x04 || X || Y) requires 65 bytes. `CRYPT_SM2_GetPubKeyEx` (called via `sm2Params`) checks if the buffer is at least 65 bytes and will fail, making public key export impossible.",
+    "code": "uint8_t pubkey[32] = {0};\n    CRYPT_EAL_ProcessFuncCb processCb = NULL;\n    void *args = NULL;\n    BSL_Param sm2Params[3] = {0};\n    int32_t ret = CRYPT_GetPkeyProcessParams_ex(params, &processCb, &args);\n    if (ret != CRYPT_SUCCESS) {\n        return ret;\n    }\n    if (ctx->KeyIndex != 0 || ctx->PrivateKey != NULL) {\n        (void)BSL_PARAM_InitValue(&sm2Params[index], CRYPT_PARAM_EC_PRVKEY, BSL_PARAM_TYPE_OCTETS, prvkey, sizeof(prvkey));\n        ret = CRYPT_SM2_GetPrvKeyEx(ctx, sm2Params);\n        if (ret != CRYPT_SUCCESS) {\n            return ret;\n        }\n        sm2Params[index].valueLen = sm2Params[index].useLen;\n        index++;\n    }\n    if (ctx->KeyIndex != 0 || ctx->PublicKey != NULL) {\n        (void)BSL_PARAM_InitValue(&sm2Params[index], CRYPT_PARAM_EC_PUBKEY, BSL_PARAM_TYPE_OCTETS,\n            pubkey, sizeof(pubkey));\n        ret = CRYPT_SM2_GetPubKeyEx(ctx, sm2Params);",
+    "fix": "uint8_t prvkey[32] = {0};\n    uint8_t pubkey[65] = {0};\n    CRYPT_EAL_ProcessFuncCb processCb = NULL;\n    void *args = NULL;\n    BSL_Param sm2Params[3] = {0};\n    int32_t ret = CRYPT_GetPkeyProcessParams_ex(params, &processCb, &args);\n    if (ret != CRYPT_SUCCESS) {\n        return ret;\n    }\n    if (ctx->KeyIndex != 0 || ctx->PrivateKey != NULL) {\n        (void)BSL_PARAM_InitValue(&sm2Params[index], CRYPT_PARAM_EC_PRVKEY, BSL_PARAM_TYPE_OCTETS, prvkey, sizeof(prvkey));\n        ret = CRYPT_SM2_GetPrvKeyEx(ctx, sm2Params);\n        if (ret != CRYPT_SUCCESS) {\n            return ret;\n        }\n        sm2Params[index].valueLen = sm2Params[index].useLen;\n        index++;\n    }\n    if (ctx->KeyIndex != 0 || ctx->PublicKey != NULL) {\n        (void)BSL_PARAM_InitValue(&sm2Params[index], CRYPT_PARAM_EC_PUBKEY, BSL_PARAM_TYPE_OCTETS,\n            pubkey, sizeof(pubkey));\n        ret = CRYPT_SM2_GetPubKeyEx(ctx, sm2Params);"
+  },
+  {
+    "source": "gemini",
+    "file": "src/sm2_pkeycipher.c",
+    "line": "153",
+    "severity": "medium",
+    "title": "Memory leak in CRYPT_SM2_Decrypt on error paths",
+    "problem": "`pucEncData` is allocated at the beginning of `CRYPT_SM2_Decrypt` but is not freed if `SDF_GetPrivateKeyAccessRight` or `SDF_ReleasePrivateKeyAccessRight` fails.",
+    "code": "// support key index and external key both\n    if (ctx->KeyIndex != 0) {\n        ret = SDF_GetPrivateKeyAccessRight(ctx->hSessionHandle, ctx->KeyIndex,\n                (unsigned char *)DEFAULT_PASS, DEFAULT_PASS_LEN);\n        if (ret != SDR_OK) {\n            LOG_ERROR(\"SDF_GetPrivateKeyAccessRight error, ret = %08x\", ret);\n            return CRYPT_SM2_INVALID_PRVKEY;\n        }\n        ret = SDF_InternalDecrypt_ECC(ctx->hSessionHandle, ctx->KeyIndex, pucEncData, out, outlen);\n        if (ret != SDR_OK) {\n            LOG_ERROR(\"SDF_InternalDecrypt_ECC error, ret = %08x\", ret);\n            BSL_SAL_Free(pucEncData);\n            return CRYPT_SM2_DECRYPT_FAIL;\n        }\n        ret = SDF_ReleasePrivateKeyAccessRight(ctx->hSessionHandle, ctx->KeyIndex);\n        if (ret != SDR_OK) {\n            LOG_ERROR(\"SDF_ReleasePrivateKeyAccessRight error, ret = %08x\", ret);\n            return CRYPT_SM2_INVALID_PRVKEY;\n        }\n    }",
+    "fix": "// support key index and external key both\n    if (ctx->KeyIndex != 0) {\n        ret = SDF_GetPrivateKeyAccessRight(ctx->hSessionHandle, ctx->KeyIndex,\n                (unsigned char *)DEFAULT_PASS, DEFAULT_PASS_LEN);\n        if (ret != SDR_OK) {\n            LOG_ERROR(\"SDF_GetPrivateKeyAccessRight error, ret = %08x\", ret);\n            BSL_SAL_Free(pucEncData);\n            return CRYPT_SM2_INVALID_PRVKEY;\n        }\n        ret = SDF_InternalDecrypt_ECC(ctx->hSessionHandle, ctx->KeyIndex, pucEncData, out, outlen);\n        if (ret != SDR_OK) {\n            LOG_ERROR(\"SDF_InternalDecrypt_ECC error, ret = %08x\", ret);\n            BSL_SAL_Free(pucEncData);\n            return CRYPT_SM2_DECRYPT_FAIL;\n        }\n        ret = SDF_ReleasePrivateKeyAccessRight(ctx->hSessionHandle, ctx->KeyIndex);\n        if (ret != SDR_OK) {\n            LOG_ERROR(\"SDF_ReleasePrivateKeyAccessRight error, ret = %08x\", ret);\n            BSL_SAL_Free(pucEncData);\n            return CRYPT_SM2_INVALID_PRVKEY;\n        }\n    }"
+  },
+  {
+    "source": "gemini",
+    "file": "src/rsa_keymgmt.c",
+    "line": "21",
+    "severity": "medium",
+    "title": "Resource-heavy context creation (Device/Session leak potential)",
+    "problem": "`CRYPT_RSA_NewCtxEx` opens a new SDF device handle and a new session for every single RSA context created. This is extremely inefficient and can quickly exhaust the hardware's limit on open devices or sessions. Device handles should ideally be shared or managed at the provider level.",
+    "code": "ret = SDF_OpenDevice(&hDeviceHandle);\n    if (ret != SDR_OK) {\n        LOG_ERROR(\"SDF_OpenDevice error, ret = %08x\", ret);\n        BSL_SAL_Free(ctx);\n        return NULL;\n    }\n\n    ret = SDF_OpenSession(hDeviceHandle, &hSessionHandle);\n    if (ret != SDR_OK) {\n        LOG_ERROR(\"SDF_OpenSession error, ret = %08x\", ret);\n        SDF_CloseDevice(hDeviceHandle);\n        BSL_SAL_Free(ctx);\n        return NULL;\n    }",
+    "fix": "/* Implementation should be refactored to manage hDeviceHandle at the Provider context level (src/provider.c) and potentially use a session pool or share sessions across contexts. */"
+  },
+  {
+    "source": "gemini",
+    "file": "src/rsa_keymgmt.c",
+    "line": "512",
+    "severity": "medium",
+    "title": "Potential NULL pointer dereference in DupCtx",
+    "problem": "In `CRYPT_RSA_DupCtx`, `SDF_OpenSession` is called using `newCtx->hDeviceHandle`. If `ctx->hDeviceHandle` was NULL, `newCtx->hDeviceHandle` remains NULL (from `Calloc`), leading to a NULL pointer dereference in `SDF_OpenSession` if `ctx->hSessionHandle` was non-NULL.",
+    "code": "if (ctx->hDeviceHandle != NULL) {\n        ret = SDF_OpenDevice(&newCtx->hDeviceHandle);\n        if (ret != SDR_OK) {\n            LOG_ERROR(\"SDF_OpenDevice error, ret = %08x\", ret);\n            goto ERR;\n        }\n    }\n    if (ctx->hSessionHandle != NULL) {\n        ret = SDF_OpenSession(newCtx->hDeviceHandle, &newCtx->hSessionHandle);",
+    "fix": "if (ctx->hDeviceHandle != NULL) {\n        ret = SDF_OpenDevice(&newCtx->hDeviceHandle);\n        if (ret != SDR_OK) {\n            LOG_ERROR(\"SDF_OpenDevice error, ret = %08x\", ret);\n            goto ERR;\n        }\n    }\n    if (ctx->hSessionHandle != NULL && newCtx->hDeviceHandle != NULL) {\n        ret = SDF_OpenSession(newCtx->hDeviceHandle, &newCtx->hSessionHandle);"
+  },
+  {
+    "source": "gemini",
+    "file": "src/provider.h",
+    "line": "9",
+    "severity": "medium",
+    "title": "Hardcoded default password for private key access",
+    "problem": "`DEFAULT_PASS` is hardcoded as \"12345678\". This password is used to access private keys in the SDF device. Hardcoding such sensitive information is insecure and should be configurable or provided by the user/application at runtime.",
+    "code": "#define DEFAULT_PASS \"12345678\"\n#define DEFAULT_PASS_LEN strlen(DEFAULT_PASS)",
+    "fix": "/* Remove hardcoded DEFAULT_PASS and implement a mechanism to pass the key password from the application through the provider context or control APIs. */"
+  },
+  {
+    "source": "gemini",
+    "file": "src/sm2_keymgmt.c",
+    "line": "102",
+    "severity": "medium",
+    "title": "KeyIndex masquerading as private key data",
+    "problem": "If the provided private key data consists of zeros except for the last byte, it is interpreted as a `KeyIndex`. When exporting this key back, `CRYPT_SM2_GetPrvKeyEx` returns this \"fake\" private key. This can lead to security issues or interoperability failures if this key is imported into a system that expects real private key bytes.",
+    "code": "if (memcmp(prv.data, zero, prv.len - 1) == 0) {\n        // data with leading 0x00, use it as KeyIndex\n        ctx->KeyIndex = prv.data[prv.len - 1];\n    }",
+    "fix": "/* Use a separate parameter type (e.g. CRYPT_PARAM_KEY_INDEX) to specify hardware key indices instead of overloading the private key buffer. */"
+  },
+  {
+    "source": "gemini",
+    "file": "src/log.c",
+    "line": "24",
+    "severity": "low",
+    "title": "Use of thread-unsafe localtime function",
+    "problem": "`localtime` returns a pointer to a static structure which is shared among all threads. In a multi-threaded environment, this can lead to race conditions where the timestamp in the log is corrupted.",
+    "code": "time(&timep);\n    p = localtime(&timep);",
+    "fix": "struct tm tm_res;\n    time(&timep);\n    p = localtime_r(&timep, &tm_res);"
+  },
+  {
+    "source": "gemini",
+    "file": "src/rsa_keymgmt.c",
+    "line": "472",
+    "severity": "low",
+    "title": "Missing NULL checks for SDF handles in FreeCtx",
+    "problem": "`SDF_CloseSession` and `SDF_CloseDevice` are called without checking if the handles are valid (non-NULL). Depending on the SDF library implementation, passing a NULL handle might cause a crash.",
+    "code": "BSL_SAL_Free(ctx->e);\n    BSL_SAL_Free(ctx->label.data);\n    SDF_CloseSession(ctx->hSessionHandle);\n    SDF_CloseDevice(ctx->hDeviceHandle);\n    BSL_SAL_Free(ctx);",
+    "fix": "BSL_SAL_Free(ctx->e);\n    BSL_SAL_Free(ctx->label.data);\n    if (ctx->hSessionHandle != NULL) {\n        SDF_CloseSession(ctx->hSessionHandle);\n    }\n    if (ctx->hDeviceHandle != NULL) {\n        SDF_CloseDevice(ctx->hDeviceHandle);\n    }\n    BSL_SAL_Free(ctx);"
+  },
+  {
+    "source": "gemini",
+    "file": "src/rsa_padding.c",
+    "line": "686",
+    "severity": "low",
+    "title": "Inefficient random number generation for RSA padding",
+    "problem": "In `CRYPT_RSA_SetPkcsV15Type2_ex`, if a byte generated by `SDF_GenerateRandom` is zero, it enters a `do-while` loop that calls `SDF_GenerateRandom` again for just 1 byte. Frequent small calls to hardware random number generators are typically inefficient.",
+    "code": "do {\n            // no zero\n            ret = SDF_GenerateRandom(ctx->hSessionHandle, 1, ps + i);\n            if (ret != SDR_OK) {\n                LOG_ERROR(\"SDF_GenerateRandom error, ret = %08x\", ret);\n                return CRYPT_EAL_ERR_RAND_NO_WORKING;\n            }\n        } while (*(ps + i) == 0);",
+    "fix": "/* It is more efficient to generate a larger block of random bytes and filter out zeros, or use a local PRNG seeded by the hardware RNG. */"
+  }
+]

@@ -1,82 +1,62 @@
 [
   {
     "source": "gemini",
-    "file": "CMakeLists.txt",
-    "line": "98",
+    "file": "src/composite_sign/src/crypt_composite_sign.c",
+    "line": "228",
     "severity": "high",
-    "title": "Inclusion of non-existent directory",
-    "problem": "The build configuration includes `${CMAKE_CURRENT_SOURCE_DIR}/src/hybrid_env/include`, but this directory does not exist in the source tree. This causes build errors or warnings.",
-    "code": "target_include_directories(pqcp_provider\n        ${CMAKE_CURRENT_SOURCE_DIR}/src/classic_mceliece/include\n        ${CMAKE_CURRENT_SOURCE_DIR}/src/frodokem/include\n        ${CMAKE_CURRENT_SOURCE_DIR}/src/polarlac/include\n        ${CMAKE_CURRENT_SOURCE_DIR}/src/hybrid_env/include\n        ${CMAKE_CURRENT_SOURCE_DIR}/src/composite_sign/include\n        ${OPENHITLS_INCLUDE_DIRS}",
-    "fix": "target_include_directories(pqcp_provider\n        ${CMAKE_CURRENT_SOURCE_DIR}/src/classic_mceliece/include\n        ${CMAKE_CURRENT_SOURCE_DIR}/src/frodokem/include\n        ${CMAKE_CURRENT_SOURCE_DIR}/src/polarlac/include\n        ${CMAKE_CURRENT_SOURCE_DIR}/src/composite_sign/include\n        ${OPENHITLS_INCLUDE_DIRS}"
+    "title": "Missing NULL Check for Input Parameter",
+    "problem": "The function `CRYPT_CompositeSetctxInfo` does not check if `val` is NULL before passing it to `BSL_SAL_Dump` (which presumably copies from it). If `len > 0` but `val` is NULL, this will likely cause a segmentation fault.",
+    "code": "static int32_t CRYPT_CompositeSetctxInfo(CRYPT_CompositeCtx *ctx, void *val, uint32_t len)\n{\n    if (len > COMPOSITE_MAX_CTX_BYTES) {\n        BSL_ERR_PUSH_ERROR(PQCP_COMPOSITE_KEYLEN_ERROR);\n        return PQCP_COMPOSITE_KEYLEN_ERROR;\n    }\n    if (ctx->ctxInfo != NULL) {",
+    "fix": "static int32_t CRYPT_CompositeSetctxInfo(CRYPT_CompositeCtx *ctx, void *val, uint32_t len)\n{\n    if (len > COMPOSITE_MAX_CTX_BYTES) {\n        BSL_ERR_PUSH_ERROR(PQCP_COMPOSITE_KEYLEN_ERROR);\n        return PQCP_COMPOSITE_KEYLEN_ERROR;\n    }\n    if (val == NULL && len > 0) {\n        BSL_ERR_PUSH_ERROR(CRYPT_NULL_INPUT);\n        return CRYPT_NULL_INPUT;\n    }\n    if (ctx->ctxInfo != NULL) {"
   },
   {
     "source": "gemini",
-    "file": "test/CMakeLists.txt",
-    "line": "92-93",
+    "file": "src/composite_sign/src/crypt_composite_sign.c",
+    "line": "541-546",
     "severity": "high",
-    "title": "Inclusion of non-existent directory",
-    "problem": "The test build configuration includes `hybrid_env` directories that do not exist.",
-    "code": "${CMAKE_SOURCE_DIR}/../platform/openhitls/platform/Secure_C/include\n    ${CMAKE_SOURCE_DIR}/../src/hybrid_env/include\n    ${CMAKE_SOURCE_DIR}/../src/hybrid_env/src\n    ${CMAKE_SOURCE_DIR}/../src/composite_sign/include",
-    "fix": "${CMAKE_SOURCE_DIR}/../platform/openhitls/platform/Secure_C/include\n    ${CMAKE_SOURCE_DIR}/../src/composite_sign/include"
+    "title": "Ignored Return Value of Secure Memory Copy",
+    "problem": "The return value of `memcpy_s` is explicitly ignored (`(void)memcpy_s(...)`) in `CompositeMsgEncode`. If `memcpy_s` fails (e.g., due to invalid overlap or size parameters), the destination buffer `msg->data` will contain uninitialized or partial data. The function then returns `CRYPT_SUCCESS`, causing the caller to sign/verify this invalid data.",
+    "code": "(void)memcpy_s(ptr, msg->len, PREFIX, prefixLen);\n    ptr += prefixLen;\n    (void)memcpy_s(ptr, msg->len - prefixLen, label, labelLen);\n    ptr += labelLen;\n    *ptr = ctx->ctxLen;\n    ptr++;\n    if (ctx->ctxInfo != NULL && ctx->ctxLen > 0) {\n        (void)memcpy_s(ptr, msg->len - (prefixLen + labelLen + 1), ctx->ctxInfo, ctx->ctxLen);\n        ptr += ctx->ctxLen;\n    }",
+    "fix": "if (memcpy_s(ptr, msg->len, PREFIX, prefixLen) != EOK) {\n        BSL_SAL_FREE(msg->data);\n        return CRYPT_MEM_CPY_FAIL;\n    }\n    ptr += prefixLen;\n    if (memcpy_s(ptr, msg->len - prefixLen, label, labelLen) != EOK) {\n        BSL_SAL_FREE(msg->data);\n        return CRYPT_MEM_CPY_FAIL;\n    }\n    ptr += labelLen;\n    *ptr = ctx->ctxLen;\n    ptr++;\n    if (ctx->ctxInfo != NULL && ctx->ctxLen > 0) {\n        if (memcpy_s(ptr, msg->len - (prefixLen + labelLen + 1), ctx->ctxInfo, ctx->ctxLen) != EOK) {\n            BSL_SAL_FREE(msg->data);\n            return CRYPT_MEM_CPY_FAIL;\n        }\n        ptr += ctx->ctxLen;\n    }"
+  },
+  {
+    "source": "gemini",
+    "file": "include/pqcp_types.h",
+    "line": "22-42",
+    "severity": "high",
+    "title": "Breaking API Change in Parameter IDs",
+    "problem": "The parameter ID base values have changed significantly (e.g., `CRYPT_PARAM_SCLOUDPLUS_BASE` 900 -> `PQCP_PARAM_SCLOUDPLUS_BASE` 5100). This is a binary and source incompatibility for any external application relying on the old values. While the rename suggests an API refactor, changing the underlying integer values breaks ABI with existing compiled code.",
+    "code": "#define PQCP_PARAM_BASE 5000\n#define PQCP_PARAM_SCLOUDPLUS_BASE (PQCP_PARAM_BASE + 100)\n// ...\n#define PQCP_PARAM_FRODOKEM_BASE (PQCP_PARAM_BASE + 200)",
+    "fix": "/* Ensure these values align with external expectations or version the API explicitly. \n   If backward compatibility is required, restore original values: */\n#define PQCP_PARAM_BASE 900 // Adjusted base if necessary\n// Or map specific bases back to 900, 1000, 1100, 1200 as before."
   },
   {
     "source": "gemini",
     "file": "src/composite_sign/src/crypt_composite_sign.c",
-    "line": "320-321",
+    "line": "366",
     "severity": "medium",
-    "title": "Ignored return value of secure memory copy",
-    "problem": "The return values of `memcpy_s` are explicitly cast to `void`. Ignoring the error code hides potential failures (e.g. invalid arguments) and violates secure coding standards.",
-    "code": "(void)memcpy_s(prv->data, prv->len, pqcPrv.data, pqcPrv.dataLen);\n    (void)memcpy_s(prv->data + pqcPrv.dataLen, prv->len - pqcPrv.dataLen, tradPrv.data, tradPrv.dataLen);",
-    "fix": "if (memcpy_s(prv->data, prv->len, pqcPrv.data, pqcPrv.dataLen) != EOK) {\n        ret = CRYPT_MEM_ALLOC_FAIL; // Or appropriate error code\n        goto ERR;\n    }\n    if (memcpy_s(prv->data + pqcPrv.dataLen, prv->len - pqcPrv.dataLen, tradPrv.data, tradPrv.dataLen) != EOK) {\n        ret = CRYPT_MEM_ALLOC_FAIL;\n        goto ERR;\n    }"
+    "title": "Incomplete Public Key Length Validation",
+    "problem": "`CRYPT_COMPOSITE_SetPubKey` checks if `pub->len` is greater than `pqcPubkeyLen`, but it does not check if `pub->len` exactly matches the expected composite public key length (`ctx->info->compPubKeyLen`). Excessively large `pub->len` will result in a larger-than-expected `tradPub` buffer being passed to the traditional method, relying on that method's validation which may be insufficient.",
+    "code": "RETURN_RET_IF(pub->len <= ctx->info->pqcPubkeyLen, PQCP_COMPOSITE_KEYLEN_ERROR);\n\n    BSL_Buffer pqcPub = {pub->data, ctx->info->pqcPubkeyLen};\n    BSL_Buffer tradPub = {pub->data + ctx->info->pqcPubkeyLen, pub->len - ctx->info->pqcPubkeyLen};",
+    "fix": "RETURN_RET_IF(pub->len != ctx->info->compPubKeyLen, PQCP_COMPOSITE_KEYLEN_ERROR);\n\n    BSL_Buffer pqcPub = {pub->data, ctx->info->pqcPubkeyLen};\n    BSL_Buffer tradPub = {pub->data + ctx->info->pqcPubkeyLen, pub->len - ctx->info->pqcPubkeyLen};"
   },
   {
     "source": "gemini",
     "file": "src/composite_sign/src/crypt_composite_sign.c",
-    "line": "343-344",
+    "line": "351",
     "severity": "medium",
-    "title": "Ignored return value of secure memory copy",
-    "problem": "The return values of `memcpy_s` are explicitly cast to `void`.",
-    "code": "(void)memcpy_s(pub->data, pub->len, pqcPub.data, pqcPub.dataLen);\n    (void)memcpy_s(pub->data + pqcPub.dataLen, pub->len - pqcPub.dataLen, tradPub.data, tradPub.dataLen);",
-    "fix": "if (memcpy_s(pub->data, pub->len, pqcPub.data, pqcPub.dataLen) != EOK) {\n        ret = CRYPT_MEM_ALLOC_FAIL;\n        goto ERR;\n    }\n    if (memcpy_s(pub->data + pqcPub.dataLen, pub->len - pqcPub.dataLen, tradPub.data, tradPub.dataLen) != EOK) {\n        ret = CRYPT_MEM_ALLOC_FAIL;\n        goto ERR;\n    }"
+    "title": "Incomplete Private Key Length Validation",
+    "problem": "`CRYPT_COMPOSITE_SetPrvKey` checks if `prv->len` is greater than `pqcPrvkeyLen`, but does not enforce that `prv->len` matches `ctx->info->compPrvKeyLen`. This allows passing arbitrarily large buffers as the private key, potentially causing issues in the underlying traditional key setter.",
+    "code": "RETURN_RET_IF(prv->len <= ctx->info->pqcPrvkeyLen, PQCP_COMPOSITE_KEYLEN_ERROR);\n    BSL_Buffer pqcPrv = {prv->data, ctx->info->pqcPrvkeyLen};\n    BSL_Buffer tradPrv = {prv->data + ctx->info->pqcPrvkeyLen, prv->len - ctx->info->pqcPrvkeyLen};",
+    "fix": "RETURN_RET_IF(prv->len != ctx->info->compPrvKeyLen, PQCP_COMPOSITE_KEYLEN_ERROR);\n    BSL_Buffer pqcPrv = {prv->data, ctx->info->pqcPrvkeyLen};\n    BSL_Buffer tradPrv = {prv->data + ctx->info->pqcPrvkeyLen, prv->len - ctx->info->pqcPrvkeyLen};"
   },
   {
     "source": "gemini",
-    "file": "src/composite_sign/src/crypt_composite_sign.c",
-    "line": "466-476",
-    "severity": "medium",
-    "title": "Ignored return value of secure memory copy",
-    "problem": "Multiple `memcpy_s` calls in `CompositeMsgEncode` ignore the return value.",
-    "code": "(void)memcpy_s(ptr, msg->len, PREFIX, prefixLen);\n    ptr += prefixLen;\n    (void)memcpy_s(ptr, msg->len - prefixLen, label, labelLen);\n    ptr += labelLen;\n    *ptr = ctx->ctxLen;\n    ptr++;\n    if (ctx->ctxInfo != NULL && ctx->ctxLen > 0) {\n        (void)memcpy_s(ptr, msg->len - (prefixLen + labelLen + 1), ctx->ctxInfo, ctx->ctxLen);\n        ptr += ctx->ctxLen;\n    }\n    (void)memcpy_s(ptr, digestLen, digest, digestLen);",
-    "fix": "if (memcpy_s(ptr, msg->len, PREFIX, prefixLen) != EOK) return CRYPT_MEM_ALLOC_FAIL;\n    ptr += prefixLen;\n    if (memcpy_s(ptr, msg->len - prefixLen, label, labelLen) != EOK) return CRYPT_MEM_ALLOC_FAIL;\n    ptr += labelLen;\n    *ptr = ctx->ctxLen;\n    ptr++;\n    if (ctx->ctxInfo != NULL && ctx->ctxLen > 0) {\n        if (memcpy_s(ptr, msg->len - (prefixLen + labelLen + 1), ctx->ctxInfo, ctx->ctxLen) != EOK) return CRYPT_MEM_ALLOC_FAIL;\n        ptr += ctx->ctxLen;\n    }\n    if (memcpy_s(ptr, digestLen, digest, digestLen) != EOK) return CRYPT_MEM_ALLOC_FAIL;"
-  },
-  {
-    "source": "gemini",
-    "file": "test/demo/composite_sign_demo.c",
-    "line": "27",
-    "severity": "medium",
-    "title": "Insufficient buffer size for MLDSA-87 signatures",
-    "problem": "`signData` buffer is 4096 bytes. MLDSA-87 composite signatures require > 4600 bytes. If the algorithm is changed to MLDSA-87, this buffer will overflow.",
-    "code": "uint8_t signData[4096];",
-    "fix": "uint8_t signData[5000];"
-  },
-  {
-    "source": "gemini",
-    "file": "src/composite_sign/src/crypt_composite_sign.c",
-    "line": "211",
+    "file": "src/provider/pqcp_pkey.c",
+    "line": "51",
     "severity": "low",
-    "title": "Function naming inconsistency",
-    "problem": "`CRYPT_CompositeSetctxInfo` uses lowercase `ctx` in the name, inconsistent with `CRYPT_CompositeSetAlgInfo` and standard CamelCase convention.",
-    "code": "static int32_t CRYPT_CompositeSetctxInfo(CRYPT_CompositeCtx *ctx, void *val, uint32_t len)",
-    "fix": "static int32_t CRYPT_CompositeSetCtxInfo(CRYPT_CompositeCtx *ctx, void *val, uint32_t len)"
-  },
-  {
-    "source": "gemini",
-    "file": "src/composite_sign/src/crypt_composite_sign_local.h",
-    "line": "43",
-    "severity": "low",
-    "title": "Typo in comment",
-    "problem": "`composiet` is misspelled.",
-    "code": "uint32_t compPrvKeyLen; // composiet prvkey len",
-    "fix": "uint32_t compPrvKeyLen; // composite prvkey len"
+    "title": "Commented Out Error Handling",
+    "problem": "The error reporting macro `BSL_ERR_PUSH_ERROR` is commented out. If context creation fails (e.g., unsupported algorithm), the function returns NULL without pushing an error code to the stack, making diagnostics difficult.",
+    "code": "if (pkeyCtx == NULL) {\n        // BSL_ERR_PUSH_ERROR(CRYPT_PROVIDER_NOT_SUPPORT);\n        return NULL;\n    }",
+    "fix": "if (pkeyCtx == NULL) {\n        BSL_ERR_PUSH_ERROR(CRYPT_PROVIDER_NOT_SUPPORT);\n        return NULL;\n    }"
   }
 ]

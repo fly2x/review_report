@@ -2,12 +2,17 @@
 ## openHiTLS/openhitls - PR #992
 
 ### Summary
-- **Total Issues**: 11
+- **Total Issues**: 10
 - **Critical**: 1
 - **High**: 5
 - **Medium**: 2
-- **Low**: 3
+- **Low**: 2
 - **Reviewers**: claude, gemini, codex
+
+### Verification Notes
+已对三个模型报告交叉核对。以下条目因证据不足或自相矛盾，暂不纳入最终问题清单：
+- `crypto/lms/src/lms_core.c` 的 unsigned 递减循环被指“可能无限循环”，但按代码逻辑在 `r` 递减至 0 时会退出；且未看到 `numLeaves` 为 0/1 的变更证据。
+- `BSL_SAL_Free` 与 `BSL_SAL_FREE` 的大小写差异仅出现在单一报告，且其他片段未能佐证其为编译错误；需要结合真实宏/函数定义确认。
 
 ---
 
@@ -15,7 +20,7 @@
 ## Critical
 
 ### Ignored return value of LmsHash in LmOtsGeneratePublicKey
-`crypto/lms/src/lms_ots.c:136`
+`crypto/lms/src/lms_ots.c:135-139`
 **Reviewers**: GEMINI | **置信度**: 可信
 ```
 LmsHash(publicKey, buffer, LMS_PBLC_PREFIX_LEN + params.p * params.n);
@@ -38,7 +43,7 @@ return ret;
 ## High
 
 ### Ignored return value of LmsHash in LmOtsComputeQ
-`crypto/lms/src/lms_ots.c:172`
+`crypto/lms/src/lms_ots.c:171-178`
 **Reviewers**: GEMINI | **置信度**: 可信
 ```
 LmsHash(Q, prefix, LMS_MESG_PREFIX_LEN(ctx->n) + messageLen);
@@ -63,7 +68,7 @@ return CRYPT_SUCCESS;
 ---
 
 ### Ignored return value of LmsHash in LmOtsSignChains
-`crypto/lms/src/lms_ots.c:198`
+`crypto/lms/src/lms_ots.c:197-200`
 **Reviewers**: GEMINI | **置信度**: 可信
 ```
 (void)memcpy_s(iterBuf + LMS_ITER_PREV_OFFSET, ctx->n, tmp, ctx->n);
@@ -81,7 +86,7 @@ if (LmsHash(tmp, iterBuf, LMS_ITER_LEN(ctx->n)) != CRYPT_SUCCESS) {
 ---
 
 ### Ignored return value of LmsHash in LmOtsValidateChains
-`crypto/lms/src/lms_ots.c:288`
+`crypto/lms/src/lms_ots.c:288-291`
 **Reviewers**: GEMINI | **置信度**: 可信
 ```
 (void)memcpy_s(iterBuf + LMS_ITER_PREV_OFFSET, ctx->n, tmp, ctx->n);
@@ -99,7 +104,7 @@ if (LmsHash(tmp, iterBuf, LMS_ITER_LEN(ctx->n)) != CRYPT_SUCCESS) {
 ---
 
 ### Ignored return value of LmsHash in LmOtsValidateSignature
-`crypto/lms/src/lms_ots.c:333`
+`crypto/lms/src/lms_ots.c:333-339`
 **Reviewers**: GEMINI | **置信度**: 可信
 ```
 LmsHash(computedPubKey, finalBuf, LMS_PBLC_PREFIX_LEN + params.p * params.n);
@@ -123,7 +128,7 @@ return ret2;
 ---
 
 ### Wrong height used for HSS tree index calculation
-`crypto/lms/src/hss_utils.c:360-362`
+`crypto/lms/src/hss_utils.c:355-362`
 **Reviewers**: CODEX | **置信度**: 可信
 ```
 for (int32_t i = (int32_t)para->levels - 2; i >= 0; i--) {
@@ -134,6 +139,12 @@ for (int32_t i = (int32_t)para->levels - 2; i >= 0; i--) {
 **Issue**: The loop uses the child height (`para->levelPara[i + 1].height`) instead of the current level height when computing `sigsPerTree[i]`. This miscomputes `treeIndex`/`leafIndex` for non-uniform hierarchies, which can cause LM-OTS key reuse and incorrect capacity tracking. It also lacks overflow checks.
 **Fix**:
 ```
+uint32_t bottomHeight = para->levelPara[para->levels - 1].height;
+if (bottomHeight > 63) {
+    return CRYPT_HSS_INVALID_PARAM;
+}
+sigsPerTree[para->levels - 1] = 1ULL << bottomHeight;
+
 for (int32_t i = (int32_t)para->levels - 2; i >= 0; i--) {
     uint32_t height = para->levelPara[i].height;
     if (height > 63 || sigsPerTree[i + 1] > (UINT64_MAX >> height)) {
@@ -149,7 +160,7 @@ for (int32_t i = (int32_t)para->levels - 2; i >= 0; i--) {
 ## Medium
 
 ### HSS private-key load leaves stale tree cache
-`crypto/lms/src/hss_api.c:373-378`
+`crypto/lms/src/hss_api.c:363-378`
 **Reviewers**: CODEX | **置信度**: 可信
 ```
 int32_t ret = HssDecompressParamSet(ctx->para, compressed);
@@ -183,7 +194,7 @@ return CRYPT_SUCCESS;
 ---
 
 ### Levels accepted that key format cannot encode
-`crypto/lms/src/hss_api.c:191-195`
+`crypto/lms/src/hss_api.c:185-195`
 **Reviewers**: CODEX | **置信度**: 可信
 ```
 if (levels < HSS_MIN_LEVELS || levels > HSS_MAX_LEVELS) {
@@ -205,11 +216,18 @@ ctx->para->levels = levels;
 
 ## Low
 
-### Master seed not cleared on root-seed hash failure
-`crypto/lms/src/hss_utils.c:284-286`
+### Master seed not cleared on root-seed hash failure paths
+`crypto/lms/src/hss_utils.c:283-296`
 **Reviewers**: CODEX | **置信度**: 可信
 ```
 int32_t ret = LmsHash(hash, buffer, HSS_ROOT_SEED_DERIVE_BUF_LEN);
+if (ret != CRYPT_SUCCESS) {
+    return CRYPT_HSS_SEED_DERIVE_FAIL;
+}
+
+...
+
+ret = LmsHash(rootSeed, buffer, HSS_ROOT_SEED_DERIVE_BUF_LEN);
 if (ret != CRYPT_SUCCESS) {
     return CRYPT_HSS_SEED_DERIVE_FAIL;
 }
@@ -223,22 +241,7 @@ if (ret != CRYPT_SUCCESS) {
     LmsZeroize(hash, sizeof(hash));
     return CRYPT_HSS_SEED_DERIVE_FAIL;
 }
-```
 
----
-
-### Master seed not cleared on second hash failure
-`crypto/lms/src/hss_utils.c:294-296`
-**Reviewers**: CODEX | **置信度**: 可信
-```
-ret = LmsHash(rootSeed, buffer, HSS_ROOT_SEED_DERIVE_BUF_LEN);
-if (ret != CRYPT_SUCCESS) {
-    return CRYPT_HSS_SEED_DERIVE_FAIL;
-}
-```
-**Issue**: On the second hash failure in `HssGenerateRootSeed`, the stack buffer containing `masterSeed` is returned without zeroization, leaving sensitive material in memory.
-**Fix**:
-```
 ret = LmsHash(rootSeed, buffer, HSS_ROOT_SEED_DERIVE_BUF_LEN);
 if (ret != CRYPT_SUCCESS) {
     LmsZeroize(buffer, sizeof(buffer));
@@ -250,7 +253,7 @@ if (ret != CRYPT_SUCCESS) {
 ---
 
 ### HSS compare ignores private seed
-`crypto/lms/src/hss_api.c:173-177`
+`crypto/lms/src/hss_api.c:172-177`
 **Reviewers**: CODEX | **置信度**: 可信
 ```
 if (ctx1->privateKey != NULL && ctx2->privateKey != NULL) {

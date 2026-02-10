@@ -1,0 +1,102 @@
+[
+  {
+    "source": "codex",
+    "file": "src/log.c",
+    "line": "19-20",
+    "severity": "high",
+    "title": "Unbounded vsprintf in LOG_ERROR",
+    "problem": "`vsprintf` writes without bounds into a fixed-size buffer, allowing a long format string to overflow `log_buf` and corrupt memory.",
+    "code": "va_start(args, lpFormat);\nvsprintf(log_buf, lpFormat, args);\nva_end(args);",
+    "fix": "va_start(args, lpFormat);\nvsnprintf(log_buf, sizeof(log_buf), lpFormat, args);\nva_end(args);"
+  },
+  {
+    "source": "codex",
+    "file": "src/crypt_util_mgf.c",
+    "line": "41-44",
+    "severity": "medium",
+    "title": "Missing digest-size zero check can hang MGF1",
+    "problem": "If `CRYPT_EAL_MdGetDigestSize` returns 0 (unsupported/invalid hash), `partLen` stays 0 and the loop never advances, causing an infinite loop.",
+    "code": "uint32_t hashLen = CRYPT_EAL_MdGetDigestSize(id);\nif (hashLen > HASH_MAX_MDSIZE) {\n    return CRYPT_RSA_ERR_INPUT_VALUE;\n}",
+    "fix": "uint32_t hashLen = CRYPT_EAL_MdGetDigestSize(id);\nif (hashLen == 0 || hashLen > HASH_MAX_MDSIZE) {\n    return CRYPT_RSA_ERR_INPUT_VALUE;\n}"
+  },
+  {
+    "source": "codex",
+    "file": "src/crypt_util_pkey.c",
+    "line": "22-26",
+    "severity": "medium",
+    "title": "`args` may be uninitialized when process args are absent",
+    "problem": "If `CRYPT_PARAM_PKEY_PROCESS_ARGS` isn’t present, `*args` is never initialized and the callback may receive garbage.",
+    "code": "BSL_Param *argsParam = BSL_PARAM_FindParam(params, CRYPT_PARAM_PKEY_PROCESS_ARGS);\nif (argsParam != NULL) {\n    GOTO_ERR_IF_EX(BSL_PARAM_GetPtrValue(argsParam, CRYPT_PARAM_PKEY_PROCESS_ARGS,\n        BSL_PARAM_TYPE_CTX_PTR, args, NULL), ret);\n}",
+    "fix": "if (args != NULL) {\n    *args = NULL;\n}\nBSL_Param *argsParam = BSL_PARAM_FindParam(params, CRYPT_PARAM_PKEY_PROCESS_ARGS);\nif (argsParam != NULL) {\n    GOTO_ERR_IF_EX(BSL_PARAM_GetPtrValue(argsParam, CRYPT_PARAM_PKEY_PROCESS_ARGS,\n        BSL_PARAM_TYPE_CTX_PTR, args, NULL), ret);\n}"
+  },
+  {
+    "source": "codex",
+    "file": "src/rsa_sign.c",
+    "line": "95-113",
+    "severity": "medium",
+    "title": "Private key access right not released on error",
+    "problem": "If `SDF_InternalPrivateKeyOperation_RSA` fails, the access right is not released, leaving the key in an acquired state.",
+    "code": "ret = SDF_GetPrivateKeyAccessRight(ctx->hSessionHandle, ctx->KeyIndex,\n        (unsigned char *)DEFAULT_PASS, DEFAULT_PASS_LEN);\nif (ret != SDR_OK) {\n    LOG_ERROR(\"SDF_GetPrivateKeyAccessRight error, ret = %08x\", ret);\n    ret = CRYPT_RSA_ERR_INVALID_PRVKEY;\n    goto EXIT;\n}\nret = SDF_InternalPrivateKeyOperation_RSA(ctx->hSessionHandle, ctx->KeyIndex,\n        pad, padLen, sign, signLen);\nif (ret != SDR_OK) {\n    LOG_ERROR(\"SDF_InternalPrivateKeyOperation_RSA error, ret = %08x\", ret);\n    ret = CRYPT_RSA_ERR_INVALID_PRVKEY;\n    goto EXIT;\n}",
+    "fix": "int accessGranted = 0;\n/* ... */\nret = SDF_GetPrivateKeyAccessRight(ctx->hSessionHandle, ctx->KeyIndex,\n        (unsigned char *)DEFAULT_PASS, DEFAULT_PASS_LEN);\nif (ret != SDR_OK) {\n    LOG_ERROR(\"SDF_GetPrivateKeyAccessRight error, ret = %08x\", ret);\n    ret = CRYPT_RSA_ERR_INVALID_PRVKEY;\n    goto EXIT;\n}\naccessGranted = 1;\n\nret = SDF_InternalPrivateKeyOperation_RSA(ctx->hSessionHandle, ctx->KeyIndex,\n        pad, padLen, sign, signLen);\nif (ret != SDR_OK) {\n    LOG_ERROR(\"SDF_InternalPrivateKeyOperation_RSA error, ret = %08x\", ret);\n    ret = CRYPT_RSA_ERR_INVALID_PRVKEY;\n    goto EXIT;\n}\n\nEXIT:\nif (accessGranted) {\n    int32_t rret = SDF_ReleasePrivateKeyAccessRight(ctx->hSessionHandle, ctx->KeyIndex);\n    if (rret != SDR_OK && ret == CRYPT_SUCCESS) {\n        LOG_ERROR(\"SDF_ReleasePrivateKeyAccessRight error, ret = %08x\", rret);\n        ret = CRYPT_RSA_ERR_INVALID_PRVKEY;\n    }\n}"
+  },
+  {
+    "source": "codex",
+    "file": "src/rsa_pkeycipher.c",
+    "line": "134-154",
+    "severity": "medium",
+    "title": "Private key access right not released on error",
+    "problem": "If `SDF_InternalPrivateKeyOperation_RSA` fails, the access right isn’t released, which can leak privileges or lock the key.",
+    "code": "ret = SDF_GetPrivateKeyAccessRight(ctx->hSessionHandle, ctx->KeyIndex,\n        (unsigned char *)DEFAULT_PASS, DEFAULT_PASS_LEN);\nif (ret != SDR_OK) {\n    LOG_ERROR(\"SDF_GetPrivateKeyAccessRight error, ret = %08x\", ret);\n    ret = CRYPT_RSA_ERR_INVALID_PRVKEY;\n    goto EXIT;\n}\nret = SDF_InternalPrivateKeyOperation_RSA(ctx->hSessionHandle, ctx->KeyIndex,\n        (unsigned char *)data, dataLen, pad, &padLen);\nif (ret != SDR_OK) {\n    LOG_ERROR(\"SDF_InternalPrivateKeyOperation_RSA error, ret = %08x\", ret);\n    ret = CRYPT_RSA_ERR_INVALID_PRVKEY;\n    goto EXIT;\n}",
+    "fix": "int accessGranted = 0;\n/* ... */\nret = SDF_GetPrivateKeyAccessRight(ctx->hSessionHandle, ctx->KeyIndex,\n        (unsigned char *)DEFAULT_PASS, DEFAULT_PASS_LEN);\nif (ret != SDR_OK) {\n    LOG_ERROR(\"SDF_GetPrivateKeyAccessRight error, ret = %08x\", ret);\n    ret = CRYPT_RSA_ERR_INVALID_PRVKEY;\n    goto EXIT;\n}\naccessGranted = 1;\n\nret = SDF_InternalPrivateKeyOperation_RSA(ctx->hSessionHandle, ctx->KeyIndex,\n        (unsigned char *)data, dataLen, pad, &padLen);\nif (ret != SDR_OK) {\n    LOG_ERROR(\"SDF_InternalPrivateKeyOperation_RSA error, ret = %08x\", ret);\n    ret = CRYPT_RSA_ERR_INVALID_PRVKEY;\n    goto EXIT;\n}\n\nEXIT:\nif (accessGranted) {\n    int32_t rret = SDF_ReleasePrivateKeyAccessRight(ctx->hSessionHandle, ctx->KeyIndex);\n    if (rret != SDR_OK && ret == CRYPT_SUCCESS) {\n        LOG_ERROR(\"SDF_ReleasePrivateKeyAccessRight error, ret = %08x\", rret);\n        ret = CRYPT_RSA_ERR_INVALID_PRVKEY;\n    }\n}"
+  },
+  {
+    "source": "codex",
+    "file": "src/sm2_sign.c",
+    "line": "88-103",
+    "severity": "medium",
+    "title": "Private key access right not released on error",
+    "problem": "On `SDF_InternalSign_ECC` failure, the access right is not released, leaving the key in an acquired state.",
+    "code": "ret = SDF_GetPrivateKeyAccessRight(ctx->hSessionHandle, ctx->KeyIndex,\n        (unsigned char *)DEFAULT_PASS, DEFAULT_PASS_LEN);\nif (ret != SDR_OK) {\n    LOG_ERROR(\"SDF_GetPrivateKeyAccessRight error, ret = %08x\", ret);\n    return CRYPT_SM2_INVALID_PRVKEY;\n}\nret = SDF_InternalSign_ECC(ctx->hSessionHandle, ctx->KeyIndex, tbs, tbsLen, &pucSignature);\nif (ret != SDR_OK) {\n    LOG_ERROR(\"SDF_InternalSign_ECC error, ret = %08x\", ret);\n    return CRYPT_SM2_INVALID_PRVKEY;\n}",
+    "fix": "int accessGranted = 0;\n/* ... */\nret = SDF_GetPrivateKeyAccessRight(ctx->hSessionHandle, ctx->KeyIndex,\n        (unsigned char *)DEFAULT_PASS, DEFAULT_PASS_LEN);\nif (ret != SDR_OK) {\n    LOG_ERROR(\"SDF_GetPrivateKeyAccessRight error, ret = %08x\", ret);\n    return CRYPT_SM2_INVALID_PRVKEY;\n}\naccessGranted = 1;\n\nret = SDF_InternalSign_ECC(ctx->hSessionHandle, ctx->KeyIndex, tbs, tbsLen, &pucSignature);\nif (ret != SDR_OK) {\n    LOG_ERROR(\"SDF_InternalSign_ECC error, ret = %08x\", ret);\n    goto EXIT;\n}\n\nEXIT:\nif (accessGranted) {\n    (void)SDF_ReleasePrivateKeyAccessRight(ctx->hSessionHandle, ctx->KeyIndex);\n}"
+  },
+  {
+    "source": "codex",
+    "file": "src/sm2_pkeycipher.c",
+    "line": "153-169",
+    "severity": "medium",
+    "title": "Private key access right not released on error",
+    "problem": "If `SDF_InternalDecrypt_ECC` fails, the access right is not released, which can leak privileges or lock the key.",
+    "code": "ret = SDF_GetPrivateKeyAccessRight(ctx->hSessionHandle, ctx->KeyIndex,\n        (unsigned char *)DEFAULT_PASS, DEFAULT_PASS_LEN);\nif (ret != SDR_OK) {\n    LOG_ERROR(\"SDF_GetPrivateKeyAccessRight error, ret = %08x\", ret);\n    return CRYPT_SM2_INVALID_PRVKEY;\n}\nret = SDF_InternalDecrypt_ECC(ctx->hSessionHandle, ctx->KeyIndex, pucEncData, out, outlen);\nif (ret != SDR_OK) {\n    LOG_ERROR(\"SDF_InternalDecrypt_ECC error, ret = %08x\", ret);\n    BSL_SAL_Free(pucEncData);\n    return CRYPT_SM2_DECRYPT_FAIL;\n}",
+    "fix": "int accessGranted = 0;\n/* ... */\nret = SDF_GetPrivateKeyAccessRight(ctx->hSessionHandle, ctx->KeyIndex,\n        (unsigned char *)DEFAULT_PASS, DEFAULT_PASS_LEN);\nif (ret != SDR_OK) {\n    LOG_ERROR(\"SDF_GetPrivateKeyAccessRight error, ret = %08x\", ret);\n    return CRYPT_SM2_INVALID_PRVKEY;\n}\naccessGranted = 1;\n\nret = SDF_InternalDecrypt_ECC(ctx->hSessionHandle, ctx->KeyIndex, pucEncData, out, outlen);\nif (ret != SDR_OK) {\n    LOG_ERROR(\"SDF_InternalDecrypt_ECC error, ret = %08x\", ret);\n    ret = CRYPT_SM2_DECRYPT_FAIL;\n    goto EXIT;\n}\n\nEXIT:\nif (accessGranted) {\n    (void)SDF_ReleasePrivateKeyAccessRight(ctx->hSessionHandle, ctx->KeyIndex);\n}"
+  },
+  {
+    "source": "codex",
+    "file": "src/sm2_keymgmt.c",
+    "line": "457-459",
+    "severity": "medium",
+    "title": "SM2 export uses too-small buffer for public key",
+    "problem": "SM2 uncompressed public keys are 65 bytes, but the export buffer is only 32 bytes, causing `CRYPT_SM2_GetPubKeyEx` to fail.",
+    "code": "uint32_t index = 0;\nuint8_t prvkey[32] = {0};\nuint8_t pubkey[32] = {0};",
+    "fix": "uint32_t index = 0;\nuint8_t prvkey[32] = {0};\nuint8_t pubkey[SM2_POINT_COORDINATE_LEN] = {0};"
+  },
+  {
+    "source": "codex",
+    "file": "src/rsa_keymgmt.c",
+    "line": "584-595",
+    "severity": "medium",
+    "title": "RSA key check reports success without validation",
+    "problem": "The check function returns success for keypair/private-key checks but does not actually validate anything, so invalid keys can be treated as valid.",
+    "code": "case CRYPT_PKEY_CHECK_KEYPAIR:\n    // TODO\n    return CRYPT_SUCCESS;\ncase CRYPT_PKEY_CHECK_PRVKEY:\n    // TODO\n    return CRYPT_SUCCESS;",
+    "fix": "case CRYPT_PKEY_CHECK_KEYPAIR:\ncase CRYPT_PKEY_CHECK_PRVKEY:\n    return CRYPT_NOT_SUPPORT; /* implement real checks before returning success */"
+  },
+  {
+    "source": "codex",
+    "file": "src/sm2_keymgmt.c",
+    "line": "301-318",
+    "severity": "medium",
+    "title": "SM2 key check reports success without validation",
+    "problem": "The check function returns success for keypair/private-key checks but does not validate the key material, allowing invalid keys to pass.",
+    "code": "case CRYPT_PKEY_CHECK_KEYPAIR:\n    if (pkey1 == NULL || pkey2 == NULL) {\n        return CRYPT_NULL_INPUT;\n    }\n    // TODO\n    ret = CRYPT_SUCCESS;\n    break;\ncase CRYPT_PKEY_CHECK_PRVKEY:\n    if (pkey1 == NULL) {\n        return CRYPT_NULL_INPUT;\n    }\n    // TODO\n    ret = CRYPT_SUCCESS;\n    break;",
+    "fix": "case CRYPT_PKEY_CHECK_KEYPAIR:\ncase CRYPT_PKEY_CHECK_PRVKEY:\n    return CRYPT_NOT_SUPPORT; /* implement real checks before returning success */"
+  }
+]
