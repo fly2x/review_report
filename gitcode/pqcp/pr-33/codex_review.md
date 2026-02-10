@@ -1,34 +1,86 @@
-# Code Review: openhitls/pqcp#33
+# Code Review: openHiTLS/pqcp#33
 **Reviewer**: CODEX
 
 
 ## High
 
-### Duplicate const qualifier breaks build
-`src/provider/pqcp_pkey.c:145`
+### Partial initialization left behind on allocation failure
+`src/composite_sign/src/crypt_composite_sign.c:190-199`
 ```
-const const CRYPT_EAL_Func g_pqcpKeyMgmtCompositeSign[] = {
+ctx->pqcMethod = pqcMethod;
+ctx->tradMethod = tradMethod;
+ctx->pqcCtx = pqcMethod->newCtx();
+RETURN_RET_IF((ctx->pqcCtx == NULL), CRYPT_MEM_ALLOC_FAIL);
+ctx->tradCtx = tradMethod->newCtx();
+if (ctx->tradCtx == NULL) {
+    pqcMethod->freeCtx(ctx->pqcCtx);
+    ctx->pqcCtx = NULL;
+    return CRYPT_MEM_ALLOC_FAIL;
+}
 ```
-**Issue**: The declaration uses `const const`, which is invalid C and will not compile.
+**Issue**: `CRYPT_CompositeSetAlgInfo` sets `ctx->info` and method pointers before allocating subcontexts. If `newCtx()` fails, the function returns with `ctx->info` still set and `ctx->pqcCtx`/`ctx->tradCtx` null. This makes the context unrecoverable (`SET_PARA_BY_ID` returns “already set”) and can later hit null subcontext paths.
 **Fix**:
 ```
-const CRYPT_EAL_Func g_pqcpKeyMgmtCompositeSign[] = {
+const COMPOSITE_ALG_INFO *info = CRYPT_COMPOSITE_GetInfo(*(int32_t *)val);
+if (info == NULL) {
+    BSL_ERR_PUSH_ERROR(CRYPT_INVALID_ARG);
+    return CRYPT_INVALID_ARG;
+}
+
+const EAL_PkeyMethod *pqcMethod = CRYPT_EAL_PkeyFindMethod(info->pqcAlg);
+const EAL_PkeyMethod *tradMethod = CRYPT_EAL_PkeyFindMethod(info->tradAlg);
+RETURN_RET_IF((pqcMethod == NULL || tradMethod == NULL), CRYPT_NOT_SUPPORT);
+
+void *pqcCtx = pqcMethod->newCtx();
+RETURN_RET_IF(pqcCtx == NULL, CRYPT_MEM_ALLOC_FAIL);
+
+void *tradCtx = tradMethod->newCtx();
+if (tradCtx == NULL) {
+    pqcMethod->freeCtx(pqcCtx);
+    return CRYPT_MEM_ALLOC_FAIL;
+}
+
+ctx->info = info;
+ctx->pqcMethod = pqcMethod;
+ctx->tradMethod = tradMethod;
+ctx->pqcCtx = pqcCtx;
+ctx->tradCtx = tradCtx;
 ```
 
 ---
 
-### Traditional private key slice uses wrong buffer pointer
-`src/composite_sign/src/crypt_composite_sign.c:386-388`
+### Public PolarLAC control IDs no longer handled
+`src/polarlac/src/polarlac.c:263-290`
 ```
-BSL_Buffer pqcPrv = {prv->data, ctx->info->pqcPrvkeyLen};
-BSL_Buffer tradPrv = {prv->data, + ctx->info->pqcPrvkeyLen, prv->len - ctx->info->pqcPrvkeyLen};
+switch (cmd) {
+    case CRYPT_CTRL_SET_PARA_BY_ID:
+        return PolarLacSetAlgInfo(ctx, val, valLen);
+    case CRYPT_CTRL_GET_CIPHERTEXT_LEN:
+        ...
+    case CRYPT_CTRL_GET_PRVKEY_LEN:
+        ...
+    case CRYPT_CTRL_GET_PUBKEY_LEN:
+        ...
 ```
-**Issue**: The SM2 private key buffer is initialized from the start of the composite key (and with an extra initializer), so the PQC seed is reused as the TRAD key. This corrupts key imports and can cause invalid keys or failures.
+**Issue**: The control switch now accepts only generic `CRYPT_CTRL_*` IDs, but `include/pqcp_types.h` still exposes `PQCP_POLAR_LAC_*` IDs and existing callers use them. This is a runtime compatibility break (`PQCP_INVALID_ARG`) for existing API users.
 **Fix**:
 ```
-BSL_Buffer pqcPrv = {prv->data, ctx->info->pqcPrvkeyLen};
-BSL_Buffer tradPrv = {prv->data + ctx->info->pqcPrvkeyLen,
-                      prv->len - ctx->info->pqcPrvkeyLen};
+switch (cmd) {
+    case PQCP_POLAR_LAC_SET_PARAMS_BY_ID:
+    case CRYPT_CTRL_SET_PARA_BY_ID:
+        return PolarLacSetAlgInfo(ctx, val, valLen);
+
+    case PQCP_POLAR_LAC_GET_CIPHER_LEN:
+    case CRYPT_CTRL_GET_CIPHERTEXT_LEN:
+        ...
+
+    case PQCP_POLAR_LAC_GET_PRVKEY_LEN:
+    case CRYPT_CTRL_GET_PRVKEY_LEN:
+        ...
+
+    case PQCP_POLAR_LAC_GET_PUBKEY_LEN:
+    case CRYPT_CTRL_GET_PUBKEY_LEN:
+        ...
 ```
 
 ---
@@ -36,113 +88,107 @@ BSL_Buffer tradPrv = {prv->data + ctx->info->pqcPrvkeyLen,
 
 ## Medium
 
-### Composite key setters accept truncated keys
-`src/composite_sign/src/crypt_composite_sign.c:385-399`
+### DupCtx does not copy signing context info
+`src/composite_sign/src/crypt_composite_sign.c:125-137`
 ```
-RETURN_RET_IF(prv->len <= ctx->info->pqcPrvkeyLen, CRYPT_COMPOSITE_KEYLEN_ERROR);
+newCtx->info = ctx->info;
 ...
-RETURN_RET_IF(pub->len <= ctx->info->pqcPubkeyLen, CRYPT_COMPOSITE_KEYLEN_ERROR);
+newCtx->pqcMethod = ctx->pqcMethod;
+newCtx->tradMethod = ctx->tradMethod;
+newCtx->libCtx = ctx->libCtx;
+return newCtx;
 ```
-**Issue**: The length checks only ensure the buffer is larger than the PQC part, so a too-short TRAD component can be accepted, resulting in malformed keys and undefined behavior in downstream algorithms.
+**Issue**: `CRYPT_COMPOSITE_DupCtx` duplicates keys/methods but drops `ctxInfo`/`ctxLen`. Any context string set via `CRYPT_CTRL_SET_CTX_INFO` is lost in the duplicate, so signatures from original and duplicate can diverge unexpectedly.
 **Fix**:
 ```
-RETURN_RET_IF(prv->len != ctx->info->compPrvKeyLen, CRYPT_COMPOSITE_KEYLEN_ERROR);
-...
-RETURN_RET_IF(pub->len != ctx->info->compPubKeyLen, CRYPT_COMPOSITE_KEYLEN_ERROR);
+newCtx->info = ctx->info;
+newCtx->pqcMethod = ctx->pqcMethod;
+newCtx->tradMethod = ctx->tradMethod;
+newCtx->libCtx = ctx->libCtx;
+
+if (ctx->ctxLen > 0) {
+    newCtx->ctxInfo = BSL_SAL_Dump(ctx->ctxInfo, ctx->ctxLen);
+    if (newCtx->ctxInfo == NULL) {
+        BSL_ERR_PUSH_ERROR(CRYPT_MEM_ALLOC_FAIL);
+        goto ERR;
+    }
+    newCtx->ctxLen = ctx->ctxLen;
+}
+return newCtx;
 ```
 
 ---
 
-### CRYPT_CTRL_SET_CTX_INFO allows NULL input with non-zero length
-`src/composite_sign/src/crypt_composite_sign.c:214-225`
+### SetCtxInfo rejects valid clear operation and misclassifies null input
+`src/composite_sign/src/crypt_composite_sign.c:212-227`
 ```
 if (len > COMPOSITE_MAX_CTX_BYTES) {
-    BSL_ERR_PUSH_ERROR(CRYPT_COMPOSITE_KEYLEN_ERROR);
-    return CRYPT_COMPOSITE_KEYLEN_ERROR;
+    ...
 }
-...
+if (ctx->ctxInfo != NULL) {
+    BSL_SAL_FREE(ctx->ctxInfo);
+    ctx->ctxLen = 0;
+}
 ctx->ctxInfo = BSL_SAL_Dump((uint8_t *)val, len);
+if (ctx->ctxInfo == NULL) {
+    BSL_ERR_PUSH_ERROR(CRYPT_MEM_ALLOC_FAIL);
+    return CRYPT_MEM_ALLOC_FAIL;
+}
+ctx->ctxLen = len;
 ```
-**Issue**: `val` is not validated before being copied. If the caller passes `len > 0` with `val == NULL`, `BSL_SAL_Dump` will dereference NULL and crash.
+**Issue**: `CRYPT_CompositeSetctxInfo` always calls `BSL_SAL_Dump(val, len)`. With `len == 0`, `BSL_SAL_Dump` returns null and this path returns `CRYPT_MEM_ALLOC_FAIL`, so callers cannot clear context info. Also `val == NULL && len > 0` is treated as allocation failure instead of null input.
 **Fix**:
 ```
 if (len > COMPOSITE_MAX_CTX_BYTES) {
-    BSL_ERR_PUSH_ERROR(CRYPT_COMPOSITE_KEYLEN_ERROR);
-    return CRYPT_COMPOSITE_KEYLEN_ERROR;
+    BSL_ERR_PUSH_ERROR(PQCP_COMPOSITE_KEYLEN_ERROR);
+    return PQCP_COMPOSITE_KEYLEN_ERROR;
 }
-if (val == NULL && len > 0) {
+
+if (len == 0) {
+    BSL_SAL_FREE(ctx->ctxInfo);
+    ctx->ctxInfo = NULL;
+    ctx->ctxLen = 0;
+    return CRYPT_SUCCESS;
+}
+
+if (val == NULL) {
     BSL_ERR_PUSH_ERROR(CRYPT_NULL_INPUT);
     return CRYPT_NULL_INPUT;
 }
-ctx->ctxInfo = BSL_SAL_Dump((uint8_t *)val, len);
+
+BSL_SAL_FREE(ctx->ctxInfo);
+ctx->ctxInfo = BSL_SAL_Dump(val, len);
+if (ctx->ctxInfo == NULL) {
+    BSL_ERR_PUSH_ERROR(CRYPT_MEM_ALLOC_FAIL);
+    return CRYPT_MEM_ALLOC_FAIL;
+}
+ctx->ctxLen = len;
 ```
 
 ---
 
-### Missing NULL checks for GetParamValue results in Get*KeyEx
-`src/composite_sign/src/crypt_composite_sign.c:414-435`
-```
-BSL_Param *paramPrv = GetParamValue(para, CRYPT_PARAM_COMPOSITE_PRVKEY, &prv.data, &(prv.len));
-int32_t ret = CRYPT_COMPOSITE_GetPrvKey(ctx, &prv);
-if (ret != CRYPT_SUCCESS) {
-    return ret;
-}
-paramPrv->useLen = prv.len;
 
-BSL_Param *paramPub = GetParamValue(para, CRYPT_PARAM_COMPOSITE_PUBKEY, &pub.data, &(pub.len));
-int32_t ret = CRYPT_COMPOSITE_GetPubKey(ctx, &pub);
-if (ret != CRYPT_SUCCESS) {
-    return ret;
-}
-paramPub->useLen = pub.len;
+## Low
+
+### Uninitialized context pointers freed on error path
+`test/demo/composite_sign_demo.c:22-23`
 ```
-**Issue**: If the requested param is absent, `GetParamValue` can return NULL and `paramPrv/paramPub` are dereferenced, causing a crash instead of returning an error.
+CRYPT_EAL_PkeyCtx *signCtx;
+CRYPT_EAL_PkeyCtx *verifyCtx;
+...
+EXIT:
+    CRYPT_EAL_PkeyFreeCtx(signCtx);
+    CRYPT_EAL_PkeyFreeCtx(verifyCtx);
+```
+**Issue**: `signCtx` and `verifyCtx` are uninitialized. If context creation fails and execution jumps to `EXIT`, `CRYPT_EAL_PkeyFreeCtx` may be called on garbage pointers.
 **Fix**:
 ```
-BSL_Param *paramPrv = GetParamValue(para, CRYPT_PARAM_COMPOSITE_PRVKEY, &prv.data, &(prv.len));
-if (paramPrv == NULL) {
-    BSL_ERR_PUSH_ERROR(CRYPT_INVALID_ARG);
-    return CRYPT_INVALID_ARG;
-}
-int32_t ret = CRYPT_COMPOSITE_GetPrvKey(ctx, &prv);
-if (ret != CRYPT_SUCCESS) {
-    return ret;
-}
-paramPrv->useLen = prv.len;
-
-BSL_Param *paramPub = GetParamValue(para, CRYPT_PARAM_COMPOSITE_PUBKEY, &pub.data, &(pub.len));
-if (paramPub == NULL) {
-    BSL_ERR_PUSH_ERROR(CRYPT_INVALID_ARG);
-    return CRYPT_INVALID_ARG;
-}
-int32_t ret = CRYPT_COMPOSITE_GetPubKey(ctx, &pub);
-if (ret != CRYPT_SUCCESS) {
-    return ret;
-}
-paramPub->useLen = pub.len;
-```
-
----
-
-### Composite algorithm labels mismatched for MLDSA65/87
-`src/composite_sign/src/crypt_composite_sign.c:54-58`
-```
-{CRYPT_COMPOSITE_MLDSA65_SM2, "COMPSIG-MLDSA44-SM2", CRYPT_PKEY_ML_DSA, CRYPT_MLDSA_TYPE_MLDSA_65,
-    CRYPT_PKEY_SM2, 0, CRYPT_MD_SM3, CRYPT_MD_SM3, 0, 2017, 64, 1952, 32, 3309,
-},
-{CRYPT_COMPOSITE_MLDSA87_SM2, "COMPSIG-MLDSA44-SM2", CRYPT_PKEY_ML_DSA, CRYPT_MLDSA_TYPE_MLDSA_87,
-    CRYPT_PKEY_SM2, 0, CRYPT_MD_SM3, CRYPT_MD_SM3, 0, 2657, 64, 2592, 32, 4627,
-},
-```
-**Issue**: The MLDSA65 and MLDSA87 entries use the MLDSA44 label, so the domain-separation label in the signed message is incorrect for those variants. This can break interoperability and produce non-spec signatures.
-**Fix**:
-```
-{CRYPT_COMPOSITE_MLDSA65_SM2, "COMPSIG-MLDSA65-SM2", CRYPT_PKEY_ML_DSA, CRYPT_MLDSA_TYPE_MLDSA_65,
-    CRYPT_PKEY_SM2, 0, CRYPT_MD_SM3, CRYPT_MD_SM3, 0, 2017, 64, 1952, 32, 3309,
-},
-{CRYPT_COMPOSITE_MLDSA87_SM2, "COMPSIG-MLDSA87-SM2", CRYPT_PKEY_ML_DSA, CRYPT_MLDSA_TYPE_MLDSA_87,
-    CRYPT_PKEY_SM2, 0, CRYPT_MD_SM3, CRYPT_MD_SM3, 0, 2657, 64, 2592, 32, 4627,
-},
+CRYPT_EAL_PkeyCtx *signCtx = NULL;
+CRYPT_EAL_PkeyCtx *verifyCtx = NULL;
+...
+EXIT:
+    CRYPT_EAL_PkeyFreeCtx(signCtx);
+    CRYPT_EAL_PkeyFreeCtx(verifyCtx);
 ```
 
 ---

@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Code Review: openhitls/pqcp#33 - GEMINI</title>
+    <title>Code Review: openHiTLS/pqcp#33 - GEMINI</title>
     <style>
         :root { --critical: #dc2626; --high: #ea580c; --medium: #ca8a04; --low: #65a30d; }
         * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -29,44 +29,126 @@
 </head>
 <body>
     <div class="container">
-        <h1>Code Review: openhitls/pqcp#33 - GEMINI</h1>
+        <h1>Code Review: openHiTLS/pqcp#33 - GEMINI</h1>
         <div class="subtitle"></div>
-<div class="section"><div class="section-title critical">Critical</div>
+<div class="section"><div class="section-title high">High</div>
 <div class="issue">
-                <div class="issue-title">Incorrect buffer pointer arithmetic and initialization</div>
-                <div class="issue-location">src/composite_sign/src/crypt_composite_sign.c:389</div>
-                <pre>BSL_Buffer pqcPrv = {prv-&gt;data, ctx-&gt;info-&gt;pqcPrvkeyLen};
-    BSL_Buffer tradPrv = {prv-&gt;data, + ctx-&gt;info-&gt;pqcPrvkeyLen, prv-&gt;len - ctx-&gt;info-&gt;pqcPrvkeyLen};
-    RETURN_RET_IF_ERR(CRYPT_CompositeSetPqcPrvKey(ctx, &amp;pqcPrv), ret);</pre>
-                <div class="problem"><strong>Issue:</strong> The initialization of `tradPrv` uses the comma operator incorrectly within the brace initializer, or attempts to initialize 3 fields when `BSL_Buffer` likely has 2. Critically, `tradPrv.data` is initialized to `prv->data` (the start of the buffer) instead of the offset pointer. This causes the traditional private key to be set using the PQC private key data.</div>
-                <div class="fix-label">Fix:</div><pre>BSL_Buffer pqcPrv = {prv-&gt;data, ctx-&gt;info-&gt;pqcPrvkeyLen};
-    BSL_Buffer tradPrv = {prv-&gt;data + ctx-&gt;info-&gt;pqcPrvkeyLen, prv-&gt;len - ctx-&gt;info-&gt;pqcPrvkeyLen};
-    RETURN_RET_IF_ERR(CRYPT_CompositeSetPqcPrvKey(ctx, &amp;pqcPrv), ret);</pre>
+                <div class="issue-title">Inclusion of non-existent directory</div>
+                <div class="issue-location">CMakeLists.txt:98</div>
+                <pre>target_include_directories(pqcp_provider
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/classic_mceliece/include
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/frodokem/include
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/polarlac/include
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/hybrid_env/include
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/composite_sign/include
+        ${OPENHITLS_INCLUDE_DIRS}</pre>
+                <div class="problem"><strong>Issue:</strong> The build configuration includes `${CMAKE_CURRENT_SOURCE_DIR}/src/hybrid_env/include`, but this directory does not exist in the source tree. This causes build errors or warnings.</div>
+                <div class="fix-label">Fix:</div><pre>target_include_directories(pqcp_provider
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/classic_mceliece/include
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/frodokem/include
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/polarlac/include
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/composite_sign/include
+        ${OPENHITLS_INCLUDE_DIRS}</pre>
+                <div class="issue-source">Reviewer: gemini</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">Inclusion of non-existent directory</div>
+                <div class="issue-location">test/CMakeLists.txt:92-93</div>
+                <pre>${CMAKE_SOURCE_DIR}/../platform/openhitls/platform/Secure_C/include
+    ${CMAKE_SOURCE_DIR}/../src/hybrid_env/include
+    ${CMAKE_SOURCE_DIR}/../src/hybrid_env/src
+    ${CMAKE_SOURCE_DIR}/../src/composite_sign/include</pre>
+                <div class="problem"><strong>Issue:</strong> The test build configuration includes `hybrid_env` directories that do not exist.</div>
+                <div class="fix-label">Fix:</div><pre>${CMAKE_SOURCE_DIR}/../platform/openhitls/platform/Secure_C/include
+    ${CMAKE_SOURCE_DIR}/../src/composite_sign/include</pre>
+                <div class="issue-source">Reviewer: gemini</div>
+            </div>
+</div>
+<div class="section"><div class="section-title medium">Medium</div>
+<div class="issue">
+                <div class="issue-title">Ignored return value of secure memory copy</div>
+                <div class="issue-location">src/composite_sign/src/crypt_composite_sign.c:320-321</div>
+                <pre>(void)memcpy_s(prv-&gt;data, prv-&gt;len, pqcPrv.data, pqcPrv.dataLen);
+    (void)memcpy_s(prv-&gt;data + pqcPrv.dataLen, prv-&gt;len - pqcPrv.dataLen, tradPrv.data, tradPrv.dataLen);</pre>
+                <div class="problem"><strong>Issue:</strong> The return values of `memcpy_s` are explicitly cast to `void`. Ignoring the error code hides potential failures (e.g. invalid arguments) and violates secure coding standards.</div>
+                <div class="fix-label">Fix:</div><pre>if (memcpy_s(prv-&gt;data, prv-&gt;len, pqcPrv.data, pqcPrv.dataLen) != EOK) {
+        ret = CRYPT_MEM_ALLOC_FAIL; // Or appropriate error code
+        goto ERR;
+    }
+    if (memcpy_s(prv-&gt;data + pqcPrv.dataLen, prv-&gt;len - pqcPrv.dataLen, tradPrv.data, tradPrv.dataLen) != EOK) {
+        ret = CRYPT_MEM_ALLOC_FAIL;
+        goto ERR;
+    }</pre>
+                <div class="issue-source">Reviewer: gemini</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">Ignored return value of secure memory copy</div>
+                <div class="issue-location">src/composite_sign/src/crypt_composite_sign.c:343-344</div>
+                <pre>(void)memcpy_s(pub-&gt;data, pub-&gt;len, pqcPub.data, pqcPub.dataLen);
+    (void)memcpy_s(pub-&gt;data + pqcPub.dataLen, pub-&gt;len - pqcPub.dataLen, tradPub.data, tradPub.dataLen);</pre>
+                <div class="problem"><strong>Issue:</strong> The return values of `memcpy_s` are explicitly cast to `void`.</div>
+                <div class="fix-label">Fix:</div><pre>if (memcpy_s(pub-&gt;data, pub-&gt;len, pqcPub.data, pqcPub.dataLen) != EOK) {
+        ret = CRYPT_MEM_ALLOC_FAIL;
+        goto ERR;
+    }
+    if (memcpy_s(pub-&gt;data + pqcPub.dataLen, pub-&gt;len - pqcPub.dataLen, tradPub.data, tradPub.dataLen) != EOK) {
+        ret = CRYPT_MEM_ALLOC_FAIL;
+        goto ERR;
+    }</pre>
+                <div class="issue-source">Reviewer: gemini</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">Ignored return value of secure memory copy</div>
+                <div class="issue-location">src/composite_sign/src/crypt_composite_sign.c:466-476</div>
+                <pre>(void)memcpy_s(ptr, msg-&gt;len, PREFIX, prefixLen);
+    ptr += prefixLen;
+    (void)memcpy_s(ptr, msg-&gt;len - prefixLen, label, labelLen);
+    ptr += labelLen;
+    *ptr = ctx-&gt;ctxLen;
+    ptr++;
+    if (ctx-&gt;ctxInfo != NULL &amp;&amp; ctx-&gt;ctxLen &gt; 0) {
+        (void)memcpy_s(ptr, msg-&gt;len - (prefixLen + labelLen + 1), ctx-&gt;ctxInfo, ctx-&gt;ctxLen);
+        ptr += ctx-&gt;ctxLen;
+    }
+    (void)memcpy_s(ptr, digestLen, digest, digestLen);</pre>
+                <div class="problem"><strong>Issue:</strong> Multiple `memcpy_s` calls in `CompositeMsgEncode` ignore the return value.</div>
+                <div class="fix-label">Fix:</div><pre>if (memcpy_s(ptr, msg-&gt;len, PREFIX, prefixLen) != EOK) return CRYPT_MEM_ALLOC_FAIL;
+    ptr += prefixLen;
+    if (memcpy_s(ptr, msg-&gt;len - prefixLen, label, labelLen) != EOK) return CRYPT_MEM_ALLOC_FAIL;
+    ptr += labelLen;
+    *ptr = ctx-&gt;ctxLen;
+    ptr++;
+    if (ctx-&gt;ctxInfo != NULL &amp;&amp; ctx-&gt;ctxLen &gt; 0) {
+        if (memcpy_s(ptr, msg-&gt;len - (prefixLen + labelLen + 1), ctx-&gt;ctxInfo, ctx-&gt;ctxLen) != EOK) return CRYPT_MEM_ALLOC_FAIL;
+        ptr += ctx-&gt;ctxLen;
+    }
+    if (memcpy_s(ptr, digestLen, digest, digestLen) != EOK) return CRYPT_MEM_ALLOC_FAIL;</pre>
+                <div class="issue-source">Reviewer: gemini</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">Insufficient buffer size for MLDSA-87 signatures</div>
+                <div class="issue-location">test/demo/composite_sign_demo.c:27</div>
+                <pre>uint8_t signData[4096];</pre>
+                <div class="problem"><strong>Issue:</strong> `signData` buffer is 4096 bytes. MLDSA-87 composite signatures require > 4600 bytes. If the algorithm is changed to MLDSA-87, this buffer will overflow.</div>
+                <div class="fix-label">Fix:</div><pre>uint8_t signData[5000];</pre>
                 <div class="issue-source">Reviewer: gemini</div>
             </div>
 </div>
 <div class="section"><div class="section-title low">Low</div>
 <div class="issue">
-                <div class="issue-title">Missing break statement in switch case</div>
-                <div class="issue-location">src/provider/pqcp_pkey.c:46-49</div>
-                <pre>case CRYPT_PKEY_COMPOSITE_SIGN:
-            pkeyCtx = CRYPT_COMPOSITE_NewCtx();
-        default:
-            break;</pre>
-                <div class="problem"><strong>Issue:</strong> The `CRYPT_PKEY_COMPOSITE_SIGN` case falls through to the `default` case. While the `default` case contains a `break`, relying on this fallthrough is fragile and considered bad practice.</div>
-                <div class="fix-label">Fix:</div><pre>case CRYPT_PKEY_COMPOSITE_SIGN:
-            pkeyCtx = CRYPT_COMPOSITE_NewCtx();
-            break;
-        default:
-            break;</pre>
+                <div class="issue-title">Function naming inconsistency</div>
+                <div class="issue-location">src/composite_sign/src/crypt_composite_sign.c:211</div>
+                <pre>static int32_t CRYPT_CompositeSetctxInfo(CRYPT_CompositeCtx *ctx, void *val, uint32_t len)</pre>
+                <div class="problem"><strong>Issue:</strong> `CRYPT_CompositeSetctxInfo` uses lowercase `ctx` in the name, inconsistent with `CRYPT_CompositeSetAlgInfo` and standard CamelCase convention.</div>
+                <div class="fix-label">Fix:</div><pre>static int32_t CRYPT_CompositeSetCtxInfo(CRYPT_CompositeCtx *ctx, void *val, uint32_t len)</pre>
                 <div class="issue-source">Reviewer: gemini</div>
             </div>
 <div class="issue">
-                <div class="issue-title">Duplicate const qualifier</div>
-                <div class="issue-location">src/provider/pqcp_pkey.c:147</div>
-                <pre>const const CRYPT_EAL_Func g_pqcpKeyMgmtCompositeSign[] = {</pre>
-                <div class="problem"><strong>Issue:</strong> The variable `g_pqcpKeyMgmtCompositeSign` is declared with `const const`. This is redundant.</div>
-                <div class="fix-label">Fix:</div><pre>const CRYPT_EAL_Func g_pqcpKeyMgmtCompositeSign[] = {</pre>
+                <div class="issue-title">Typo in comment</div>
+                <div class="issue-location">src/composite_sign/src/crypt_composite_sign_local.h:43</div>
+                <pre>uint32_t compPrvKeyLen; // composiet prvkey len</pre>
+                <div class="problem"><strong>Issue:</strong> `composiet` is misspelled.</div>
+                <div class="fix-label">Fix:</div><pre>uint32_t compPrvKeyLen; // composite prvkey len</pre>
                 <div class="issue-source">Reviewer: gemini</div>
             </div>
 </div>
