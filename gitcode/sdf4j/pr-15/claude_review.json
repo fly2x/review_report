@@ -1,0 +1,62 @@
+[
+  {
+    "source": "claude",
+    "file": "sdf4j/src/main/native/include/sdf_types.h",
+    "line": "89",
+    "severity": "critical",
+    "title": "RSA 4096-bit support incomplete - native struct size mismatch",
+    "problem": "The Java classes RSAPublicKey and RSAPrivateKey were updated to support 4096-bit RSA keys (changing RSA_MAX_BITS from 2048 to 4096), but the native C structures RSArefPublicKey and RSArefPrivateKey still define RSAref_MAX_BITS as 2048. This causes silent data truncation when using 4096-bit keys.",
+    "code": "#define RSAref_MAX_BITS     2048  // Still 2048, should be 4096\n#define RSAref_MAX_LEN      ((RSAref_MAX_BITS + 7) / 8)  // 256 bytes, should be 512",
+    "fix": "#define RSAref_MAX_BITS     4096\n#define RSAref_MAX_LEN      ((RSAref_MAX_BITS + 7) / 8)  // 512 bytes\n#define RSAref_MAX_PBITS    ((RSAref_MAX_BITS + 1) / 2)  // 2048 bits\n#define RSAref_MAX_PLEN     ((RSAref_MAX_PBITS + 7) / 8)  // 256 bytes"
+  },
+  {
+    "source": "claude",
+    "file": "sdf4j/src/main/native/src/sdf_jni_symmetric.c",
+    "line": "1274-1276",
+    "severity": "high",
+    "title": "AuthDecFinal buffer size reduced to unsafe value",
+    "problem": "The output buffer for SDF_AuthDecFinal was reduced from 4096 bytes to just 16 bytes. For authenticated decryption (GCM mode), the final block may need more than 16 bytes, especially considering the last plaintext block. This could cause buffer overflow or truncated output.",
+    "code": "/* max len is the last block size */\nULONG output_len = 16;\nBYTE output_buf[16];",
+    "fix": "ULONG output_len = 4096;  /* Allocate sufficient buffer size for final output */\nBYTE *output_buf = (BYTE*)malloc(output_len);\nif (output_buf == NULL) {\n    THROW_SDF_EXCEPTION(env, 0x0100001C, \"Memory allocation failed\");\n    return NULL;\n}\n/* ... use output_buf ... */\nif (ret != SDR_OK) {\n    free(output_buf);\n    THROW_SDF_EXCEPTION(env, ret, \"Failed to perform auth dec final operation\");\n    return NULL;\n}\njbyteArray result = native_to_java_byte_array(env, output_buf, output_len);\nfree(output_buf);\nreturn result;"
+  },
+  {
+    "source": "claude",
+    "file": "sdf4j/src/main/native/src/sdf_jni_asymmetric.c",
+    "line": "379",
+    "severity": "high",
+    "title": "RSA envelope output buffer overflow potential",
+    "problem": "The output buffer is allocated based on native_key.bits, which is user-controlled. If a malicious RSAPublicKey object has bits set to a large value while the actual m/e arrays are smaller, this could cause buffer overflow or excessive memory allocation.",
+    "code": "ULONG output_len = (native_key.bits + 7) / 8;  // User-controlled value\nBYTE *output_buf = (BYTE*)malloc(output_len);",
+    "fix": "ULONG output_len = (native_key.bits + 7) / 8;\n/* Cap output buffer size to RSAref_MAX_LEN (256 bytes) */\nif (output_len > RSAref_MAX_LEN) {\n    THROW_SDF_EXCEPTION(env, SDR_INARGERR, \"Key bits too large\");\n    return NULL;\n}\nBYTE *output_buf = (BYTE*)malloc(output_len);"
+  },
+  {
+    "source": "claude",
+    "file": "docs/API_GUIDE.md",
+    "line": "1095-1126",
+    "severity": "high",
+    "title": "Documentation claims 4096-bit RSA support not implemented in native code",
+    "problem": "The API documentation claims RSA functions support 4096-bit keys, but the native C code still limits RSA keys to 2048 bits (RSAref_MAX_BITS = 2048 in sdf_types.h). This is misleading and could lead to silent data truncation.",
+    "code": "| `SDF_ExportSignPublicKey_RSA(sessionHandle, keyIndex)` | 导出RSA签名公钥  (最大规格4096 bits) |\n| `SDF_ExportEncPublicKey_RSA(sessionHandle, keyIndex)` | 导出RSA加密公钥  (最大规格4096 bits) |",
+    "fix": "Update documentation to reflect actual 2048-bit limit, or update native code to support 4096-bit keys first.\n| `SDF_ExportSignPublicKey_RSA(sessionHandle, keyIndex)` | 导出RSA签名公钥  (最大规格2048 bits) |\n| `SDF_ExportEncPublicKey_RSA(sessionHandle, keyIndex)` | 导出RSA加密公钥  (最大规格2048 bits) |"
+  },
+  {
+    "source": "claude",
+    "file": "examples/src/test/java/org/openhitls/sdf4j/examples/AsymmetricOperationTest.java",
+    "line": "968",
+    "severity": "medium",
+    "title": "Test uses uninitialized input array",
+    "problem": "The test creates a 256-byte input array filled with zeros but doesn't verify this is valid input for the RSA envelope operation. The test may pass due to SDR_NOTSUPPORT exception rather than actually testing the function.",
+    "code": "byte[] deInput = new byte[256];  // All zeros - is this valid input?\nbyte[] deOutput = sdf.SDF_ExchangeDigitEnvelopeBaseOnRSA(sessionHandle, keyIndex, publicKey, deInput);",
+    "fix": "// First create a valid digital envelope, then test exchanging it\n// Or document that this test is for API verification only"
+  },
+  {
+    "source": "claude",
+    "file": "sdf4j/src/main/native/src/sdf_jni_util.c",
+    "line": "250-251",
+    "severity": "medium",
+    "title": "Zero-length buffer allocation for ECC decrypt",
+    "problem": "If ecc_cipher->L is 0, malloc(0) behavior is implementation-defined and may return NULL or a non-dereferenceable pointer. This could cause issues.",
+    "code": "ULONG plaintext_len = ecc_cipher->L;\nBYTE *plaintext_buf = (BYTE*)malloc(plaintext_len);",
+    "fix": "ULONG plaintext_len = ecc_cipher->L;\nif (plaintext_len == 0) {\n    free(ecc_cipher);\n    THROW_SDF_EXCEPTION(env, SDR_INARGERR, \"Invalid cipher length\");\n    return NULL;\n}\nBYTE *plaintext_buf = (BYTE*)malloc(plaintext_len);"
+  }
+]

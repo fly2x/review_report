@@ -1,0 +1,58 @@
+I will start by listing the current directory and then run `git diff --stat` to get an overview of the changes in the PR.
+I will read the diffs for the Java files to understand the API changes.
+I will read the full content of `RSAPrivateKey.java` to check for any validations or hardcoded buffer sizes that might be affected by the update to `RSA_MAX_BITS`.
+I will read the diffs for the C files, specifically `sdf4j/src/main/native/src/sdf_jni_asymmetric.c` and the header files, to verify the implementation of `SDF_ExchangeDigitEnvelopeBaseOnRSA` and ensure consistency with the Java side changes.
+I will read `docs/API_GUIDE.md` to check the documentation changes and verify if they align with the code changes.
+I will read `sdf4j/src/main/native/include/sdf_types.h` to verify the definition of `RSArefPrivateKey` and check if it supports 4096 bits.
+I will read `sdf4j/src/main/native/src/type_conversion.c` to verify how it handles the conversion of RSA keys and confirm if a buffer overflow or truncation will occur due to the size mismatch.
+===ISSUE===
+FILE: sdf4j/src/main/java/org/openhitls/sdf4j/types/RSAPrivateKey.java
+LINE: 32
+SEVERITY: critical
+TITLE: Native header mismatch for RSA key size
+PROBLEM: The Java constant `RSA_MAX_BITS` was updated to 4096, but the corresponding C definition `RSAref_MAX_BITS` in `sdf4j/src/main/native/include/sdf_types.h` (not included in this PR) remains 2048. This causes `java_to_native_RSAPrivateKey` in `type_conversion.c` to truncate 4096-bit keys to 2048 bits (256 bytes) when copying to the fixed-size native struct. Furthermore, when these native structs (with `bits=4096` but only 256 bytes of space for `m`) are passed to SDF functions, it leads to buffer over-reads or stack corruption as the SDF implementation expects 512 bytes based on the bit length.
+CODE:
+```java
+    /**
+     * 最大位数
+     */
+    public static final int RSA_MAX_BITS = 4096;
+```
+FIX:
+```java
+// You must update sdf4j/src/main/native/include/sdf_types.h to match:
+// #define RSAref_MAX_BITS     4096
+// And recompile the native library.
+public static final int RSA_MAX_BITS = 4096;
+```
+===END===
+
+===ISSUE===
+FILE: sdf4j/src/main/native/src/sdf_jni_symmetric.c
+LINE: 1275
+SEVERITY: high
+TITLE: Potential stack buffer overflow in AuthDecFinal
+PROBLEM: The output buffer `output_buf` was reduced from a heap-allocated 4096 bytes to a stack-allocated 16 bytes. While GCM/CCM `Final` typically outputs only the final partial block (<= 16 bytes), relying on this exact size is dangerous. If the underlying SDF implementation buffers more data (e.g., a full block + partial) or behaves differently, writing more than 16 bytes to `output_buf` will cause a stack buffer overflow.
+CODE:
+```c
+    /* max len is the last block size */
+    ULONG output_len = 16;
+    BYTE output_buf[16];
+    LONG ret = g_sdf_functions.SDF_AuthDecFinal(
+        (HANDLE)sessionHandle,
+        output_buf,
+        &output_len
+    );
+```
+FIX:
+```c
+    /* Allocate sufficient buffer size for final block(s) */
+    ULONG output_len = 256; 
+    BYTE output_buf[256];
+    LONG ret = g_sdf_functions.SDF_AuthDecFinal(
+        (HANDLE)sessionHandle,
+        output_buf,
+        &output_len
+    );
+```
+===END===

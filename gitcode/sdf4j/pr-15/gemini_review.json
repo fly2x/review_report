@@ -1,0 +1,22 @@
+[
+  {
+    "source": "gemini",
+    "file": "sdf4j/src/main/java/org/openhitls/sdf4j/types/RSAPrivateKey.java",
+    "line": "32",
+    "severity": "critical",
+    "title": "Native header mismatch for RSA key size",
+    "problem": "The Java constant `RSA_MAX_BITS` was updated to 4096, but the corresponding C definition `RSAref_MAX_BITS` in `sdf4j/src/main/native/include/sdf_types.h` (not included in this PR) remains 2048. This causes `java_to_native_RSAPrivateKey` in `type_conversion.c` to truncate 4096-bit keys to 2048 bits (256 bytes) when copying to the fixed-size native struct. Furthermore, when these native structs (with `bits=4096` but only 256 bytes of space for `m`) are passed to SDF functions, it leads to buffer over-reads or stack corruption as the SDF implementation expects 512 bytes based on the bit length.",
+    "code": "/**\n     * 最大位数\n     */\n    public static final int RSA_MAX_BITS = 4096;",
+    "fix": "// You must update sdf4j/src/main/native/include/sdf_types.h to match:\n// #define RSAref_MAX_BITS     4096\n// And recompile the native library.\npublic static final int RSA_MAX_BITS = 4096;"
+  },
+  {
+    "source": "gemini",
+    "file": "sdf4j/src/main/native/src/sdf_jni_symmetric.c",
+    "line": "1275",
+    "severity": "high",
+    "title": "Potential stack buffer overflow in AuthDecFinal",
+    "problem": "The output buffer `output_buf` was reduced from a heap-allocated 4096 bytes to a stack-allocated 16 bytes. While GCM/CCM `Final` typically outputs only the final partial block (<= 16 bytes), relying on this exact size is dangerous. If the underlying SDF implementation buffers more data (e.g., a full block + partial) or behaves differently, writing more than 16 bytes to `output_buf` will cause a stack buffer overflow.",
+    "code": "/* max len is the last block size */\n    ULONG output_len = 16;\n    BYTE output_buf[16];\n    LONG ret = g_sdf_functions.SDF_AuthDecFinal(\n        (HANDLE)sessionHandle,\n        output_buf,\n        &output_len\n    );",
+    "fix": "/* Allocate sufficient buffer size for final block(s) */\n    ULONG output_len = 256; \n    BYTE output_buf[256];\n    LONG ret = g_sdf_functions.SDF_AuthDecFinal(\n        (HANDLE)sessionHandle,\n        output_buf,\n        &output_len\n    );"
+  }
+]

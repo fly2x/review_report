@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Code Review: openHiTLS/sdf4j#15 - CODEX</title>
+    <style>
+        :root { --critical: #dc2626; --high: #ea580c; --medium: #ca8a04; --low: #65a30d; }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: system-ui, sans-serif; background: #f8fafc; color: #1e293b; padding: 2rem; line-height: 1.6; }
+        .container { max-width: 900px; margin: 0 auto; }
+        h1 { font-size: 1.5rem; margin-bottom: 0.5rem; }
+        .subtitle { color: #64748b; margin-bottom: 2rem; }
+        .section { margin-bottom: 2rem; }
+        .section-title { font-size: 1.1rem; font-weight: 600; padding: 0.5rem 1rem; border-radius: 0.5rem 0.5rem 0 0; color: white; }
+        .section-title.critical { background: var(--critical); }
+        .section-title.high { background: var(--high); }
+        .section-title.medium { background: var(--medium); }
+        .section-title.low { background: var(--low); }
+        .issue { background: white; border: 1px solid #e2e8f0; border-top: none; padding: 1rem; }
+        .issue:last-child { border-radius: 0 0 0.5rem 0.5rem; }
+        .issue-title { font-weight: 600; margin-bottom: 0.25rem; }
+        .issue-location { font-family: monospace; font-size: 0.875rem; color: #64748b; margin-bottom: 0.75rem; }
+        .issue-source { font-size: 0.75rem; color: #94a3b8; margin-top: 0.5rem; }
+        pre { background: #1e293b; color: #e2e8f0; padding: 0.75rem; border-radius: 0.375rem; overflow-x: auto; font-size: 0.875rem; margin: 0.5rem 0; }
+        .problem { margin: 0.75rem 0; }
+        .fix-label { font-weight: 600; margin-top: 0.75rem; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Code Review: openHiTLS/sdf4j#15 - CODEX</h1>
+        <div class="subtitle"></div>
+<div class="section"><div class="section-title high">High</div>
+<div class="issue">
+                <div class="issue-title">RSA max size increased to 4096 without matching native struct update</div>
+                <div class="issue-location">sdf4j/src/main/java/org/openhitls/sdf4j/types/RSAPublicKey.java:23-33</div>
+                <pre>/**
+ * 最大位数
+ */
+public static final int RSA_MAX_BITS = 4096;</pre>
+                <div class="problem"><strong>Issue:</strong> Java now accepts 4096-bit RSA keys, but JNI native structs are still compiled with 2048-bit buffers (`RSAref_MAX_BITS=2048`). This creates a capability mismatch (truncation/incorrect behavior) and can lead to ABI misuse when interacting with 4096-capable vendor libraries.</div>
+                <div class="fix-label">Fix:</div><pre>/**
+ * 最大位数（must stay aligned with native RSAref_MAX_BITS）
+ */
+public static final int RSA_MAX_BITS = 2048;</pre>
+                <div class="issue-source">Reviewer: codex</div>
+            </div>
+</div>
+<div class="section"><div class="section-title medium">Medium</div>
+<div class="issue">
+                <div class="issue-title">Output buffer size uses unvalidated RSA bit length</div>
+                <div class="issue-location">sdf4j/src/main/native/src/sdf_jni_asymmetric.c:379-381</div>
+                <pre>ULONG output_len = (native_key.bits + 7) / 8;
+BYTE *output_buf = (BYTE*)malloc(output_len);</pre>
+                <div class="problem"><strong>Issue:</strong> `output_len` is derived directly from `native_key.bits` with no range check. A malformed/default key (`bits == 0`) can produce `malloc(0)` and pass an invalid output buffer contract into `SDF_ExchangeDigitEnvelopeBaseOnRSA`.</div>
+                <div class="fix-label">Fix:</div><pre>if (native_key.bits == 0 || native_key.bits &gt; RSAref_MAX_BITS) {
+    THROW_SDF_EXCEPTION(env, SDR_INARGERR, "Invalid RSA key bits");
+    return NULL;
+}
+
+ULONG output_len = (native_key.bits + 7) / 8;
+BYTE *output_buf = (BYTE*)malloc(output_len);</pre>
+                <div class="issue-source">Reviewer: codex</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">RSA private operation buffer sizing trusts mutable key metadata</div>
+                <div class="issue-location">sdf4j/src/main/native/src/sdf_jni_util.c:135-137</div>
+                <pre>/* Allocate output buffer based on key size */
+ULONG output_len = (priv_key.bits + 7) / 8;  /* Calculate from private key bits */
+BYTE *output_buf = (BYTE*)malloc(output_len);</pre>
+                <div class="problem"><strong>Issue:</strong> Buffer length now depends on `priv_key.bits` from Java object state. If `bits` is inconsistent or zero, output buffer can be under-sized/invalid before calling `SDF_ExternalPrivateKeyOperation_RSA`.</div>
+                <div class="fix-label">Fix:</div><pre>if (priv_key.bits == 0 || priv_key.bits &gt; RSAref_MAX_BITS) {
+    free(input_buf);
+    THROW_SDF_EXCEPTION(env, SDR_INARGERR, "Invalid RSA key bits");
+    return NULL;
+}
+
+ULONG output_len = (priv_key.bits + 7) / 8;
+BYTE *output_buf = (BYTE*)malloc(output_len);</pre>
+                <div class="issue-source">Reviewer: codex</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">New RSA envelope test uses synthetic invalid input and is flaky</div>
+                <div class="issue-location">examples/src/test/java/org/openhitls/sdf4j/examples/AsymmetricOperationTest.java:965-974</div>
+                <pre>Object[] keyPair = sdf.SDF_GenerateKeyPair_RSA(sessionHandle, 2048);
+assertNotNull(keyPair);
+RSAPublicKey publicKey = (RSAPublicKey) keyPair[0];
+byte[] deInput = new byte[256];
+byte[] deOutput = sdf.SDF_ExchangeDigitEnvelopeBaseOnRSA(sessionHandle, keyIndex, publicKey, deInput);</pre>
+                <div class="problem"><strong>Issue:</strong> The test feeds an all-zero envelope (`new byte[256]`) into `SDF_ExchangeDigitEnvelopeBaseOnRSA`. That is not a real digital envelope and can fail on compliant devices with argument/key errors, causing false negatives.</div>
+                <div class="fix-label">Fix:</div><pre>Object[] keyPair = sdf.SDF_GenerateKeyPair_RSA(sessionHandle, 2048);
+assertNotNull(keyPair);
+RSAPublicKey publicKey = (RSAPublicKey) keyPair[0];
+
+KeyEncryptionResult wrapped = sdf.SDF_GenerateKeyWithIPK_RSA(sessionHandle, keyIndex, 128);
+try {
+    byte[] deOutput = sdf.SDF_ExchangeDigitEnvelopeBaseOnRSA(
+            sessionHandle, keyIndex, publicKey, wrapped.getEncryptedKey());
+    assertNotNull(deOutput);
+    assertTrue("输出长度应大于0", deOutput.length &gt; 0);
+} finally {
+    sdf.SDF_DestroyKey(sessionHandle, wrapped.getKeyHandle());
+}</pre>
+                <div class="issue-source">Reviewer: codex</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">Documentation overstates RSA capability as 4096-bit</div>
+                <div class="issue-location">docs/API_GUIDE.md:1095-1101</div>
+                <pre>| `SDF_ExportSignPublicKey_RSA(sessionHandle, keyIndex)` | 导出RSA签名公钥  (最大规格4096 bits) |
+| `SDF_ExportEncPublicKey_RSA(sessionHandle, keyIndex)` | 导出RSA加密公钥  (最大规格4096 bits) |
+| `SDF_GenerateKeyWithIPK_RSA(sessionHandle, keyIndex, keyBits)` | 用内部RSA公钥生成会话密钥  (最大规格4096 bits) |
+| `SDF_GenerateKeyWithEPK_RSA(sessionHandle, keyBits, publicKey)` | 用外部RSA公钥生成会话密钥  (最大规格4096 bits) |
+| `SDF_ImportKeyWithISK_RSA(sessionHandle, keyIndex, encryptedKey)` | 用内部RSA私钥导入会话密钥  (最大规格4096 bits) |</pre>
+                <div class="problem"><strong>Issue:</strong> Multiple table entries now state 4096-bit RSA support, but current JNI native RSA structs remain 2048-bit. This creates incorrect operational expectations for users.</div>
+                <div class="fix-label">Fix:</div><pre>| `SDF_ExportSignPublicKey_RSA(sessionHandle, keyIndex)` | 导出RSA签名公钥 (当前实现最大规格2048 bits) |
+| `SDF_ExportEncPublicKey_RSA(sessionHandle, keyIndex)` | 导出RSA加密公钥 (当前实现最大规格2048 bits) |
+| `SDF_GenerateKeyWithIPK_RSA(sessionHandle, keyIndex, keyBits)` | 用内部RSA公钥生成会话密钥 (当前实现最大规格2048 bits) |
+| `SDF_GenerateKeyWithEPK_RSA(sessionHandle, keyBits, publicKey)` | 用外部RSA公钥生成会话密钥 (当前实现最大规格2048 bits) |
+| `SDF_ImportKeyWithISK_RSA(sessionHandle, keyIndex, encryptedKey)` | 用内部RSA私钥导入会话密钥 (当前实现最大规格2048 bits) |</pre>
+                <div class="issue-source">Reviewer: codex</div>
+            </div>
+</div>
+<div class="section"><div class="section-title low">Low</div>
+<div class="issue">
+                <div class="issue-title">Newly added algorithm IDs are not handled by getAlgorithmName</div>
+                <div class="issue-location">sdf4j/src/main/java/org/openhitls/sdf4j/constants/AlgorithmID.java:167-271</div>
+                <pre>public static final int SGD_SM2 = 0x00020100;
+...
+public static final int SGD_SM2_DECRYPT = 0x00020801;
+...
+public static final int SGD_SM3_HMAC = 0x00100001;</pre>
+                <div class="problem"><strong>Issue:</strong> `SGD_SM2`, `SGD_SM2_DECRYPT`, and `SGD_SM3_HMAC` were added, but `getAlgorithmName()` has no matching cases, so these constants resolve to `Unknown(...)`.</div>
+                <div class="fix-label">Fix:</div><pre>// SM2
+case SGD_SM2:
+    return "SM2";
+case SGD_SM2_1:
+    return "SM2-Sign";
+case SGD_SM2_2:
+    return "SM2-KeyExchange";
+case SGD_SM2_3:
+    return "SM2-Encrypt";
+case SGD_SM2_DECRYPT:
+    return "SM2-Decrypt";
+
+// Hash / HMAC
+case SGD_SM3:
+    return "SM3";
+case SGD_SM3_HMAC:
+    return "SM3-HMAC";</pre>
+                <div class="issue-source">Reviewer: codex</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">API signature typo in RSA digital envelope entry</div>
+                <div class="issue-location">docs/API_GUIDE.md:1126</div>
+                <pre>| `SDF_ExchangeDigitEnvelopeBaseOnRSA(sessionHandle, uiKeyIndex, pucPublicKey, pucDEInput))` | RSA 数字信封转换 (最大规格4096 bits) |</pre>
+                <div class="problem"><strong>Issue:</strong> The documented method has an extra closing parenthesis, which makes the signature incorrect for copy/paste usage.</div>
+                <div class="fix-label">Fix:</div><pre>| `SDF_ExchangeDigitEnvelopeBaseOnRSA(sessionHandle, uiKeyIndex, pucPublicKey, pucDEInput)` | RSA 数字信封转换 (最大规格4096 bits) |</pre>
+                <div class="issue-source">Reviewer: codex</div>
+            </div>
+</div>
+</div></body></html>
