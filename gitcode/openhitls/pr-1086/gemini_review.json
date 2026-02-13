@@ -1,0 +1,32 @@
+[
+  {
+    "source": "gemini",
+    "file": "configure.py",
+    "line": "521",
+    "severity": "high",
+    "title": "Command Injection via hkey parameter",
+    "problem": "The `hkey` argument, which can be controlled by the user via `--hkey`, is directly interpolated into a shell command string used in `execute_process`. A malicious user could supply a crafted `hkey` containing shell metacharacters (e.g., `\"; rm -rf /; \"`) to execute arbitrary commands during the install phase.",
+    "code": "# Use the openssl command to generate an HMAC file.\n            cmake += 'install(CODE \"execute_process(COMMAND openssl dgst -hmac \\\\\\\"%s\\\\\\\" -%s -out lib%s.so.hmac lib%s.so)\")\\n' % (self._args.hkey, self._hmac, lib_name, lib_name)",
+    "fix": "# Use the openssl command to generate an HMAC file.\n            # Use list format for COMMAND to avoid shell injection\n            cmake += 'install(CODE \"execute_process(COMMAND openssl dgst -hmac \\\\\\\"%s\\\\\\\" -%s -out lib%s.so.hmac lib%s.so)\")\\n' % (self._args.hkey.replace('\"', '\\\\\"'), self._hmac, lib_name, lib_name)\n            # Ideally validate self._args.hkey contains only safe characters"
+  },
+  {
+    "source": "gemini",
+    "file": "bsl/sal/src/sal_mem.c",
+    "line": "112-145",
+    "severity": "high",
+    "title": "Insecure Memory Clearing (Dead Store Elimination)",
+    "problem": "The `CleanSensitiveData` function manually zeroes out memory using a loop and simple assignment. The file also enables `-O3` optimization. Modern compilers can optimize away these write operations (Dead Store Elimination) if the memory is freed immediately afterwards (which `BSL_SAL_ClearFree` does), leaving sensitive data in memory.",
+    "code": "static void CleanSensitiveData(void *buf, uint32_t bufLen)\n{\n    uint8_t *tmp = (uint8_t *)buf;\n    // ... (complex alignment logic) ...\n    for (uint32_t i = boundOpt; i < bufLen; ++i) {\n        tmp[i] = 0;\n    }\n}",
+    "fix": "static void CleanSensitiveData(void *buf, uint32_t bufLen)\n{\n    volatile uint8_t *tmp = (volatile uint8_t *)buf;\n    for (uint32_t i = 0; i < bufLen; ++i) {\n        tmp[i] = 0;\n    }\n}"
+  },
+  {
+    "source": "gemini",
+    "file": "apps/src/app_client.c",
+    "line": "520",
+    "severity": "medium",
+    "title": "Logic Error: Stdin Closed Prematurely",
+    "problem": "In `ConfirmAction` (used for SM mode confirmation), `stdin` is opened via `HITLS_APP_UioOpen(NULL, ...)` and then `BSL_UIO_SetIsUnderlyingClosedByUio(rUio, true)` is called. When `BSL_UIO_Free(rUio)` is called at the end of the function, it closes `stdin`. Subsequent attempts to read from `stdin` in `HandleClientDataExchange` will fail.",
+    "code": "BSL_UIO *rUio = HITLS_APP_UioOpen(NULL, 'r', 1);\n    BSL_UIO_SetIsUnderlyingClosedByUio(rUio, true);\n    if (rUio == NULL) {",
+    "fix": "BSL_UIO *rUio = HITLS_APP_UioOpen(NULL, 'r', 1);\n    BSL_UIO_SetIsUnderlyingClosedByUio(rUio, false); // Do not close stdin when freeing UIO\n    if (rUio == NULL) {"
+  }
+]

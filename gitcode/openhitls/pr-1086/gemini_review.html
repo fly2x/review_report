@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Code Review: openHiTLS/openhitls#1086 - GEMINI</title>
+    <style>
+        :root { --critical: #dc2626; --high: #ea580c; --medium: #ca8a04; --low: #65a30d; }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: system-ui, sans-serif; background: #f8fafc; color: #1e293b; padding: 2rem; line-height: 1.6; }
+        .container { max-width: 900px; margin: 0 auto; }
+        h1 { font-size: 1.5rem; margin-bottom: 0.5rem; }
+        .subtitle { color: #64748b; margin-bottom: 2rem; }
+        .section { margin-bottom: 2rem; }
+        .section-title { font-size: 1.1rem; font-weight: 600; padding: 0.5rem 1rem; border-radius: 0.5rem 0.5rem 0 0; color: white; }
+        .section-title.critical { background: var(--critical); }
+        .section-title.high { background: var(--high); }
+        .section-title.medium { background: var(--medium); }
+        .section-title.low { background: var(--low); }
+        .issue { background: white; border: 1px solid #e2e8f0; border-top: none; padding: 1rem; }
+        .issue:last-child { border-radius: 0 0 0.5rem 0.5rem; }
+        .issue-title { font-weight: 600; margin-bottom: 0.25rem; }
+        .issue-location { font-family: monospace; font-size: 0.875rem; color: #64748b; margin-bottom: 0.75rem; }
+        .issue-source { font-size: 0.75rem; color: #94a3b8; margin-top: 0.5rem; }
+        pre { background: #1e293b; color: #e2e8f0; padding: 0.75rem; border-radius: 0.375rem; overflow-x: auto; font-size: 0.875rem; margin: 0.5rem 0; }
+        .problem { margin: 0.75rem 0; }
+        .fix-label { font-weight: 600; margin-top: 0.75rem; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Code Review: openHiTLS/openhitls#1086 - GEMINI</h1>
+        <div class="subtitle"></div>
+<div class="section"><div class="section-title high">High</div>
+<div class="issue">
+                <div class="issue-title">Command Injection via hkey parameter</div>
+                <div class="issue-location">configure.py:521</div>
+                <pre># Use the openssl command to generate an HMAC file.
+            cmake += 'install(CODE "execute_process(COMMAND openssl dgst -hmac \\\"%s\\\" -%s -out lib%s.so.hmac lib%s.so)")\n' % (self._args.hkey, self._hmac, lib_name, lib_name)</pre>
+                <div class="problem"><strong>Issue:</strong> The `hkey` argument, which can be controlled by the user via `--hkey`, is directly interpolated into a shell command string used in `execute_process`. A malicious user could supply a crafted `hkey` containing shell metacharacters (e.g., `"; rm -rf /; "`) to execute arbitrary commands during the install phase.</div>
+                <div class="fix-label">Fix:</div><pre># Use the openssl command to generate an HMAC file.
+            # Use list format for COMMAND to avoid shell injection
+            cmake += 'install(CODE "execute_process(COMMAND openssl dgst -hmac \\\"%s\\\" -%s -out lib%s.so.hmac lib%s.so)")\n' % (self._args.hkey.replace('"', '\\"'), self._hmac, lib_name, lib_name)
+            # Ideally validate self._args.hkey contains only safe characters</pre>
+                <div class="issue-source">Reviewer: gemini</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">Insecure Memory Clearing (Dead Store Elimination)</div>
+                <div class="issue-location">bsl/sal/src/sal_mem.c:112-145</div>
+                <pre>static void CleanSensitiveData(void *buf, uint32_t bufLen)
+{
+    uint8_t *tmp = (uint8_t *)buf;
+    // ... (complex alignment logic) ...
+    for (uint32_t i = boundOpt; i &lt; bufLen; ++i) {
+        tmp[i] = 0;
+    }
+}</pre>
+                <div class="problem"><strong>Issue:</strong> The `CleanSensitiveData` function manually zeroes out memory using a loop and simple assignment. The file also enables `-O3` optimization. Modern compilers can optimize away these write operations (Dead Store Elimination) if the memory is freed immediately afterwards (which `BSL_SAL_ClearFree` does), leaving sensitive data in memory.</div>
+                <div class="fix-label">Fix:</div><pre>static void CleanSensitiveData(void *buf, uint32_t bufLen)
+{
+    volatile uint8_t *tmp = (volatile uint8_t *)buf;
+    for (uint32_t i = 0; i &lt; bufLen; ++i) {
+        tmp[i] = 0;
+    }
+}</pre>
+                <div class="issue-source">Reviewer: gemini</div>
+            </div>
+</div>
+<div class="section"><div class="section-title medium">Medium</div>
+<div class="issue">
+                <div class="issue-title">Logic Error: Stdin Closed Prematurely</div>
+                <div class="issue-location">apps/src/app_client.c:520</div>
+                <pre>BSL_UIO *rUio = HITLS_APP_UioOpen(NULL, 'r', 1);
+    BSL_UIO_SetIsUnderlyingClosedByUio(rUio, true);
+    if (rUio == NULL) {</pre>
+                <div class="problem"><strong>Issue:</strong> In `ConfirmAction` (used for SM mode confirmation), `stdin` is opened via `HITLS_APP_UioOpen(NULL, ...)` and then `BSL_UIO_SetIsUnderlyingClosedByUio(rUio, true)` is called. When `BSL_UIO_Free(rUio)` is called at the end of the function, it closes `stdin`. Subsequent attempts to read from `stdin` in `HandleClientDataExchange` will fail.</div>
+                <div class="fix-label">Fix:</div><pre>BSL_UIO *rUio = HITLS_APP_UioOpen(NULL, 'r', 1);
+    BSL_UIO_SetIsUnderlyingClosedByUio(rUio, false); // Do not close stdin when freeing UIO
+    if (rUio == NULL) {</pre>
+                <div class="issue-source">Reviewer: gemini</div>
+            </div>
+</div>
+</div></body></html>

@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Code Review: openHiTLS/openhitls#1086 - CODEX</title>
+    <style>
+        :root { --critical: #dc2626; --high: #ea580c; --medium: #ca8a04; --low: #65a30d; }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: system-ui, sans-serif; background: #f8fafc; color: #1e293b; padding: 2rem; line-height: 1.6; }
+        .container { max-width: 900px; margin: 0 auto; }
+        h1 { font-size: 1.5rem; margin-bottom: 0.5rem; }
+        .subtitle { color: #64748b; margin-bottom: 2rem; }
+        .section { margin-bottom: 2rem; }
+        .section-title { font-size: 1.1rem; font-weight: 600; padding: 0.5rem 1rem; border-radius: 0.5rem 0.5rem 0 0; color: white; }
+        .section-title.critical { background: var(--critical); }
+        .section-title.high { background: var(--high); }
+        .section-title.medium { background: var(--medium); }
+        .section-title.low { background: var(--low); }
+        .issue { background: white; border: 1px solid #e2e8f0; border-top: none; padding: 1rem; }
+        .issue:last-child { border-radius: 0 0 0.5rem 0.5rem; }
+        .issue-title { font-weight: 600; margin-bottom: 0.25rem; }
+        .issue-location { font-family: monospace; font-size: 0.875rem; color: #64748b; margin-bottom: 0.75rem; }
+        .issue-source { font-size: 0.75rem; color: #94a3b8; margin-top: 0.5rem; }
+        pre { background: #1e293b; color: #e2e8f0; padding: 0.75rem; border-radius: 0.375rem; overflow-x: auto; font-size: 0.875rem; margin: 0.5rem 0; }
+        .problem { margin: 0.75rem 0; }
+        .fix-label { font-weight: 600; margin-top: 0.75rem; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Code Review: openHiTLS/openhitls#1086 - CODEX</h1>
+        <div class="subtitle"></div>
+<div class="section"><div class="section-title high">High</div>
+<div class="issue">
+                <div class="issue-title">Undefined variable `len` breaks `HITLS_APP_SM_MODE` build</div>
+                <div class="issue-location">apps/src/app_utils.c:1102-1107</div>
+                <pre>(void)snprintf(str, sizeof(str), "%d", pid);
+if (param-&gt;smParam-&gt;smTag == 1 &amp;&amp; param-&gt;randAlgId == CRYPT_RAND_SHA256) {
+    param-&gt;randAlgId = CRYPT_RAND_SM4_CTR_DF;
+}
+int32_t ret = CRYPT_EAL_ProviderRandInitCtx(APP_GetCurrent_LibCtx(), param-&gt;randAlgId,
+    param-&gt;provider-&gt;providerAttr, (const uint8_t *)str, len, NULL);</pre>
+                <div class="problem"><strong>Issue:</strong> `len` is still passed to `CRYPT_EAL_ProviderRandInitCtx` after replacing `sprintf_s` with `snprintf`, but `len` is no longer defined. This causes a compile error when `HITLS_APP_SM_MODE` is enabled.</div>
+                <div class="fix-label">Fix:</div><pre>int len = snprintf(str, sizeof(str), "%d", pid);
+if (len &lt; 0 || (size_t)len &gt;= sizeof(str)) {
+    AppPrintError("Failed to set pid, pid = %d.\n", pid);
+    return HITLS_APP_INVALID_ARG;
+}
+if (param-&gt;smParam-&gt;smTag == 1 &amp;&amp; param-&gt;randAlgId == CRYPT_RAND_SHA256) {
+    param-&gt;randAlgId = CRYPT_RAND_SM4_CTR_DF;
+}
+int32_t ret = CRYPT_EAL_ProviderRandInitCtx(APP_GetCurrent_LibCtx(), param-&gt;randAlgId,
+    param-&gt;provider-&gt;providerAttr, (const uint8_t *)str, (uint32_t)len, NULL);</pre>
+                <div class="issue-source">Reviewer: codex</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">Sensitive key material is wiped with non-guaranteed `memset`</div>
+                <div class="issue-location">tls/handshake/common/src/hs_kx.c:436-440</div>
+                <pre>memset(tmpPskPmsBufTmp, 0, MAX_PRE_MASTER_SECRET_SIZE);
+...
+ERR:
+    memset(tmpPskPmsBufTmp, 0, MAX_PRE_MASTER_SECRET_SIZE);
+...
+memset(keyPara.masterSecret, 0, MASTER_SECRET_LEN);</pre>
+                <div class="problem"><strong>Issue:</strong> Pre-master/master secret buffers are cleared using `memset`. Compilers may optimize these calls away, leaving secret material in memory after use.</div>
+                <div class="fix-label">Fix:</div><pre>BSL_SAL_CleanseData(tmpPskPmsBufTmp, MAX_PRE_MASTER_SECRET_SIZE);
+...
+ERR:
+    BSL_SAL_CleanseData(tmpPskPmsBufTmp, MAX_PRE_MASTER_SECRET_SIZE);
+...
+BSL_SAL_CleanseData(keyPara.masterSecret, MASTER_SECRET_LEN);</pre>
+                <div class="issue-source">Reviewer: codex</div>
+            </div>
+</div>
+<div class="section"><div class="section-title medium">Medium</div>
+<div class="issue">
+                <div class="issue-title">PSK buffer cleanup downgraded from secure erase to plain `memset`</div>
+                <div class="issue-location">tls/handshake/send/src/send_client_hello.c:330</div>
+                <pre>memset(psk, 0, HS_PSK_MAX_LEN);
+...
+memset(psk, 0, HS_PSK_MAX_LEN);
+...
+memset(psk, 0, HS_PSK_MAX_LEN);</pre>
+                <div class="problem"><strong>Issue:</strong> The temporary `psk` buffer holds secret key material but is cleared with `memset`, which can be optimized out and fail to reliably erase secrets.</div>
+                <div class="fix-label">Fix:</div><pre>BSL_SAL_CleanseData(psk, HS_PSK_MAX_LEN);
+...
+BSL_SAL_CleanseData(psk, HS_PSK_MAX_LEN);
+...
+BSL_SAL_CleanseData(psk, HS_PSK_MAX_LEN);</pre>
+                <div class="issue-source">Reviewer: codex</div>
+            </div>
+</div>
+</div></body></html>

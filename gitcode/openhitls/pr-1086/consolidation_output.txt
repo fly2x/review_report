@@ -1,0 +1,359 @@
+Now I have enough information to produce the consolidated report. Let me output the issues in the required format:
+
+===ISSUE===
+FILE: apps/src/app_utils.c
+LINE: 1102-1107
+SEVERITY: critical
+TITLE: Undefined variable `len` causes compilation error in HITLS_APP_SM_MODE
+REVIEWERS: CODEX
+CONFIDENCE: trusted
+PROBLEM: The variable `len` is used in the CRYPT_EAL_ProviderRandInitCtx call but is never defined. When replacing sprintf_s with snprintf, the return value (which provided the length) was discarded but the variable `len` remained in the function call. This causes a compilation error when HITLS_APP_SM_MODE is enabled.
+CODE:
+```
+static int32_t InitRand(AppInitParam *param)
+{
+#ifdef HITLS_APP_SM_MODE
+    pid_t pid = getpid();
+    char str[32] = {0};
+    (void)snprintf(str, sizeof(str), "%d", pid);
+    if (param->smParam->smTag == 1 && param->randAlgId == CRYPT_RAND_SHA256) {
+        param->randAlgId = CRYPT_RAND_SM4_CTR_DF;
+    }
+    int32_t ret = CRYPT_EAL_ProviderRandInitCtx(APP_GetCurrent_LibCtx(), param->randAlgId,
+        param->provider->providerAttr, (const uint8_t *)str, len, NULL);
+```
+FIX:
+```
+static int32_t InitRand(AppInitParam *param)
+{
+#ifdef HITLS_APP_SM_MODE
+    pid_t pid = getpid();
+    char str[32] = {0};
+    int len = snprintf(str, sizeof(str), "%d", pid);
+    if (len < 0 || (size_t)len >= sizeof(str)) {
+        AppPrintError("Failed to set pid, pid = %d.\n", pid);
+        return HITLS_APP_INVALID_ARG;
+    }
+    if (param->smParam->smTag == 1 && param->randAlgId == CRYPT_RAND_SHA256) {
+        param->randAlgId = CRYPT_RAND_SM4_CTR_DF;
+    }
+    int32_t ret = CRYPT_EAL_ProviderRandInitCtx(APP_GetCurrent_LibCtx(), param->randAlgId,
+        param->provider->providerAttr, (const uint8_t *)str, (uint32_t)len, NULL);
+```
+===END===
+
+===ISSUE===
+FILE: bsl/sal/src/sal_mem.c
+LINE: 159-187
+SEVERITY: high
+TITLE: Insecure memory clearing may be optimized away by compiler
+REVIEWERS: GEMINI
+CONFIDENCE: trusted
+PROBLEM: The CleanSensitiveData function uses non-volatile assignments to wipe sensitive memory. With -O3 optimization enabled (line 114), the compiler may optimize away these writes as dead stores, leaving sensitive data in memory. The original code used memset_s which guarantees the memory is written.
+CODE:
+```
+static void CleanSensitiveData(void *buf, uint32_t bufLen)
+{
+    uint8_t *tmp = (uint8_t *)buf;
+    uint32_t boundOpt;
+
+    if (((uintptr_t)buf & 0x3) == 0) {
+        boundOpt = (bufLen >> 4) << 4;
+        for (uint32_t i = 0; i < boundOpt; i += 16) {
+            uint32_t *ctmp = (uint32_t *)(uintptr_t)(tmp + i);
+            ctmp[0] = 0;
+            ctmp[1] = 0;
+            ctmp[2] = 0;
+            ctmp[3] = 0;
+        }
+    } else {
+        boundOpt = (bufLen >> 2) << 2;
+        for (uint32_t i = 0; i < boundOpt; i += 4) {
+            tmp[i] = 0;
+            tmp[i + 1] = 0;
+            tmp[i + 2] = 0;
+            tmp[i + 3] = 0;
+        }
+    }
+    for (uint32_t i = boundOpt; i < bufLen; ++i) {
+        tmp[i] = 0;
+    }
+}
+```
+FIX:
+```
+static void CleanSensitiveData(void *buf, uint32_t bufLen)
+{
+    volatile uint8_t *tmp = (volatile uint8_t *)buf;
+    uint32_t boundOpt;
+
+    if (((uintptr_t)buf & 0x3) == 0) {
+        boundOpt = (bufLen >> 4) << 4;
+        for (uint32_t i = 0; i < boundOpt; i += 16) {
+            volatile uint32_t *ctmp = (volatile uint32_t *)(volatile uintptr_t)(tmp + i);
+            ctmp[0] = 0;
+            ctmp[1] = 0;
+            ctmp[2] = 0;
+            ctmp[3] = 0;
+        }
+    } else {
+        boundOpt = (bufLen >> 2) << 2;
+        for (uint32_t i = 0; i < boundOpt; i += 4) {
+            tmp[i] = 0;
+            tmp[i + 1] = 0;
+            tmp[i + 2] = 0;
+            tmp[i + 3] = 0;
+        }
+    }
+    for (uint32_t i = boundOpt; i < bufLen; ++i) {
+        tmp[i] = 0;
+    }
+}
+```
+===END===
+
+===ISSUE===
+FILE: tls/handshake/send/src/send_client_hello.c
+LINE: 330, 337, 345
+SEVERITY: high
+TITLE: PSK secret material cleared with insecure memset instead of secure wipe
+REVIEWERS: CODEX
+CONFIDENCE: trusted
+PROBLEM: The PSK buffer contains secret key material but is cleared using memset, which can be optimized away by the compiler. The original code used memset_s which guarantees secure wiping. This should use BSL_SAL_CleanseData which is already available in the codebase and used elsewhere for secure data clearing.
+CODE:
+```
+if (pskLen > HS_PSK_MAX_LEN) {
+    BSL_LOG_BINLOG_FIXLEN(BINLOG_ID17111, BSL_LOG_LEVEL_ERR, BSL_LOG_BINLOG_TYPE_RUN, "pskLen err", 0, 0, 0, 0);
+    memset(psk, 0, HS_PSK_MAX_LEN);
+    return HITLS_MSG_HANDLE_ILLEGAL_PSK_LEN;
+}
+
+HITLS_Session *sess = HITLS_SESS_New();
+if (sess == NULL) {
+    BSL_LOG_BINLOG_FIXLEN(BINLOG_ID17112, BSL_LOG_LEVEL_ERR, BSL_LOG_BINLOG_TYPE_RUN, "sess new fail", 0, 0, 0, 0);
+    memset(psk, 0, HS_PSK_MAX_LEN);
+    return HITLS_MEMALLOC_FAIL;
+}
+
+HITLS_SESS_SetMasterKey(sess, psk, pskLen);
+HITLS_SESS_SetCipherSuite(sess, HITLS_AES_128_GCM_SHA256);
+HITLS_SESS_SetProtocolVersion(sess, HITLS_VERSION_TLS13);
+*pskSession = sess;
+memset(psk, 0, HS_PSK_MAX_LEN);
+```
+FIX:
+```
+if (pskLen > HS_PSK_MAX_LEN) {
+    BSL_LOG_BINLOG_FIXLEN(BINLOG_ID17111, BSL_LOG_LEVEL_ERR, BSL_LOG_BINLOG_TYPE_RUN, "pskLen err", 0, 0, 0, 0);
+    BSL_SAL_CleanseData(psk, HS_PSK_MAX_LEN);
+    return HITLS_MSG_HANDLE_ILLEGAL_PSK_LEN;
+}
+
+HITLS_Session *sess = HITLS_SESS_New();
+if (sess == NULL) {
+    BSL_LOG_BINLOG_FIXLEN(BINLOG_ID17112, BSL_LOG_LEVEL_ERR, BSL_LOG_BINLOG_TYPE_RUN, "sess new fail", 0, 0, 0, 0);
+    BSL_SAL_CleanseData(psk, HS_PSK_MAX_LEN);
+    return HITLS_MEMALLOC_FAIL;
+}
+
+HITLS_SESS_SetMasterKey(sess, psk, pskLen);
+HITLS_SESS_SetCipherSuite(sess, HITLS_AES_128_GCM_SHA256);
+HITLS_SESS_SetProtocolVersion(sess, HITLS_VERSION_TLS13);
+*pskSession = sess;
+BSL_SAL_CleanseData(psk, HS_PSK_MAX_LEN);
+```
+===END===
+
+===ISSUE===
+FILE: tls/handshake/common/src/hs_kx.c
+LINE: 436, 440
+SEVERITY: high
+TITLE: Pre-master secret cleared with insecure memset instead of secure wipe
+REVIEWERS: CODEX
+CONFIDENCE: trusted
+PROBLEM: The tmpPskPmsBufTmp buffer contains pre-master secret material but is cleared using memset, which can be optimized away by the compiler. The original code used memset_s which guarantees secure wiping. This should use BSL_SAL_CleanseData.
+CODE:
+```
+memcpy(pmsBuf, tmpPskPmsBufTmp, offset);
+*pmsUsedLen = offset;
+
+memset(tmpPskPmsBufTmp, 0, MAX_PRE_MASTER_SECRET_SIZE);
+
+return HITLS_SUCCESS;
+ERR:
+memset(tmpPskPmsBufTmp, 0, MAX_PRE_MASTER_SECRET_SIZE);
+BSL_ERR_PUSH_ERROR(HITLS_MEMCPY_FAIL);
+return HITLS_MEMCPY_FAIL;
+```
+FIX:
+```
+memcpy(pmsBuf, tmpPskPmsBufTmp, offset);
+*pmsUsedLen = offset;
+
+BSL_SAL_CleanseData(tmpPskPmsBufTmp, MAX_PRE_MASTER_SECRET_SIZE);
+
+return HITLS_SUCCESS;
+ERR:
+BSL_SAL_CleanseData(tmpPskPmsBufTmp, MAX_PRE_MASTER_SECRET_SIZE);
+BSL_ERR_PUSH_ERROR(HITLS_MEMCPY_FAIL);
+return HITLS_MEMCPY_FAIL;
+```
+===END===
+
+===ISSUE===
+FILE: tls/handshake/common/src/hs_kx.c
+LINE: 667
+SEVERITY: high
+TITLE: Master secret cleared with insecure memset instead of secure wipe
+REVIEWERS: CODEX
+CONFIDENCE: trusted
+PROBLEM: The keyPara.masterSecret buffer contains the master secret but is cleared using memset. The original code used memset_s. This should use BSL_SAL_CleanseData.
+CODE:
+```
+memcpy(keyPara.masterSecret, ctx->hsCtx->masterKey, MASTER_SECRET_LEN);
+ret = REC_InitPendingState(ctx, &keyPara);
+
+memset(keyPara.masterSecret, 0, MASTER_SECRET_LEN);
+return ret;
+```
+FIX:
+```
+memcpy(keyPara.masterSecret, ctx->hsCtx->masterKey, MASTER_SECRET_LEN);
+ret = REC_InitPendingState(ctx, &keyPara);
+
+BSL_SAL_CleanseData(keyPara.masterSecret, MASTER_SECRET_LEN);
+return ret;
+```
+===END===
+
+===ISSUE===
+FILE: bsl/log/src/log.c
+LINE: 39-43
+SEVERITY: medium
+TITLE: Missing length validation in BSL_LOG_GetVersion can cause buffer overflow
+REVIEWERS: CLAUDE
+CONFIDENCE: trusted
+PROBLEM: The original code verified that strlen(g_openHiTLSVersion) fits in the caller's buffer via memcpy_s. The new code only checks *versionLen >= HITLS_VERSION_LEN but doesn't verify the actual string length. If g_openHiTLSVersion is longer than expected (e.g., due to build configuration), it could overflow the caller's buffer.
+CODE:
+```
+if (*versionLen < HITLS_VERSION_LEN) {
+    return BSL_LOG_ERR_BAD_PARAM;
+}
+
+uint32_t len = (uint32_t)strlen(g_openHiTLSVersion);
+
+memcpy(version, g_openHiTLSVersion, len);
+
+*versionLen = len;
+return BSL_SUCCESS;
+```
+FIX:
+```
+if (*versionLen < HITLS_VERSION_LEN) {
+    return BSL_LOG_ERR_BAD_PARAM;
+}
+
+uint32_t len = (uint32_t)strlen(g_openHiTLSVersion);
+if (len > *versionLen) {
+    return BSL_MEMCPY_FAIL;
+}
+memcpy(version, g_openHiTLSVersion, len);
+
+*versionLen = len;
+return BSL_SUCCESS;
+```
+===END===
+
+===ISSUE===
+FILE: tls/cm/src/conn_create.c
+LINE: 838-844
+SEVERITY: medium
+TITLE: Incorrect offset increment logic in Uint8ToHex after snprintf conversion
+REVIEWERS: CLAUDE
+CONFIDENCE: likely
+PROBLEM: The original code used `offsetTemp += sizeof(uint16_t)` (which is 2) because sprintf_s with "%02x" always writes 2 hex digits. The new code uses the actual snprintf return value. While the validation check handles error cases, if snprintf returns a value other than 2 (e.g., due to truncation), the offset calculation could be incorrect. For correctness, the offset should always increment by 2 for each byte since each hex byte is exactly 2 characters.
+CODE:
+```
+for (size_t i = 0u; i < srcLen; i++) {
+    int n = snprintf((char *)&destBuf[offsetTemp], (destMaxSize - offsetTemp), "%02x", srcBuf[i]);
+    if (n < 0 || (size_t)n >= (destMaxSize - offsetTemp)) {
+        BSL_LOG_BINLOG_FIXLEN(BINLOG_ID16481, BSL_LOG_LEVEL_ERR, BSL_LOG_BINLOG_TYPE_RUN,
+            "snprintf fail", 0, 0, 0, 0);
+        return HITLS_INVALID_INPUT;
+    }
+    offsetTemp += (size_t)n;
+```
+FIX:
+```
+for (size_t i = 0u; i < srcLen; i++) {
+    int n = snprintf((char *)&destBuf[offsetTemp], (destMaxSize - offsetTemp), "%02x", srcBuf[i]);
+    if (n < 0 || n != 2 || (size_t)n >= (destMaxSize - offsetTemp)) {
+        BSL_LOG_BINLOG_FIXLEN(BINLOG_ID16481, BSL_LOG_LEVEL_ERR, BSL_LOG_BINLOG_TYPE_RUN,
+            "snprintf fail", 0, 0, 0, 0);
+        return HITLS_INVALID_INPUT;
+    }
+    offsetTemp += 2;  // Each hex byte is exactly 2 characters
+```
+===END===
+
+===ISSUE===
+FILE: apps/src/app_enc.c
+LINE: 128-132
+SEVERITY: medium
+TITLE: Missing output validation in Int2Hex after snprintf_s replacement
+REVIEWERS: CLAUDE
+CONFIDENCE: likely
+PROBLEM: The original code verified that snprintf_s wrote exactly REC_HEX_BUF_LENGTH (8) characters by checking strlen(hexBuf) != REC_HEX_BUF_LENGTH. The new code with standard snprintf doesn't validate the output. While the format "%08X" should always write 8 hex digits for a 32-bit int, the validation was removed entirely.
+CODE:
+```
+static int32_t Int2Hex(int32_t num, char *hexBuf)
+{
+    (void)snprintf(hexBuf, REC_HEX_BUF_LENGTH + 1, "%08X", num);
+    return HITLS_APP_SUCCESS;
+}
+```
+FIX:
+```
+static int32_t Int2Hex(int32_t num, char *hexBuf)
+{
+    int ret = snprintf(hexBuf, REC_HEX_BUF_LENGTH + 1, "%08X", num);
+    if (ret < 0 || ret != REC_HEX_BUF_LENGTH) {
+        AppPrintError("enc: error in uint to hex.\n");
+        return HITLS_APP_ENCODE_FAIL;
+    }
+    return HITLS_APP_SUCCESS;
+}
+```
+===END===
+
+===ISSUE===
+FILE: tls/handshake/common/src/hs_common.c
+LINE: 716-723
+SEVERITY: medium
+TITLE: Incorrect condition in IsSpecialLabel after memcpy_s replacement
+REVIEWERS: CLAUDE
+CONFIDENCE: likely
+PROBLEM: The original code used memcpy_s error return to detect if the label was too long. The new condition `useLabelLen <= sizeof(labelBuf)` is semantically incorrect. When the label is short (which is the normal case), the code copies it and then returns true (indicating "special handling needed"). The function should only return true when the label is too long, not when it fits.
+CODE:
+```
+size_t useLabelLen = labelLen;
+if (labelLen > MAX_LABEL_SIZE) {
+    useLabelLen = MAX_LABEL_SIZE;
+}
+if (labelLen != 0 && useLabelLen <= sizeof(labelBuf)) {
+    memcpy(labelBuf, label, useLabelLen);
+} else if (labelLen != 0) {
+    return true;
+}
+```
+FIX:
+```
+size_t useLabelLen = labelLen;
+if (labelLen != 0) {
+    if (labelLen > sizeof(labelBuf) - 1) {
+        return true;  // Label too long, needs special handling
+    }
+    memcpy(labelBuf, label, labelLen);
+}
+```
+===END===

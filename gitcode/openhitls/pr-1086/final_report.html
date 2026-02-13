@@ -1,0 +1,361 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Final Report: openHiTLS/openhitls#1086</title>
+    <style>
+        :root { --critical: #dc2626; --high: #ea580c; --medium: #ca8a04; --low: #65a30d;
+                 --trusted: #059669; --likely: #0284c7; --evaluate: #7c3aed; }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: system-ui, sans-serif; background: #f8fafc; color: #1e293b; padding: 2rem; line-height: 1.6; }
+        .container { max-width: 900px; margin: 0 auto; }
+        h1 { font-size: 1.75rem; margin-bottom: 0.5rem; }
+        .subtitle { color: #64748b; margin-bottom: 1rem; }
+        .stats { display: flex; gap: 1rem; margin-bottom: 2rem; flex-wrap: wrap; }
+        .stat { background: white; border: 1px solid #e2e8f0; border-radius: 0.5rem; padding: 1rem; min-width: 100px; text-align: center; }
+        .stat-value { font-size: 1.5rem; font-weight: 700; }
+        .stat-label { font-size: 0.875rem; color: #64748b; }
+        .stat.critical .stat-value { color: var(--critical); }
+        .stat.high .stat-value { color: var(--high); }
+        .stat.medium .stat-value { color: var(--medium); }
+        .stat.low .stat-value { color: var(--low); }
+        .reviewers { background: #e0e7ff; color: #3730a3; padding: 0.5rem 1rem; border-radius: 0.5rem; margin-bottom: 2rem; }
+        .section { margin-bottom: 2rem; }
+        .section-title { font-size: 1.1rem; font-weight: 600; padding: 0.5rem 1rem; border-radius: 0.5rem 0.5rem 0 0; color: white; }
+        .section-title.critical { background: var(--critical); }
+        .section-title.high { background: var(--high); }
+        .section-title.medium { background: var(--medium); }
+        .section-title.low { background: var(--low); }
+        .issue { background: white; border: 1px solid #e2e8f0; border-top: none; padding: 1rem; }
+        .issue:last-child { border-radius: 0 0 0.5rem 0.5rem; }
+        .issue-title { font-weight: 600; margin-bottom: 0.25rem; }
+        .issue-location { font-family: monospace; font-size: 0.875rem; color: #64748b; margin-bottom: 0.5rem; }
+        .issue-meta { font-size: 0.75rem; margin-bottom: 0.75rem; display: flex; gap: 0.75rem; align-items: center; }
+        .issue-meta .reviewers { background: #f1f5f9; color: #475569; padding: 0.25rem 0.5rem; border-radius: 0.25rem; margin: 0; }
+        .confidence-badge { padding: 0.25rem 0.5rem; border-radius: 0.25rem; font-weight: 500; }
+        .confidence-badge.trusted { background: #d1fae5; color: #065f46; }
+        .confidence-badge.likely { background: #dbeafe; color: #1e40af; }
+        .confidence-badge.evaluate { background: #ede9fe; color: #5b21b6; }
+        pre { background: #1e293b; color: #e2e8f0; padding: 0.75rem; border-radius: 0.375rem; overflow-x: auto; font-size: 0.875rem; margin: 0.5rem 0; }
+        .problem { margin: 0.75rem 0; }
+        .fix-label { font-weight: 600; margin-top: 0.75rem; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Final Code Review Report</h1>
+        <div class="subtitle">openHiTLS/openhitls - PR #1086</div>
+        <p style="margin-bottom: 1rem;"></p>
+
+        <div class="stats">
+            <div class="stat"><div class="stat-value">9</div><div class="stat-label">Total</div></div>
+            <div class="stat critical"><div class="stat-value">1</div><div class="stat-label">Critical</div></div>
+            <div class="stat high"><div class="stat-value">4</div><div class="stat-label">High</div></div>
+            <div class="stat medium"><div class="stat-value">4</div><div class="stat-label">Medium</div></div>
+            <div class="stat low"><div class="stat-value">0</div><div class="stat-label">Low</div></div>
+        </div>
+
+        <div class="reviewers">Reviewers: claude, gemini, codex</div>
+<div class="section"><div class="section-title critical">Critical</div>
+<div class="issue">
+                <div class="issue-title">Undefined variable `len` causes compilation error in HITLS_APP_SM_MODE</div>
+                <div class="issue-location">apps/src/app_utils.c:1102-1107</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CODEX</span>
+                    <span class="confidence-badge trusted">置信度: 可信</span>
+                </div>
+                <pre>static int32_t InitRand(AppInitParam *param)
+{
+#ifdef HITLS_APP_SM_MODE
+    pid_t pid = getpid();
+    char str[32] = {0};
+    (void)snprintf(str, sizeof(str), "%d", pid);
+    if (param-&gt;smParam-&gt;smTag == 1 &amp;&amp; param-&gt;randAlgId == CRYPT_RAND_SHA256) {
+        param-&gt;randAlgId = CRYPT_RAND_SM4_CTR_DF;
+    }
+    int32_t ret = CRYPT_EAL_ProviderRandInitCtx(APP_GetCurrent_LibCtx(), param-&gt;randAlgId,
+        param-&gt;provider-&gt;providerAttr, (const uint8_t *)str, len, NULL);</pre>
+                <div class="problem"><strong>Issue:</strong> The variable `len` is used in the CRYPT_EAL_ProviderRandInitCtx call but is never defined. When replacing sprintf_s with snprintf, the return value (which provided the length) was discarded but the variable `len` remained in the function call. This causes a compilation error when HITLS_APP_SM_MODE is enabled.</div>
+                <div class="fix-label">Fix:</div><pre>static int32_t InitRand(AppInitParam *param)
+{
+#ifdef HITLS_APP_SM_MODE
+    pid_t pid = getpid();
+    char str[32] = {0};
+    int len = snprintf(str, sizeof(str), "%d", pid);
+    if (len &lt; 0 || (size_t)len &gt;= sizeof(str)) {
+        AppPrintError("Failed to set pid, pid = %d.\n", pid);
+        return HITLS_APP_INVALID_ARG;
+    }
+    if (param-&gt;smParam-&gt;smTag == 1 &amp;&amp; param-&gt;randAlgId == CRYPT_RAND_SHA256) {
+        param-&gt;randAlgId = CRYPT_RAND_SM4_CTR_DF;
+    }
+    int32_t ret = CRYPT_EAL_ProviderRandInitCtx(APP_GetCurrent_LibCtx(), param-&gt;randAlgId,
+        param-&gt;provider-&gt;providerAttr, (const uint8_t *)str, (uint32_t)len, NULL);</pre>
+            </div>
+</div>
+<div class="section"><div class="section-title high">High</div>
+<div class="issue">
+                <div class="issue-title">Insecure memory clearing may be optimized away by compiler</div>
+                <div class="issue-location">bsl/sal/src/sal_mem.c:159-187</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: GEMINI</span>
+                    <span class="confidence-badge trusted">置信度: 可信</span>
+                </div>
+                <pre>static void CleanSensitiveData(void *buf, uint32_t bufLen)
+{
+    uint8_t *tmp = (uint8_t *)buf;
+    uint32_t boundOpt;
+
+    if (((uintptr_t)buf &amp; 0x3) == 0) {
+        boundOpt = (bufLen &gt;&gt; 4) &lt;&lt; 4;
+        for (uint32_t i = 0; i &lt; boundOpt; i += 16) {
+            uint32_t *ctmp = (uint32_t *)(uintptr_t)(tmp + i);
+            ctmp[0] = 0;
+            ctmp[1] = 0;
+            ctmp[2] = 0;
+            ctmp[3] = 0;
+        }
+    } else {
+        boundOpt = (bufLen &gt;&gt; 2) &lt;&lt; 2;
+        for (uint32_t i = 0; i &lt; boundOpt; i += 4) {
+            tmp[i] = 0;
+            tmp[i + 1] = 0;
+            tmp[i + 2] = 0;
+            tmp[i + 3] = 0;
+        }
+    }
+    for (uint32_t i = boundOpt; i &lt; bufLen; ++i) {
+        tmp[i] = 0;
+    }
+}</pre>
+                <div class="problem"><strong>Issue:</strong> The CleanSensitiveData function uses non-volatile assignments to wipe sensitive memory. With -O3 optimization enabled (line 114), the compiler may optimize away these writes as dead stores, leaving sensitive data in memory. The original code used memset_s which guarantees the memory is written.</div>
+                <div class="fix-label">Fix:</div><pre>static void CleanSensitiveData(void *buf, uint32_t bufLen)
+{
+    volatile uint8_t *tmp = (volatile uint8_t *)buf;
+    uint32_t boundOpt;
+
+    if (((uintptr_t)buf &amp; 0x3) == 0) {
+        boundOpt = (bufLen &gt;&gt; 4) &lt;&lt; 4;
+        for (uint32_t i = 0; i &lt; boundOpt; i += 16) {
+            volatile uint32_t *ctmp = (volatile uint32_t *)(volatile uintptr_t)(tmp + i);
+            ctmp[0] = 0;
+            ctmp[1] = 0;
+            ctmp[2] = 0;
+            ctmp[3] = 0;
+        }
+    } else {
+        boundOpt = (bufLen &gt;&gt; 2) &lt;&lt; 2;
+        for (uint32_t i = 0; i &lt; boundOpt; i += 4) {
+            tmp[i] = 0;
+            tmp[i + 1] = 0;
+            tmp[i + 2] = 0;
+            tmp[i + 3] = 0;
+        }
+    }
+    for (uint32_t i = boundOpt; i &lt; bufLen; ++i) {
+        tmp[i] = 0;
+    }
+}</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">PSK secret material cleared with insecure memset instead of secure wipe</div>
+                <div class="issue-location">tls/handshake/send/src/send_client_hello.c:330</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CODEX</span>
+                    <span class="confidence-badge trusted">置信度: 可信</span>
+                </div>
+                <pre>if (pskLen &gt; HS_PSK_MAX_LEN) {
+    BSL_LOG_BINLOG_FIXLEN(BINLOG_ID17111, BSL_LOG_LEVEL_ERR, BSL_LOG_BINLOG_TYPE_RUN, "pskLen err", 0, 0, 0, 0);
+    memset(psk, 0, HS_PSK_MAX_LEN);
+    return HITLS_MSG_HANDLE_ILLEGAL_PSK_LEN;
+}
+
+HITLS_Session *sess = HITLS_SESS_New();
+if (sess == NULL) {
+    BSL_LOG_BINLOG_FIXLEN(BINLOG_ID17112, BSL_LOG_LEVEL_ERR, BSL_LOG_BINLOG_TYPE_RUN, "sess new fail", 0, 0, 0, 0);
+    memset(psk, 0, HS_PSK_MAX_LEN);
+    return HITLS_MEMALLOC_FAIL;
+}
+
+HITLS_SESS_SetMasterKey(sess, psk, pskLen);
+HITLS_SESS_SetCipherSuite(sess, HITLS_AES_128_GCM_SHA256);
+HITLS_SESS_SetProtocolVersion(sess, HITLS_VERSION_TLS13);
+*pskSession = sess;
+memset(psk, 0, HS_PSK_MAX_LEN);</pre>
+                <div class="problem"><strong>Issue:</strong> The PSK buffer contains secret key material but is cleared using memset, which can be optimized away by the compiler. The original code used memset_s which guarantees secure wiping. This should use BSL_SAL_CleanseData which is already available in the codebase and used elsewhere for secure data clearing.</div>
+                <div class="fix-label">Fix:</div><pre>if (pskLen &gt; HS_PSK_MAX_LEN) {
+    BSL_LOG_BINLOG_FIXLEN(BINLOG_ID17111, BSL_LOG_LEVEL_ERR, BSL_LOG_BINLOG_TYPE_RUN, "pskLen err", 0, 0, 0, 0);
+    BSL_SAL_CleanseData(psk, HS_PSK_MAX_LEN);
+    return HITLS_MSG_HANDLE_ILLEGAL_PSK_LEN;
+}
+
+HITLS_Session *sess = HITLS_SESS_New();
+if (sess == NULL) {
+    BSL_LOG_BINLOG_FIXLEN(BINLOG_ID17112, BSL_LOG_LEVEL_ERR, BSL_LOG_BINLOG_TYPE_RUN, "sess new fail", 0, 0, 0, 0);
+    BSL_SAL_CleanseData(psk, HS_PSK_MAX_LEN);
+    return HITLS_MEMALLOC_FAIL;
+}
+
+HITLS_SESS_SetMasterKey(sess, psk, pskLen);
+HITLS_SESS_SetCipherSuite(sess, HITLS_AES_128_GCM_SHA256);
+HITLS_SESS_SetProtocolVersion(sess, HITLS_VERSION_TLS13);
+*pskSession = sess;
+BSL_SAL_CleanseData(psk, HS_PSK_MAX_LEN);</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">Pre-master secret cleared with insecure memset instead of secure wipe</div>
+                <div class="issue-location">tls/handshake/common/src/hs_kx.c:436</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CODEX</span>
+                    <span class="confidence-badge trusted">置信度: 可信</span>
+                </div>
+                <pre>memcpy(pmsBuf, tmpPskPmsBufTmp, offset);
+*pmsUsedLen = offset;
+
+memset(tmpPskPmsBufTmp, 0, MAX_PRE_MASTER_SECRET_SIZE);
+
+return HITLS_SUCCESS;
+ERR:
+memset(tmpPskPmsBufTmp, 0, MAX_PRE_MASTER_SECRET_SIZE);
+BSL_ERR_PUSH_ERROR(HITLS_MEMCPY_FAIL);
+return HITLS_MEMCPY_FAIL;</pre>
+                <div class="problem"><strong>Issue:</strong> The tmpPskPmsBufTmp buffer contains pre-master secret material but is cleared using memset, which can be optimized away by the compiler. The original code used memset_s which guarantees secure wiping. This should use BSL_SAL_CleanseData.</div>
+                <div class="fix-label">Fix:</div><pre>memcpy(pmsBuf, tmpPskPmsBufTmp, offset);
+*pmsUsedLen = offset;
+
+BSL_SAL_CleanseData(tmpPskPmsBufTmp, MAX_PRE_MASTER_SECRET_SIZE);
+
+return HITLS_SUCCESS;
+ERR:
+BSL_SAL_CleanseData(tmpPskPmsBufTmp, MAX_PRE_MASTER_SECRET_SIZE);
+BSL_ERR_PUSH_ERROR(HITLS_MEMCPY_FAIL);
+return HITLS_MEMCPY_FAIL;</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">Master secret cleared with insecure memset instead of secure wipe</div>
+                <div class="issue-location">tls/handshake/common/src/hs_kx.c:667</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CODEX</span>
+                    <span class="confidence-badge trusted">置信度: 可信</span>
+                </div>
+                <pre>memcpy(keyPara.masterSecret, ctx-&gt;hsCtx-&gt;masterKey, MASTER_SECRET_LEN);
+ret = REC_InitPendingState(ctx, &amp;keyPara);
+
+memset(keyPara.masterSecret, 0, MASTER_SECRET_LEN);
+return ret;</pre>
+                <div class="problem"><strong>Issue:</strong> The keyPara.masterSecret buffer contains the master secret but is cleared using memset. The original code used memset_s. This should use BSL_SAL_CleanseData.</div>
+                <div class="fix-label">Fix:</div><pre>memcpy(keyPara.masterSecret, ctx-&gt;hsCtx-&gt;masterKey, MASTER_SECRET_LEN);
+ret = REC_InitPendingState(ctx, &amp;keyPara);
+
+BSL_SAL_CleanseData(keyPara.masterSecret, MASTER_SECRET_LEN);
+return ret;</pre>
+            </div>
+</div>
+<div class="section"><div class="section-title medium">Medium</div>
+<div class="issue">
+                <div class="issue-title">Missing length validation in BSL_LOG_GetVersion can cause buffer overflow</div>
+                <div class="issue-location">bsl/log/src/log.c:39-43</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CLAUDE</span>
+                    <span class="confidence-badge trusted">置信度: 可信</span>
+                </div>
+                <pre>if (*versionLen &lt; HITLS_VERSION_LEN) {
+    return BSL_LOG_ERR_BAD_PARAM;
+}
+
+uint32_t len = (uint32_t)strlen(g_openHiTLSVersion);
+
+memcpy(version, g_openHiTLSVersion, len);
+
+*versionLen = len;
+return BSL_SUCCESS;</pre>
+                <div class="problem"><strong>Issue:</strong> The original code verified that strlen(g_openHiTLSVersion) fits in the caller's buffer via memcpy_s. The new code only checks *versionLen >= HITLS_VERSION_LEN but doesn't verify the actual string length. If g_openHiTLSVersion is longer than expected (e.g., due to build configuration), it could overflow the caller's buffer.</div>
+                <div class="fix-label">Fix:</div><pre>if (*versionLen &lt; HITLS_VERSION_LEN) {
+    return BSL_LOG_ERR_BAD_PARAM;
+}
+
+uint32_t len = (uint32_t)strlen(g_openHiTLSVersion);
+if (len &gt; *versionLen) {
+    return BSL_MEMCPY_FAIL;
+}
+memcpy(version, g_openHiTLSVersion, len);
+
+*versionLen = len;
+return BSL_SUCCESS;</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">Incorrect offset increment logic in Uint8ToHex after snprintf conversion</div>
+                <div class="issue-location">tls/cm/src/conn_create.c:838-844</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CLAUDE</span>
+                    <span class="confidence-badge likely">置信度: 较可信</span>
+                </div>
+                <pre>for (size_t i = 0u; i &lt; srcLen; i++) {
+    int n = snprintf((char *)&amp;destBuf[offsetTemp], (destMaxSize - offsetTemp), "%02x", srcBuf[i]);
+    if (n &lt; 0 || (size_t)n &gt;= (destMaxSize - offsetTemp)) {
+        BSL_LOG_BINLOG_FIXLEN(BINLOG_ID16481, BSL_LOG_LEVEL_ERR, BSL_LOG_BINLOG_TYPE_RUN,
+            "snprintf fail", 0, 0, 0, 0);
+        return HITLS_INVALID_INPUT;
+    }
+    offsetTemp += (size_t)n;</pre>
+                <div class="problem"><strong>Issue:</strong> The original code used `offsetTemp += sizeof(uint16_t)` (which is 2) because sprintf_s with "%02x" always writes 2 hex digits. The new code uses the actual snprintf return value. While the validation check handles error cases, if snprintf returns a value other than 2 (e.g., due to truncation), the offset calculation could be incorrect. For correctness, the offset should always increment by 2 for each byte since each hex byte is exactly 2 characters.</div>
+                <div class="fix-label">Fix:</div><pre>for (size_t i = 0u; i &lt; srcLen; i++) {
+    int n = snprintf((char *)&amp;destBuf[offsetTemp], (destMaxSize - offsetTemp), "%02x", srcBuf[i]);
+    if (n &lt; 0 || n != 2 || (size_t)n &gt;= (destMaxSize - offsetTemp)) {
+        BSL_LOG_BINLOG_FIXLEN(BINLOG_ID16481, BSL_LOG_LEVEL_ERR, BSL_LOG_BINLOG_TYPE_RUN,
+            "snprintf fail", 0, 0, 0, 0);
+        return HITLS_INVALID_INPUT;
+    }
+    offsetTemp += 2;  // Each hex byte is exactly 2 characters</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">Missing output validation in Int2Hex after snprintf_s replacement</div>
+                <div class="issue-location">apps/src/app_enc.c:128-132</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CLAUDE</span>
+                    <span class="confidence-badge likely">置信度: 较可信</span>
+                </div>
+                <pre>static int32_t Int2Hex(int32_t num, char *hexBuf)
+{
+    (void)snprintf(hexBuf, REC_HEX_BUF_LENGTH + 1, "%08X", num);
+    return HITLS_APP_SUCCESS;
+}</pre>
+                <div class="problem"><strong>Issue:</strong> The original code verified that snprintf_s wrote exactly REC_HEX_BUF_LENGTH (8) characters by checking strlen(hexBuf) != REC_HEX_BUF_LENGTH. The new code with standard snprintf doesn't validate the output. While the format "%08X" should always write 8 hex digits for a 32-bit int, the validation was removed entirely.</div>
+                <div class="fix-label">Fix:</div><pre>static int32_t Int2Hex(int32_t num, char *hexBuf)
+{
+    int ret = snprintf(hexBuf, REC_HEX_BUF_LENGTH + 1, "%08X", num);
+    if (ret &lt; 0 || ret != REC_HEX_BUF_LENGTH) {
+        AppPrintError("enc: error in uint to hex.\n");
+        return HITLS_APP_ENCODE_FAIL;
+    }
+    return HITLS_APP_SUCCESS;
+}</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">Incorrect condition in IsSpecialLabel after memcpy_s replacement</div>
+                <div class="issue-location">tls/handshake/common/src/hs_common.c:716-723</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CLAUDE</span>
+                    <span class="confidence-badge likely">置信度: 较可信</span>
+                </div>
+                <pre>size_t useLabelLen = labelLen;
+if (labelLen &gt; MAX_LABEL_SIZE) {
+    useLabelLen = MAX_LABEL_SIZE;
+}
+if (labelLen != 0 &amp;&amp; useLabelLen &lt;= sizeof(labelBuf)) {
+    memcpy(labelBuf, label, useLabelLen);
+} else if (labelLen != 0) {
+    return true;
+}</pre>
+                <div class="problem"><strong>Issue:</strong> The original code used memcpy_s error return to detect if the label was too long. The new condition `useLabelLen <= sizeof(labelBuf)` is semantically incorrect. When the label is short (which is the normal case), the code copies it and then returns true (indicating "special handling needed"). The function should only return true when the label is too long, not when it fits.</div>
+                <div class="fix-label">Fix:</div><pre>size_t useLabelLen = labelLen;
+if (labelLen != 0) {
+    if (labelLen &gt; sizeof(labelBuf) - 1) {
+        return true;  // Label too long, needs special handling
+    }
+    memcpy(labelBuf, label, labelLen);
+}</pre>
+            </div>
+</div>
+</div></body></html>

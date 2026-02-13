@@ -1,0 +1,32 @@
+[
+  {
+    "source": "codex",
+    "file": "apps/src/app_utils.c",
+    "line": "1102-1107",
+    "severity": "high",
+    "title": "Undefined variable `len` breaks `HITLS_APP_SM_MODE` build",
+    "problem": "`len` is still passed to `CRYPT_EAL_ProviderRandInitCtx` after replacing `sprintf_s` with `snprintf`, but `len` is no longer defined. This causes a compile error when `HITLS_APP_SM_MODE` is enabled.",
+    "code": "(void)snprintf(str, sizeof(str), \"%d\", pid);\nif (param->smParam->smTag == 1 && param->randAlgId == CRYPT_RAND_SHA256) {\n    param->randAlgId = CRYPT_RAND_SM4_CTR_DF;\n}\nint32_t ret = CRYPT_EAL_ProviderRandInitCtx(APP_GetCurrent_LibCtx(), param->randAlgId,\n    param->provider->providerAttr, (const uint8_t *)str, len, NULL);",
+    "fix": "int len = snprintf(str, sizeof(str), \"%d\", pid);\nif (len < 0 || (size_t)len >= sizeof(str)) {\n    AppPrintError(\"Failed to set pid, pid = %d.\\n\", pid);\n    return HITLS_APP_INVALID_ARG;\n}\nif (param->smParam->smTag == 1 && param->randAlgId == CRYPT_RAND_SHA256) {\n    param->randAlgId = CRYPT_RAND_SM4_CTR_DF;\n}\nint32_t ret = CRYPT_EAL_ProviderRandInitCtx(APP_GetCurrent_LibCtx(), param->randAlgId,\n    param->provider->providerAttr, (const uint8_t *)str, (uint32_t)len, NULL);"
+  },
+  {
+    "source": "codex",
+    "file": "tls/handshake/common/src/hs_kx.c",
+    "line": "436-440",
+    "severity": "high",
+    "title": "Sensitive key material is wiped with non-guaranteed `memset`",
+    "problem": "Pre-master/master secret buffers are cleared using `memset`. Compilers may optimize these calls away, leaving secret material in memory after use.",
+    "code": "memset(tmpPskPmsBufTmp, 0, MAX_PRE_MASTER_SECRET_SIZE);\n...\nERR:\n    memset(tmpPskPmsBufTmp, 0, MAX_PRE_MASTER_SECRET_SIZE);\n...\nmemset(keyPara.masterSecret, 0, MASTER_SECRET_LEN);",
+    "fix": "BSL_SAL_CleanseData(tmpPskPmsBufTmp, MAX_PRE_MASTER_SECRET_SIZE);\n...\nERR:\n    BSL_SAL_CleanseData(tmpPskPmsBufTmp, MAX_PRE_MASTER_SECRET_SIZE);\n...\nBSL_SAL_CleanseData(keyPara.masterSecret, MASTER_SECRET_LEN);"
+  },
+  {
+    "source": "codex",
+    "file": "tls/handshake/send/src/send_client_hello.c",
+    "line": "330",
+    "severity": "medium",
+    "title": "PSK buffer cleanup downgraded from secure erase to plain `memset`",
+    "problem": "The temporary `psk` buffer holds secret key material but is cleared with `memset`, which can be optimized out and fail to reliably erase secrets.",
+    "code": "memset(psk, 0, HS_PSK_MAX_LEN);\n...\nmemset(psk, 0, HS_PSK_MAX_LEN);\n...\nmemset(psk, 0, HS_PSK_MAX_LEN);",
+    "fix": "BSL_SAL_CleanseData(psk, HS_PSK_MAX_LEN);\n...\nBSL_SAL_CleanseData(psk, HS_PSK_MAX_LEN);\n...\nBSL_SAL_CleanseData(psk, HS_PSK_MAX_LEN);"
+  }
+]
