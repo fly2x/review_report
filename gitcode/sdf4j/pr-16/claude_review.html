@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Code Review: openHiTLS/sdf4j#16 - CLAUDE</title>
+    <style>
+        :root { --critical: #dc2626; --high: #ea580c; --medium: #ca8a04; --low: #65a30d; }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: system-ui, sans-serif; background: #f8fafc; color: #1e293b; padding: 2rem; line-height: 1.6; }
+        .container { max-width: 900px; margin: 0 auto; }
+        h1 { font-size: 1.5rem; margin-bottom: 0.5rem; }
+        .subtitle { color: #64748b; margin-bottom: 2rem; }
+        .section { margin-bottom: 2rem; }
+        .section-title { font-size: 1.1rem; font-weight: 600; padding: 0.5rem 1rem; border-radius: 0.5rem 0.5rem 0 0; color: white; }
+        .section-title.critical { background: var(--critical); }
+        .section-title.high { background: var(--high); }
+        .section-title.medium { background: var(--medium); }
+        .section-title.low { background: var(--low); }
+        .issue { background: white; border: 1px solid #e2e8f0; border-top: none; padding: 1rem; }
+        .issue:last-child { border-radius: 0 0 0.5rem 0.5rem; }
+        .issue-title { font-weight: 600; margin-bottom: 0.25rem; }
+        .issue-location { font-family: monospace; font-size: 0.875rem; color: #64748b; margin-bottom: 0.75rem; }
+        .issue-source { font-size: 0.75rem; color: #94a3b8; margin-top: 0.5rem; }
+        pre { background: #1e293b; color: #e2e8f0; padding: 0.75rem; border-radius: 0.375rem; overflow-x: auto; font-size: 0.875rem; margin: 0.5rem 0; }
+        .problem { margin: 0.75rem 0; }
+        .fix-label { font-weight: 600; margin-top: 0.75rem; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Code Review: openHiTLS/sdf4j#16 - CLAUDE</h1>
+        <div class="subtitle"></div>
+<div class="section"><div class="section-title low">Low</div>
+<div class="issue">
+                <div class="issue-title">Inconsistent exception handling pattern</div>
+                <div class="issue-location">examples/src/test/java/org/openhitls/sdf4j/examples/HashOperationTest.java:169-171</div>
+                <pre>} catch (SDFException e) {
+    if (e.getErrorCode() == ErrorCode.SDR_NOTSUPPORT) {
+        System.out.println("[跳过] 无法导出 SM2 公钥: " + e.getMessage() + "\n");
+        return;
+    }</pre>
+                <div class="problem"><strong>Issue:</strong> In testSM3WithUserIDAndPublicKey(), when SDF_ExportSignPublicKey_ECC throws SDR_NOTSUPPORT, the method returns without using Assume.assumeTrue(). This is inconsistent with the pattern used in other test methods where Assume.assumeTrue() is called for SDR_NOTSUPPORT. This means the test will pass instead of being skipped.</div>
+                <div class="fix-label">Fix:</div><pre>} catch (SDFException e) {
+    if (e.getErrorCode() == ErrorCode.SDR_NOTSUPPORT) {
+        System.out.println("[跳过] 无法导出 SM2 公钥: " + e.getMessage());
+        Assume.assumeTrue("无法导出 SM2 公钥", false);
+    }</pre>
+                <div class="issue-source">Reviewer: claude</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">Inconsistent exception handling with malformed message</div>
+                <div class="issue-location">examples/src/test/java/org/openhitls/sdf4j/examples/HashOperationTest.java:463-465</div>
+                <pre>if (e.getErrorCode() == ErrorCode.SDR_NOTSUPPORT) {
+    System.out.println("[跳过] 获取私钥权限不支持");
+    Assume.assumeTrue("获取私钥权限不支持，继续测试...", false);</pre>
+                <div class="problem"><strong>Issue:</strong> In testInternalKeyHMAC(), the Assume.assumeTrue() message doesn't match the pattern. The message "获取私钥权限不支持，继续测试..." is not a proper condition description for Assume.assumeTrue().</div>
+                <div class="fix-label">Fix:</div><pre>if (e.getErrorCode() == ErrorCode.SDR_NOTSUPPORT) {
+    System.out.println("[跳过] 获取私钥权限不支持");
+    Assume.assumeTrue("获取私钥权限不支持", false);</pre>
+                <div class="issue-source">Reviewer: claude</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">Inconsistent exception handling with malformed message</div>
+                <div class="issue-location">examples/src/test/java/org/openhitls/sdf4j/examples/KeyManagementTest.java:157-158</div>
+                <pre>if (e.getErrorCode() == ErrorCode.SDR_NOTSUPPORT) {
+    System.out.println("[跳过] 获取私钥权限不支持");
+    Assume.assumeTrue("获取私钥权限不支持，继续测试...", false);</pre>
+                <div class="problem"><strong>Issue:</strong> In testGenerateKeyWithIPK_ECC(), the Assume.assumeTrue() message is inconsistent - it has Chinese text mixed with "..." and doesn't follow the pattern of other similar calls.</div>
+                <div class="fix-label">Fix:</div><pre>if (e.getErrorCode() == ErrorCode.SDR_NOTSUPPORT) {
+    System.out.println("[跳过] 获取私钥权限不支持");
+    Assume.assumeTrue("获取私钥权限不支持", false);</pre>
+                <div class="issue-source">Reviewer: claude</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">Inconsistent exception handling with malformed message</div>
+                <div class="issue-location">examples/src/test/java/org/openhitls/sdf4j/examples/KeyManagementTest.java:207-208</div>
+                <pre>if (e.getErrorCode() == ErrorCode.SDR_NOTSUPPORT) {
+    System.out.println("[跳过] 加密功能未实现，跳过可用性验证");
+    Assume.assumeTrue("  加密功能未实现，跳过可用性验证", false);</pre>
+                <div class="problem"><strong>Issue:</strong> In testGenerateKeyWithIPK_ECC(), the Assume.assumeTrue() message has leading spaces which is inconsistent with other calls.</div>
+                <div class="fix-label">Fix:</div><pre>if (e.getErrorCode() == ErrorCode.SDR_NOTSUPPORT) {
+    System.out.println("[跳过] 加密功能未实现，跳过可用性验证");
+    Assume.assumeTrue("加密功能未实现，跳过可用性验证", false);</pre>
+                <div class="issue-source">Reviewer: claude</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">Inconsistent exception handling with malformed message</div>
+                <div class="issue-location">examples/src/test/java/org/openhitls/sdf4j/examples/KeyManagementTest.java:308-309</div>
+                <pre>if (e.getErrorCode() == ErrorCode.SDR_NOTSUPPORT) {
+    System.out.println("[跳过] 加密功能未实现，跳过可用性验证");
+    Assume.assumeTrue("  加密功能未实现，跳过可用性验证", false);</pre>
+                <div class="problem"><strong>Issue:</strong> In testGenerateKeyWithEPK_ECC(), the Assume.assumeTrue() message has leading spaces.</div>
+                <div class="fix-label">Fix:</div><pre>if (e.getErrorCode() == ErrorCode.SDR_NOTSUPPORT) {
+    System.out.println("[跳过] 加密功能未实现，跳过可用性验证");
+    Assume.assumeTrue("加密功能未实现，跳过可用性验证", false);</pre>
+                <div class="issue-source">Reviewer: claude</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">Inconsistent exception handling with malformed message</div>
+                <div class="issue-location">examples/src/test/java/org/openhitls/sdf4j/examples/KeyManagementTest.java:359-360</div>
+                <pre>if (e.getErrorCode() == ErrorCode.SDR_NOTSUPPORT) {
+    System.out.println("[跳过] 获取私钥权限不支持");
+    Assume.assumeTrue("获取私钥权限不需要或不支持，继续测试...", false);</pre>
+                <div class="problem"><strong>Issue:</strong> In testImportKeyWithISK_ECC(), the Assume.assumeTrue() message is inconsistent with Chinese text mixed with "..."</div>
+                <div class="fix-label">Fix:</div><pre>if (e.getErrorCode() == ErrorCode.SDR_NOTSUPPORT) {
+    System.out.println("[跳过] 获取私钥权限不支持");
+    Assume.assumeTrue("获取私钥权限不支持", false);</pre>
+                <div class="issue-source">Reviewer: claude</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">Inconsistent exception handling with malformed message</div>
+                <div class="issue-location">examples/src/test/java/org/openhitls/sdf4j/examples/KeyManagementTest.java:403-404</div>
+                <pre>if (e.getErrorCode() == ErrorCode.SDR_NOTSUPPORT) {
+    System.out.println("[跳过] 加密功能未实现，跳过可用性验证");
+    Assume.assumeTrue("  加密功能未实现，跳过可用性验证", false);</pre>
+                <div class="problem"><strong>Issue:</strong> In testImportKeyWithISK_ECC(), the Assume.assumeTrue() message has leading spaces.</div>
+                <div class="fix-label">Fix:</div><pre>if (e.getErrorCode() == ErrorCode.SDR_NOTSUPPORT) {
+    System.out.println("[跳过] 加密功能未实现，跳过可用性验证");
+    Assume.assumeTrue("加密功能未实现，跳过可用性验证", false);</pre>
+                <div class="issue-source">Reviewer: claude</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">Inconsistent exception handling with malformed message</div>
+                <div class="issue-location">examples/src/test/java/org/openhitls/sdf4j/examples/KeyManagementTest.java:464-465</div>
+                <pre>if (e.getErrorCode() == ErrorCode.SDR_NOTSUPPORT) {
+    System.out.println("[跳过] 获取私钥权限不支持");
+    Assume.assumeTrue("获取私钥权限不需要或不支持，继续测试...", false);</pre>
+                <div class="problem"><strong>Issue:</strong> In testGenerateAgreementDataWithECC(), the Assume.assumeTrue() message has Chinese text mixed with "..."</div>
+                <div class="fix-label">Fix:</div><pre>if (e.getErrorCode() == ErrorCode.SDR_NOTSUPPORT) {
+    System.out.println("[跳过] 获取私钥权限不支持");
+    Assume.assumeTrue("获取私钥权限不支持", false);</pre>
+                <div class="issue-source">Reviewer: claude</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">Inconsistent exception handling with malformed message</div>
+                <div class="issue-location">examples/src/test/java/org/openhitls/sdf4j/examples/SymmetricOperationTest.java:31-32</div>
+                <pre>if (e.getErrorCode() == org.openhitls.sdf4j.constants.ErrorCode.SDR_NOTSUPPORT) {
+    System.out.println("[跳过] KEK 权限获取功能不支持");
+    Assume.assumeTrue("[跳过] KEK 权限获取功能不支持", false);</pre>
+                <div class="problem"><strong>Issue:</strong> In setUp(), the Assume.assumeTrue() message has Chinese text mixed with "..." which doesn't follow the pattern.</div>
+                <div class="fix-label">Fix:</div><pre>if (e.getErrorCode() == org.openhitls.sdf4j.constants.ErrorCode.SDR_NOTSUPPORT) {
+    System.out.println("[跳过] KEK 权限获取功能不支持");
+    Assume.assumeTrue("KEK 权限获取功能不支持", false);</pre>
+                <div class="issue-source">Reviewer: claude</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">Inconsistent exception handling with malformed message</div>
+                <div class="issue-location">examples/src/test/java/org/openhitls/sdf4j/examples/SymmetricOperationTest.java:49-50</div>
+                <pre>if (e.getErrorCode() == ErrorCode.SDR_NOTSUPPORT) {
+    System.out.println("[跳过] SDF_GenerateKeyWithKEK 功能不支持，跳过需要密钥的测试");
+    Assume.assumeTrue("SDF_GenerateKeyWithKEK 功能不支持，跳过需要密钥的测试", false);</pre>
+                <div class="problem"><strong>Issue:</strong> In setUp(), the Assume.assumeTrue() message has Chinese text mixed with "..."</div>
+                <div class="fix-label">Fix:</div><pre>if (e.getErrorCode() == ErrorCode.SDR_NOTSUPPORT) {
+    System.out.println("[跳过] SDF_GenerateKeyWithKEK 功能不支持，跳过需要密钥的测试");
+    Assume.assumeTrue("SDF_GenerateKeyWithKEK 功能不支持", false);</pre>
+                <div class="issue-source">Reviewer: claude</div>
+            </div>
+</div>
+</div></body></html>

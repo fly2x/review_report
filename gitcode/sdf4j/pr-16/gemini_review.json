@@ -1,0 +1,22 @@
+[
+  {
+    "source": "gemini",
+    "file": "sdf4j/src/test/java/org/openhitls/sdf4j/ResourceManagementTest.java",
+    "line": "102-118",
+    "severity": "medium",
+    "title": "Resource leak in exception handling test",
+    "problem": "In `testExceptionHandling`, if `sdf3.SDF_OpenSession(deviceHandle)` throws an `SDFException`, the execution flow exits the method immediately because `SDFException` is not caught by `catch (RuntimeException e)`. Consequently, `sdf3.SDF_CloseDevice(deviceHandle)` in the catch block is never executed, causing a resource leak of `deviceHandle`.",
+    "code": "long deviceHandle = sdf3.SDF_OpenDevice();\n        try {\n            // 打开设备\n            assertNotEquals(\"设备句柄有效\", 0, deviceHandle);\n\n            long sessionHandle = sdf3.SDF_OpenSession(deviceHandle);\n            assertNotEquals(\"会话句柄有效\", 0, sessionHandle);\n\n            // 获取设备信息\n            DeviceInfo info = sdf3.SDF_GetDeviceInfo(sessionHandle);\n            assertNotNull(\"设备信息应该不为空\", info);\n\n            // 模拟异常情况\n            throw new RuntimeException(\"模拟异常\");\n        } catch (RuntimeException e) {\n            // 直接关闭设备，保证session也能被关闭\n            sdf3.SDF_CloseDevice(deviceHandle);\n        }",
+    "fix": "long deviceHandle = sdf3.SDF_OpenDevice();\n        try {\n            // 打开设备\n            assertNotEquals(\"设备句柄有效\", 0, deviceHandle);\n\n            long sessionHandle = sdf3.SDF_OpenSession(deviceHandle);\n            assertNotEquals(\"会话句柄有效\", 0, sessionHandle);\n\n            // 获取设备信息\n            DeviceInfo info = sdf3.SDF_GetDeviceInfo(sessionHandle);\n            assertNotNull(\"设备信息应该不为空\", info);\n\n            // 模拟异常情况\n            throw new RuntimeException(\"模拟异常\");\n        } catch (RuntimeException e) {\n            // 捕获运行时异常\n        } finally {\n            // 确保设备总是被关闭\n            try {\n                sdf3.SDF_CloseDevice(deviceHandle);\n            } catch (SDFException e) {\n                // 忽略关闭时的错误\n            }\n        }"
+  },
+  {
+    "source": "gemini",
+    "file": "sdf4j/src/test/java/org/openhitls/sdf4j/DeviceManagementTest.java",
+    "line": "45-48",
+    "severity": "low",
+    "title": "Redundant null checks on primitive types",
+    "problem": "The test asserts `assertNotNull` on `getDeviceVersion()`, `getStandardVersion()`, and `getBufferSize()`. These methods return `long` (primitive), which is auto-boxed to `Long`. Since a primitive `long` can never be null, the boxed `Long` object is never null, making these assertions redundant and ineffective.",
+    "code": "assertNotNull(\"设备序列号不应为null\", info.getDeviceSerial());\n        assertNotNull(\"设备版本不应为null\", info.getDeviceVersion());\n        assertNotNull(\"标准版本不应为null\", info.getStandardVersion());\n        assertNotNull(\"缓冲区大小不应为null\", info.getBufferSize());",
+    "fix": "assertNotNull(\"设备序列号不应为null\", info.getDeviceSerial());\n        assertTrue(\"设备版本应大于0\", info.getDeviceVersion() > 0);\n        assertTrue(\"标准版本应大于0\", info.getStandardVersion() > 0);\n        assertTrue(\"缓冲区大小应大于0\", info.getBufferSize() > 0);"
+  }
+]

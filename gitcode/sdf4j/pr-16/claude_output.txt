@@ -1,0 +1,237 @@
+Now I understand the architecture. Each `SDF` instance has its own `gDevHandle` and `gDevResource` instance variables. When `SDF_CloseDevice` is called, it checks if the deviceHandle matches the current `gDevHandle` for that instance.
+
+Now let me examine the test file more carefully to identify potential issues:
+
+===ISSUE===
+FILE: examples/src/test/java/org/openhitls/sdf4j/examples/HashOperationTest.java
+LINE: 169-171
+SEVERITY: low
+TITLE: Inconsistent exception handling pattern
+PROBLEM:
+In testSM3WithUserIDAndPublicKey(), when SDF_ExportSignPublicKey_ECC throws SDR_NOTSUPPORT, the method returns without using Assume.assumeTrue(). This is inconsistent with the pattern used in other test methods where Assume.assumeTrue() is called for SDR_NOTSUPPORT. This means the test will pass instead of being skipped.
+
+CODE:
+```java
+} catch (SDFException e) {
+    if (e.getErrorCode() == ErrorCode.SDR_NOTSUPPORT) {
+        System.out.println("[跳过] 无法导出 SM2 公钥: " + e.getMessage() + "\n");
+        return;
+    }
+```
+
+FIX:
+```java
+} catch (SDFException e) {
+    if (e.getErrorCode() == ErrorCode.SDR_NOTSUPPORT) {
+        System.out.println("[跳过] 无法导出 SM2 公钥: " + e.getMessage());
+        Assume.assumeTrue("无法导出 SM2 公钥", false);
+    }
+```
+===END===
+
+===ISSUE===
+FILE: examples/src/test/java/org/openhitls/sdf4j/examples/HashOperationTest.java
+LINE: 463-465
+SEVERITY: low
+TITLE: Inconsistent exception handling with malformed message
+PROBLEM:
+In testInternalKeyHMAC(), the Assume.assumeTrue() message doesn't match the pattern. The message "获取私钥权限不支持，继续测试..." is not a proper condition description for Assume.assumeTrue().
+
+CODE:
+```java
+if (e.getErrorCode() == ErrorCode.SDR_NOTSUPPORT) {
+    System.out.println("[跳过] 获取私钥权限不支持");
+    Assume.assumeTrue("获取私钥权限不支持，继续测试...", false);
+```
+
+FIX:
+```java
+if (e.getErrorCode() == ErrorCode.SDR_NOTSUPPORT) {
+    System.out.println("[跳过] 获取私钥权限不支持");
+    Assume.assumeTrue("获取私钥权限不支持", false);
+```
+===END===
+
+===ISSUE===
+FILE: examples/src/test/java/org/openhitls/sdf4j/examples/KeyManagementTest.java
+LINE: 157-158
+SEVERITY: low
+TITLE: Inconsistent exception handling with malformed message
+PROBLEM:
+In testGenerateKeyWithIPK_ECC(), the Assume.assumeTrue() message is inconsistent - it has Chinese text mixed with "..." and doesn't follow the pattern of other similar calls.
+
+CODE:
+```java
+if (e.getErrorCode() == ErrorCode.SDR_NOTSUPPORT) {
+    System.out.println("[跳过] 获取私钥权限不支持");
+    Assume.assumeTrue("获取私钥权限不支持，继续测试...", false);
+```
+
+FIX:
+```java
+if (e.getErrorCode() == ErrorCode.SDR_NOTSUPPORT) {
+    System.out.println("[跳过] 获取私钥权限不支持");
+    Assume.assumeTrue("获取私钥权限不支持", false);
+```
+===END===
+
+===ISSUE===
+FILE: examples/src/test/java/org/openhitls/sdf4j/examples/KeyManagementTest.java
+LINE: 207-208
+SEVERITY: low
+TITLE: Inconsistent exception handling with malformed message  
+PROBLEM:
+In testGenerateKeyWithIPK_ECC(), the Assume.assumeTrue() message has leading spaces which is inconsistent with other calls.
+
+CODE:
+```java
+if (e.getErrorCode() == ErrorCode.SDR_NOTSUPPORT) {
+    System.out.println("[跳过] 加密功能未实现，跳过可用性验证");
+    Assume.assumeTrue("  加密功能未实现，跳过可用性验证", false);
+```
+
+FIX:
+```java
+if (e.getErrorCode() == ErrorCode.SDR_NOTSUPPORT) {
+    System.out.println("[跳过] 加密功能未实现，跳过可用性验证");
+    Assume.assumeTrue("加密功能未实现，跳过可用性验证", false);
+```
+===END===
+
+===ISSUE===
+FILE: examples/src/test/java/org/openhitls/sdf4j/examples/KeyManagementTest.java
+LINE: 308-309
+SEVERITY: low
+TITLE: Inconsistent exception handling with malformed message
+PROBLEM:
+In testGenerateKeyWithEPK_ECC(), the Assume.assumeTrue() message has leading spaces.
+
+CODE:
+```java
+if (e.getErrorCode() == ErrorCode.SDR_NOTSUPPORT) {
+    System.out.println("[跳过] 加密功能未实现，跳过可用性验证");
+    Assume.assumeTrue("  加密功能未实现，跳过可用性验证", false);
+```
+
+FIX:
+```java
+if (e.getErrorCode() == ErrorCode.SDR_NOTSUPPORT) {
+    System.out.println("[跳过] 加密功能未实现，跳过可用性验证");
+    Assume.assumeTrue("加密功能未实现，跳过可用性验证", false);
+```
+===END===
+
+===ISSUE===
+FILE: examples/src/test/java/org/openhitls/sdf4j/examples/KeyManagementTest.java
+LINE: 359-360
+SEVERITY: low
+TITLE: Inconsistent exception handling with malformed message
+PROBLEM:
+In testImportKeyWithISK_ECC(), the Assume.assumeTrue() message is inconsistent with Chinese text mixed with "..." 
+
+CODE:
+```java
+if (e.getErrorCode() == ErrorCode.SDR_NOTSUPPORT) {
+    System.out.println("[跳过] 获取私钥权限不支持");
+    Assume.assumeTrue("获取私钥权限不需要或不支持，继续测试...", false);
+```
+
+FIX:
+```java
+if (e.getErrorCode() == ErrorCode.SDR_NOTSUPPORT) {
+    System.out.println("[跳过] 获取私钥权限不支持");
+    Assume.assumeTrue("获取私钥权限不支持", false);
+```
+===END===
+
+===ISSUE===
+FILE: examples/src/test/java/org/openhitls/sdf4j/examples/KeyManagementTest.java
+LINE: 403-404
+SEVERITY: low
+TITLE: Inconsistent exception handling with malformed message
+PROBLEM:
+In testImportKeyWithISK_ECC(), the Assume.assumeTrue() message has leading spaces.
+
+CODE:
+```java
+if (e.getErrorCode() == ErrorCode.SDR_NOTSUPPORT) {
+    System.out.println("[跳过] 加密功能未实现，跳过可用性验证");
+    Assume.assumeTrue("  加密功能未实现，跳过可用性验证", false);
+```
+
+FIX:
+```java
+if (e.getErrorCode() == ErrorCode.SDR_NOTSUPPORT) {
+    System.out.println("[跳过] 加密功能未实现，跳过可用性验证");
+    Assume.assumeTrue("加密功能未实现，跳过可用性验证", false);
+```
+===END===
+
+===ISSUE===
+FILE: examples/src/test/java/org/openhitls/sdf4j/examples/KeyManagementTest.java
+LINE: 464-465
+SEVERITY: low
+TITLE: Inconsistent exception handling with malformed message
+PROBLEM:
+In testGenerateAgreementDataWithECC(), the Assume.assumeTrue() message has Chinese text mixed with "..."
+
+CODE:
+```java
+if (e.getErrorCode() == ErrorCode.SDR_NOTSUPPORT) {
+    System.out.println("[跳过] 获取私钥权限不支持");
+    Assume.assumeTrue("获取私钥权限不需要或不支持，继续测试...", false);
+```
+
+FIX:
+```java
+if (e.getErrorCode() == ErrorCode.SDR_NOTSUPPORT) {
+    System.out.println("[跳过] 获取私钥权限不支持");
+    Assume.assumeTrue("获取私钥权限不支持", false);
+```
+===END===
+
+===ISSUE===
+FILE: examples/src/test/java/org/openhitls/sdf4j/examples/SymmetricOperationTest.java
+LINE: 31-32
+SEVERITY: low
+TITLE: Inconsistent exception handling with malformed message
+PROBLEM:
+In setUp(), the Assume.assumeTrue() message has Chinese text mixed with "..." which doesn't follow the pattern.
+
+CODE:
+```java
+if (e.getErrorCode() == org.openhitls.sdf4j.constants.ErrorCode.SDR_NOTSUPPORT) {
+    System.out.println("[跳过] KEK 权限获取功能不支持");
+    Assume.assumeTrue("[跳过] KEK 权限获取功能不支持", false);
+```
+
+FIX:
+```java
+if (e.getErrorCode() == org.openhitls.sdf4j.constants.ErrorCode.SDR_NOTSUPPORT) {
+    System.out.println("[跳过] KEK 权限获取功能不支持");
+    Assume.assumeTrue("KEK 权限获取功能不支持", false);
+```
+===END===
+
+===ISSUE===
+FILE: examples/src/test/java/org/openhitls/sdf4j/examples/SymmetricOperationTest.java
+LINE: 49-50
+SEVERITY: low
+TITLE: Inconsistent exception handling with malformed message
+PROBLEM:
+In setUp(), the Assume.assumeTrue() message has Chinese text mixed with "..." 
+
+CODE:
+```java
+if (e.getErrorCode() == ErrorCode.SDR_NOTSUPPORT) {
+    System.out.println("[跳过] SDF_GenerateKeyWithKEK 功能不支持，跳过需要密钥的测试");
+    Assume.assumeTrue("SDF_GenerateKeyWithKEK 功能不支持，跳过需要密钥的测试", false);
+```
+
+FIX:
+```java
+if (e.getErrorCode() == ErrorCode.SDR_NOTSUPPORT) {
+    System.out.println("[跳过] SDF_GenerateKeyWithKEK 功能不支持，跳过需要密钥的测试");
+    Assume.assumeTrue("SDF_GenerateKeyWithKEK 功能不支持", false);
+```
+===END===

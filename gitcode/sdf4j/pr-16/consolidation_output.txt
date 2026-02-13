@@ -1,0 +1,376 @@
+Now I have validated all the issues. Let me consolidate them:
+
+===ISSUE===
+FILE: examples/src/test/java/org/openhitls/sdf4j/examples/SymmetricOperationTest.java
+LINE: 94-96
+SEVERITY: high
+TITLE: KEK access failure causes entire test class to be skipped
+REVIEWERS: CODEX
+CONFIDENCE: trusted
+PROBLEM: When SDF_GetKEKAccessRight throws SDR_NOTSUPPORT, Assume.assumeTrue(false) is called inside setUp() at line 96. This causes ALL tests in the class to be skipped, including tests that don't depend on KEK (e.g., external-key tests like testExternalKeyEncrypt). This significantly reduces test coverage and hides potential failures in other test methods.
+CODE:
+```
+} catch (SDFException e) {
+    if (e.getErrorCode() == org.openhitls.sdf4j.constants.ErrorCode.SDR_NOTSUPPORT) {
+        System.out.println("[跳过] KEK 权限获取功能不支持");
+        Assume.assumeTrue("[跳过] KEK 权限获取功能不支持", false);
+    } else {
+        System.out.println(e.getMessage());
+        throw e;
+    }
+}
+```
+FIX:
+```
+} catch (SDFException e) {
+    if (e.getErrorCode() == org.openhitls.sdf4j.constants.ErrorCode.SDR_NOTSUPPORT) {
+        // KEK access control is optional on some devices; continue without it.
+        kekAccessRightObtained = false;
+    } else {
+        System.out.println(e.getMessage());
+        throw e;
+    }
+}
+```
+===END===
+
+===ISSUE===
+FILE: examples/src/test/java/org/openhitls/sdf4j/examples/AsymmetricOperationTest.java
+LINE: 349-351
+SEVERITY: medium
+TITLE: Unsupported private key access right API skips entire internal sign/verify test
+REVIEWERS: CODEX
+CONFIDENCE: trusted
+PROBLEM: When SDF_GetPrivateKeyAccessRight throws SDR_NOTSUPPORT, the entire test is skipped. However, some devices don't require explicit access-right calls but still support internal signing. Skipping the test prevents verification of the working SDF_InternalSign_ECC/SDF_InternalVerify_ECC functionality.
+CODE:
+```
+} catch (SDFException e) {
+    if (e.getErrorCode() == ErrorCode.SDR_NOTSUPPORT) {
+        System.out.println("[跳过] 获取私钥使用权限功能未实现");
+        Assume.assumeTrue("获取私钥使用权限功能未实现", false);
+    } else {
+        System.out.println(e.getMessage());
+        throw e;
+    }
+}
+```
+FIX:
+```
+} catch (SDFException e) {
+    if (e.getErrorCode() == ErrorCode.SDR_NOTSUPPORT) {
+        // Some devices do not require/implement explicit access-right calls.
+        // Continue test; release is still guarded by accessRightObtained.
+        System.out.println("[跳过] 获取私钥使用权限功能未实现");
+    } else {
+        System.out.println(e.getMessage());
+        throw e;
+    }
+}
+```
+===END===
+
+===ISSUE===
+FILE: examples/src/test/java/org/openhitls/sdf4j/examples/KeyManagementTest.java
+LINE: 247-250
+SEVERITY: medium
+TITLE: Optional encryption validation converts successful key generation test to skipped
+REVIEWERS: CODEX
+CONFIDENCE: trusted
+PROBLEM: In testGenerateKeyWithIPK_ECC, after key generation assertions already passed, if symmetric encrypt/decrypt is unsupported (SDR_NOTSUPPORT), the test is marked as skipped. This hides the successful verification of SDF_GenerateKeyWithIPK_ECC and weakens regression detection.
+CODE:
+```
+} catch (SDFException e) {
+    if (e.getErrorCode() == ErrorCode.SDR_NOTSUPPORT) {
+        System.out.println("[跳过] 加密功能未实现，跳过可用性验证");
+        Assume.assumeTrue("  加密功能未实现，跳过可用性验证", false);
+    } else {
+        System.out.println(e.getMessage());
+        throw e;
+    }
+}
+```
+FIX:
+```
+} catch (SDFException e) {
+    if (e.getErrorCode() == ErrorCode.SDR_NOTSUPPORT) {
+        // Keep test result based on key-generation assertions; skip only this sub-check.
+        System.out.println("[跳过] 加密功能未实现，跳过可用性验证");
+    } else {
+        System.out.println(e.getMessage());
+        throw e;
+    }
+}
+```
+===END===
+
+===ISSUE===
+FILE: sdf4j/src/test/java/org/openhitls/sdf4j/ResourceManagementTest.java
+LINE: 102-118
+SEVERITY: medium
+TITLE: Resource leak in exception handling test
+REVIEWERS: GEMINI
+CONFIDENCE: trusted
+PROBLEM: In testExceptionHandling, if SDF_OpenSession throws an SDFException, the catch block only catches RuntimeException. The SDFException will propagate up without closing deviceHandle, causing a resource leak.
+CODE:
+```
+long deviceHandle = sdf3.SDF_OpenDevice();
+try {
+    // 打开设备
+    assertNotEquals("设备句柄有效", 0, deviceHandle);
+
+    long sessionHandle = sdf3.SDF_OpenSession(deviceHandle);
+    assertNotEquals("会话句柄有效", 0, sessionHandle);
+
+    // 获取设备信息
+    DeviceInfo info = sdf3.SDF_GetDeviceInfo(sessionHandle);
+    assertNotNull("设备信息应该不为空", info);
+
+    // 模拟异常情况
+    throw new RuntimeException("模拟异常");
+} catch (RuntimeException e) {
+    // 直接关闭设备，保证session也能被关闭
+    sdf3.SDF_CloseDevice(deviceHandle);
+}
+```
+FIX:
+```
+long deviceHandle = sdf3.SDF_OpenDevice();
+try {
+    // 打开设备
+    assertNotEquals("设备句柄有效", 0, deviceHandle);
+
+    long sessionHandle = sdf3.SDF_OpenSession(deviceHandle);
+    assertNotEquals("会话句柄有效", 0, sessionHandle);
+
+    // 获取设备信息
+    DeviceInfo info = sdf3.SDF_GetDeviceInfo(sessionHandle);
+    assertNotNull("设备信息应该不为空", info);
+
+    // 模拟异常情况
+    throw new RuntimeException("模拟异常");
+} catch (RuntimeException e) {
+    // 捕获运行时异常
+} finally {
+    // 确保设备总是被关闭
+    try {
+        sdf3.SDF_CloseDevice(deviceHandle);
+    } catch (SDFException e) {
+        // 忽略关闭时的错误
+    }
+}
+```
+===END===
+
+===ISSUE===
+FILE: sdf4j/src/test/java/org/openhitls/sdf4j/DeviceManagementTest.java
+LINE: 46-48
+SEVERITY: low
+TITLE: assertNotNull used on primitive-returning getters creates no-op assertions
+REVIEWERS: GEMINI, CODEX
+CONFIDENCE: trusted
+PROBLEM: getDeviceVersion(), getStandardVersion(), and getBufferSize() return primitive long. When auto-boxed to Long, the value can never be null, making these assertions ineffective.
+CODE:
+```
+assertNotNull("设备版本不应为null", info.getDeviceVersion());
+assertNotNull("标准版本不应为null", info.getStandardVersion());
+assertNotNull("缓冲区大小不应为null", info.getBufferSize());
+```
+FIX:
+```
+assertTrue("设备版本应大于0", info.getDeviceVersion() > 0);
+assertTrue("标准版本应大于0", info.getStandardVersion() > 0);
+assertTrue("缓冲区大小应大于0", info.getBufferSize() > 0);
+```
+===END===
+
+===ISSUE===
+FILE: examples/src/test/java/org/openhitls/sdf4j/examples/SymmetricOperationTest.java
+LINE: 94-96
+SEVERITY: low
+TITLE: Inconsistent Assume.assumeTrue message format with unnecessary prefix
+REVIEWERS: CLAUDE
+CONFIDENCE: trusted
+PROBLEM: The Assume.assumeTrue message "[跳过] KEK 权限获取功能不支持" includes the [跳过] prefix which is inconsistent with the pattern used in other similar calls and doesn't properly describe the condition being assumed.
+CODE:
+```
+if (e.getErrorCode() == org.openhitls.sdf4j.constants.ErrorCode.SDR_NOTSUPPORT) {
+    System.out.println("[跳过] KEK 权限获取功能不支持");
+    Assume.assumeTrue("[跳过] KEK 权限获取功能不支持", false);
+}
+```
+FIX:
+```
+if (e.getErrorCode() == org.openhitls.sdf4j.constants.ErrorCode.SDR_NOTSUPPORT) {
+    System.out.println("[跳过] KEK 权限获取功能不支持");
+    Assume.assumeTrue("KEK 权限获取功能不支持", false);
+}
+```
+===END===
+
+===ISSUE===
+FILE: examples/src/test/java/org/openhitls/sdf4j/examples/KeyManagementTest.java
+LINE: 157-158
+SEVERITY: low
+TITLE: Inconsistent Assume.assumeTrue message with extraneous text
+REVIEWERS: CLAUDE
+CONFIDENCE: trusted
+PROBLEM: The Assume.assumeTrue message "获取私钥权限不支持，继续测试..." has inconsistent formatting with "..." which doesn't follow the pattern of other similar calls.
+CODE:
+```
+if (e.getErrorCode() == ErrorCode.SDR_NOTSUPPORT) {
+    System.out.println("[跳过] 获取私钥权限不支持");
+    Assume.assumeTrue("获取私钥权限不支持，继续测试...", false);
+}
+```
+FIX:
+```
+if (e.getErrorCode() == ErrorCode.SDR_NOTSUPPORT) {
+    System.out.println("[跳过] 获取私钥权限不支持");
+    Assume.assumeTrue("获取私钥权限不支持", false);
+}
+```
+===END===
+
+===ISSUE===
+FILE: examples/src/test/java/org/openhitls/sdf4j/examples/KeyManagementTest.java
+LINE: 207-208
+SEVERITY: low
+TITLE: Inconsistent Assume.assumeTrue message with leading spaces
+REVIEWERS: CLAUDE
+CONFIDENCE: trusted
+PROBLEM: The Assume.assumeTrue message has leading spaces which is inconsistent with other similar calls.
+CODE:
+```
+if (e.getErrorCode() == ErrorCode.SDR_NOTSUPPORT) {
+    System.out.println("[跳过] 加密功能未实现，跳过可用性验证");
+    Assume.assumeTrue("  加密功能未实现，跳过可用性验证", false);
+}
+```
+FIX:
+```
+if (e.getErrorCode() == ErrorCode.SDR_NOTSUPPORT) {
+    System.out.println("[跳过] 加密功能未实现，跳过可用性验证");
+    Assume.assumeTrue("加密功能未实现，跳过可用性验证", false);
+}
+```
+===END===
+
+===ISSUE===
+FILE: examples/src/test/java/org/openhitls/sdf4j/examples/KeyManagementTest.java
+LINE: 308-309
+SEVERITY: low
+TITLE: Inconsistent Assume.assumeTrue message with leading spaces
+REVIEWERS: CLAUDE
+CONFIDENCE: trusted
+PROBLEM: The Assume.assumeTrue message has leading spaces.
+CODE:
+```
+if (e.getErrorCode() == ErrorCode.SDR_NOTSUPPORT) {
+    System.out.println("[跳过] 加密功能未实现，跳过可用性验证");
+    Assume.assumeTrue("  加密功能未实现，跳过可用性验证", false);
+}
+```
+FIX:
+```
+if (e.getErrorCode() == ErrorCode.SDR_NOTSUPPORT) {
+    System.out.println("[跳过] 加密功能未实现，跳过可用性验证");
+    Assume.assumeTrue("加密功能未实现，跳过可用性验证", false);
+}
+```
+===END===
+
+===ISSUE===
+FILE: examples/src/test/java/org/openhitls/sdf4j/examples/KeyManagementTest.java
+LINE: 359-360
+SEVERITY: low
+TITLE: Inconsistent Assume.assumeTrue message with extraneous text
+REVIEWERS: CLAUDE
+CONFIDENCE: trusted
+PROBLEM: The Assume.assumeTrue message "获取私钥权限不需要或不支持，继续测试..." is inconsistent with Chinese text mixed with "...".
+CODE:
+```
+if (e.getErrorCode() == ErrorCode.SDR_NOTSUPPORT) {
+    System.out.println("[跳过] 获取私钥权限不支持");
+    Assume.assumeTrue("获取私钥权限不需要或不支持，继续测试...", false);
+}
+```
+FIX:
+```
+if (e.getErrorCode() == ErrorCode.SDR_NOTSUPPORT) {
+    System.out.println("[跳过] 获取私钥权限不支持");
+    Assume.assumeTrue("获取私钥权限不支持", false);
+}
+```
+===END===
+
+===ISSUE===
+FILE: examples/src/test/java/org/openhitls/sdf4j/examples/KeyManagementTest.java
+LINE: 403-404
+SEVERITY: low
+TITLE: Inconsistent Assume.assumeTrue message with leading spaces
+REVIEWERS: CLAUDE
+CONFIDENCE: trusted
+PROBLEM: The Assume.assumeTrue message has leading spaces.
+CODE:
+```
+if (e.getErrorCode() == ErrorCode.SDR_NOTSUPPORT) {
+    System.out.println("[跳过] 加密功能未实现，跳过可用性验证");
+    Assume.assumeTrue("  加密功能未实现，跳过可用性验证", false);
+}
+```
+FIX:
+```
+if (e.getErrorCode() == ErrorCode.SDR_NOTSUPPORT) {
+    System.out.println("[跳过] 加密功能未实现，跳过可用性验证");
+    Assume.assumeTrue("加密功能未实现，跳过可用性验证", false);
+}
+```
+===END===
+
+===ISSUE===
+FILE: examples/src/test/java/org/openhitls/sdf4j/examples/KeyManagementTest.java
+LINE: 464-465
+SEVERITY: low
+TITLE: Inconsistent Assume.assumeTrue message with extraneous text
+REVIEWERS: CLAUDE
+CONFIDENCE: trusted
+PROBLEM: The Assume.assumeTrue message "获取私钥权限不需要或不支持，继续测试..." has Chinese text mixed with "...".
+CODE:
+```
+if (e.getErrorCode() == ErrorCode.SDR_NOTSUPPORT) {
+    System.out.println("[跳过] 获取私钥权限不支持");
+    Assume.assumeTrue("获取私钥权限不需要或不支持，继续测试...", false);
+}
+```
+FIX:
+```
+if (e.getErrorCode() == ErrorCode.SDR_NOTSUPPORT) {
+    System.out.println("[跳过] 获取私钥权限不支持");
+    Assume.assumeTrue("获取私钥权限不支持", false);
+}
+```
+===END===
+
+===ISSUE===
+FILE: examples/src/test/java/org/openhitls/sdf4j/examples/HashOperationTest.java
+LINE: 463-465
+SEVERITY: low
+TITLE: Inconsistent Assume.assumeTrue message format
+REVIEWERS: CLAUDE
+CONFIDENCE: trusted
+PROBLEM: The Assume.assumeTrue message format doesn't follow the consistent pattern - it has Chinese mixed with "...".
+CODE:
+```
+if (e.getErrorCode() == ErrorCode.SDR_NOTSUPPORT) {
+    System.out.println("[跳过] 获取私钥权限不支持");
+    Assume.assumeTrue("获取私钥权限不支持，继续测试...", false);
+}
+```
+FIX:
+```
+if (e.getErrorCode() == ErrorCode.SDR_NOTSUPPORT) {
+    System.out.println("[跳过] 获取私钥权限不支持");
+    Assume.assumeTrue("获取私钥权限不支持", false);
+}
+```
+===END===

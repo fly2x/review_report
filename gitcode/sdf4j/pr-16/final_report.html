@@ -1,0 +1,350 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Final Report: openHiTLS/sdf4j#16</title>
+    <style>
+        :root { --critical: #dc2626; --high: #ea580c; --medium: #ca8a04; --low: #65a30d;
+                 --trusted: #059669; --likely: #0284c7; --evaluate: #7c3aed; }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: system-ui, sans-serif; background: #f8fafc; color: #1e293b; padding: 2rem; line-height: 1.6; }
+        .container { max-width: 900px; margin: 0 auto; }
+        h1 { font-size: 1.75rem; margin-bottom: 0.5rem; }
+        .subtitle { color: #64748b; margin-bottom: 1rem; }
+        .stats { display: flex; gap: 1rem; margin-bottom: 2rem; flex-wrap: wrap; }
+        .stat { background: white; border: 1px solid #e2e8f0; border-radius: 0.5rem; padding: 1rem; min-width: 100px; text-align: center; }
+        .stat-value { font-size: 1.5rem; font-weight: 700; }
+        .stat-label { font-size: 0.875rem; color: #64748b; }
+        .stat.critical .stat-value { color: var(--critical); }
+        .stat.high .stat-value { color: var(--high); }
+        .stat.medium .stat-value { color: var(--medium); }
+        .stat.low .stat-value { color: var(--low); }
+        .reviewers { background: #e0e7ff; color: #3730a3; padding: 0.5rem 1rem; border-radius: 0.5rem; margin-bottom: 2rem; }
+        .section { margin-bottom: 2rem; }
+        .section-title { font-size: 1.1rem; font-weight: 600; padding: 0.5rem 1rem; border-radius: 0.5rem 0.5rem 0 0; color: white; }
+        .section-title.critical { background: var(--critical); }
+        .section-title.high { background: var(--high); }
+        .section-title.medium { background: var(--medium); }
+        .section-title.low { background: var(--low); }
+        .issue { background: white; border: 1px solid #e2e8f0; border-top: none; padding: 1rem; }
+        .issue:last-child { border-radius: 0 0 0.5rem 0.5rem; }
+        .issue-title { font-weight: 600; margin-bottom: 0.25rem; }
+        .issue-location { font-family: monospace; font-size: 0.875rem; color: #64748b; margin-bottom: 0.5rem; }
+        .issue-meta { font-size: 0.75rem; margin-bottom: 0.75rem; display: flex; gap: 0.75rem; align-items: center; }
+        .issue-meta .reviewers { background: #f1f5f9; color: #475569; padding: 0.25rem 0.5rem; border-radius: 0.25rem; margin: 0; }
+        .confidence-badge { padding: 0.25rem 0.5rem; border-radius: 0.25rem; font-weight: 500; }
+        .confidence-badge.trusted { background: #d1fae5; color: #065f46; }
+        .confidence-badge.likely { background: #dbeafe; color: #1e40af; }
+        .confidence-badge.evaluate { background: #ede9fe; color: #5b21b6; }
+        pre { background: #1e293b; color: #e2e8f0; padding: 0.75rem; border-radius: 0.375rem; overflow-x: auto; font-size: 0.875rem; margin: 0.5rem 0; }
+        .problem { margin: 0.75rem 0; }
+        .fix-label { font-weight: 600; margin-top: 0.75rem; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Final Code Review Report</h1>
+        <div class="subtitle">openHiTLS/sdf4j - PR #16</div>
+        <p style="margin-bottom: 1rem;"></p>
+
+        <div class="stats">
+            <div class="stat"><div class="stat-value">13</div><div class="stat-label">Total</div></div>
+            <div class="stat critical"><div class="stat-value">0</div><div class="stat-label">Critical</div></div>
+            <div class="stat high"><div class="stat-value">1</div><div class="stat-label">High</div></div>
+            <div class="stat medium"><div class="stat-value">3</div><div class="stat-label">Medium</div></div>
+            <div class="stat low"><div class="stat-value">9</div><div class="stat-label">Low</div></div>
+        </div>
+
+        <div class="reviewers">Reviewers: claude, gemini, codex</div>
+<div class="section"><div class="section-title high">High</div>
+<div class="issue">
+                <div class="issue-title">KEK access failure causes entire test class to be skipped</div>
+                <div class="issue-location">examples/src/test/java/org/openhitls/sdf4j/examples/SymmetricOperationTest.java:94-96</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CODEX</span>
+                    <span class="confidence-badge trusted">置信度: 可信</span>
+                </div>
+                <pre>} catch (SDFException e) {
+    if (e.getErrorCode() == org.openhitls.sdf4j.constants.ErrorCode.SDR_NOTSUPPORT) {
+        System.out.println("[跳过] KEK 权限获取功能不支持");
+        Assume.assumeTrue("[跳过] KEK 权限获取功能不支持", false);
+    } else {
+        System.out.println(e.getMessage());
+        throw e;
+    }
+}</pre>
+                <div class="problem"><strong>Issue:</strong> When SDF_GetKEKAccessRight throws SDR_NOTSUPPORT, Assume.assumeTrue(false) is called inside setUp() at line 96. This causes ALL tests in the class to be skipped, including tests that don't depend on KEK (e.g., external-key tests like testExternalKeyEncrypt). This significantly reduces test coverage and hides potential failures in other test methods.</div>
+                <div class="fix-label">Fix:</div><pre>} catch (SDFException e) {
+    if (e.getErrorCode() == org.openhitls.sdf4j.constants.ErrorCode.SDR_NOTSUPPORT) {
+        // KEK access control is optional on some devices; continue without it.
+        kekAccessRightObtained = false;
+    } else {
+        System.out.println(e.getMessage());
+        throw e;
+    }
+}</pre>
+            </div>
+</div>
+<div class="section"><div class="section-title medium">Medium</div>
+<div class="issue">
+                <div class="issue-title">Unsupported private key access right API skips entire internal sign/verify test</div>
+                <div class="issue-location">examples/src/test/java/org/openhitls/sdf4j/examples/AsymmetricOperationTest.java:349-351</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CODEX</span>
+                    <span class="confidence-badge trusted">置信度: 可信</span>
+                </div>
+                <pre>} catch (SDFException e) {
+    if (e.getErrorCode() == ErrorCode.SDR_NOTSUPPORT) {
+        System.out.println("[跳过] 获取私钥使用权限功能未实现");
+        Assume.assumeTrue("获取私钥使用权限功能未实现", false);
+    } else {
+        System.out.println(e.getMessage());
+        throw e;
+    }
+}</pre>
+                <div class="problem"><strong>Issue:</strong> When SDF_GetPrivateKeyAccessRight throws SDR_NOTSUPPORT, the entire test is skipped. However, some devices don't require explicit access-right calls but still support internal signing. Skipping the test prevents verification of the working SDF_InternalSign_ECC/SDF_InternalVerify_ECC functionality.</div>
+                <div class="fix-label">Fix:</div><pre>} catch (SDFException e) {
+    if (e.getErrorCode() == ErrorCode.SDR_NOTSUPPORT) {
+        // Some devices do not require/implement explicit access-right calls.
+        // Continue test; release is still guarded by accessRightObtained.
+        System.out.println("[跳过] 获取私钥使用权限功能未实现");
+    } else {
+        System.out.println(e.getMessage());
+        throw e;
+    }
+}</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">Optional encryption validation converts successful key generation test to skipped</div>
+                <div class="issue-location">examples/src/test/java/org/openhitls/sdf4j/examples/KeyManagementTest.java:247-250</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CODEX</span>
+                    <span class="confidence-badge trusted">置信度: 可信</span>
+                </div>
+                <pre>} catch (SDFException e) {
+    if (e.getErrorCode() == ErrorCode.SDR_NOTSUPPORT) {
+        System.out.println("[跳过] 加密功能未实现，跳过可用性验证");
+        Assume.assumeTrue("  加密功能未实现，跳过可用性验证", false);
+    } else {
+        System.out.println(e.getMessage());
+        throw e;
+    }
+}</pre>
+                <div class="problem"><strong>Issue:</strong> In testGenerateKeyWithIPK_ECC, after key generation assertions already passed, if symmetric encrypt/decrypt is unsupported (SDR_NOTSUPPORT), the test is marked as skipped. This hides the successful verification of SDF_GenerateKeyWithIPK_ECC and weakens regression detection.</div>
+                <div class="fix-label">Fix:</div><pre>} catch (SDFException e) {
+    if (e.getErrorCode() == ErrorCode.SDR_NOTSUPPORT) {
+        // Keep test result based on key-generation assertions; skip only this sub-check.
+        System.out.println("[跳过] 加密功能未实现，跳过可用性验证");
+    } else {
+        System.out.println(e.getMessage());
+        throw e;
+    }
+}</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">Resource leak in exception handling test</div>
+                <div class="issue-location">sdf4j/src/test/java/org/openhitls/sdf4j/ResourceManagementTest.java:102-118</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: GEMINI</span>
+                    <span class="confidence-badge trusted">置信度: 可信</span>
+                </div>
+                <pre>long deviceHandle = sdf3.SDF_OpenDevice();
+try {
+    // 打开设备
+    assertNotEquals("设备句柄有效", 0, deviceHandle);
+
+    long sessionHandle = sdf3.SDF_OpenSession(deviceHandle);
+    assertNotEquals("会话句柄有效", 0, sessionHandle);
+
+    // 获取设备信息
+    DeviceInfo info = sdf3.SDF_GetDeviceInfo(sessionHandle);
+    assertNotNull("设备信息应该不为空", info);
+
+    // 模拟异常情况
+    throw new RuntimeException("模拟异常");
+} catch (RuntimeException e) {
+    // 直接关闭设备，保证session也能被关闭
+    sdf3.SDF_CloseDevice(deviceHandle);
+}</pre>
+                <div class="problem"><strong>Issue:</strong> In testExceptionHandling, if SDF_OpenSession throws an SDFException, the catch block only catches RuntimeException. The SDFException will propagate up without closing deviceHandle, causing a resource leak.</div>
+                <div class="fix-label">Fix:</div><pre>long deviceHandle = sdf3.SDF_OpenDevice();
+try {
+    // 打开设备
+    assertNotEquals("设备句柄有效", 0, deviceHandle);
+
+    long sessionHandle = sdf3.SDF_OpenSession(deviceHandle);
+    assertNotEquals("会话句柄有效", 0, sessionHandle);
+
+    // 获取设备信息
+    DeviceInfo info = sdf3.SDF_GetDeviceInfo(sessionHandle);
+    assertNotNull("设备信息应该不为空", info);
+
+    // 模拟异常情况
+    throw new RuntimeException("模拟异常");
+} catch (RuntimeException e) {
+    // 捕获运行时异常
+} finally {
+    // 确保设备总是被关闭
+    try {
+        sdf3.SDF_CloseDevice(deviceHandle);
+    } catch (SDFException e) {
+        // 忽略关闭时的错误
+    }
+}</pre>
+            </div>
+</div>
+<div class="section"><div class="section-title low">Low</div>
+<div class="issue">
+                <div class="issue-title">assertNotNull used on primitive-returning getters creates no-op assertions</div>
+                <div class="issue-location">sdf4j/src/test/java/org/openhitls/sdf4j/DeviceManagementTest.java:46-48</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: GEMINI, CODEX</span>
+                    <span class="confidence-badge trusted">置信度: 可信</span>
+                </div>
+                <pre>assertNotNull("设备版本不应为null", info.getDeviceVersion());
+assertNotNull("标准版本不应为null", info.getStandardVersion());
+assertNotNull("缓冲区大小不应为null", info.getBufferSize());</pre>
+                <div class="problem"><strong>Issue:</strong> getDeviceVersion(), getStandardVersion(), and getBufferSize() return primitive long. When auto-boxed to Long, the value can never be null, making these assertions ineffective.</div>
+                <div class="fix-label">Fix:</div><pre>assertTrue("设备版本应大于0", info.getDeviceVersion() &gt; 0);
+assertTrue("标准版本应大于0", info.getStandardVersion() &gt; 0);
+assertTrue("缓冲区大小应大于0", info.getBufferSize() &gt; 0);</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">Inconsistent Assume.assumeTrue message format with unnecessary prefix</div>
+                <div class="issue-location">examples/src/test/java/org/openhitls/sdf4j/examples/SymmetricOperationTest.java:94-96</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CLAUDE</span>
+                    <span class="confidence-badge trusted">置信度: 可信</span>
+                </div>
+                <pre>if (e.getErrorCode() == org.openhitls.sdf4j.constants.ErrorCode.SDR_NOTSUPPORT) {
+    System.out.println("[跳过] KEK 权限获取功能不支持");
+    Assume.assumeTrue("[跳过] KEK 权限获取功能不支持", false);
+}</pre>
+                <div class="problem"><strong>Issue:</strong> The Assume.assumeTrue message "[跳过] KEK 权限获取功能不支持" includes the [跳过] prefix which is inconsistent with the pattern used in other similar calls and doesn't properly describe the condition being assumed.</div>
+                <div class="fix-label">Fix:</div><pre>if (e.getErrorCode() == org.openhitls.sdf4j.constants.ErrorCode.SDR_NOTSUPPORT) {
+    System.out.println("[跳过] KEK 权限获取功能不支持");
+    Assume.assumeTrue("KEK 权限获取功能不支持", false);
+}</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">Inconsistent Assume.assumeTrue message with extraneous text</div>
+                <div class="issue-location">examples/src/test/java/org/openhitls/sdf4j/examples/KeyManagementTest.java:157-158</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CLAUDE</span>
+                    <span class="confidence-badge trusted">置信度: 可信</span>
+                </div>
+                <pre>if (e.getErrorCode() == ErrorCode.SDR_NOTSUPPORT) {
+    System.out.println("[跳过] 获取私钥权限不支持");
+    Assume.assumeTrue("获取私钥权限不支持，继续测试...", false);
+}</pre>
+                <div class="problem"><strong>Issue:</strong> The Assume.assumeTrue message "获取私钥权限不支持，继续测试..." has inconsistent formatting with "..." which doesn't follow the pattern of other similar calls.</div>
+                <div class="fix-label">Fix:</div><pre>if (e.getErrorCode() == ErrorCode.SDR_NOTSUPPORT) {
+    System.out.println("[跳过] 获取私钥权限不支持");
+    Assume.assumeTrue("获取私钥权限不支持", false);
+}</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">Inconsistent Assume.assumeTrue message with leading spaces</div>
+                <div class="issue-location">examples/src/test/java/org/openhitls/sdf4j/examples/KeyManagementTest.java:207-208</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CLAUDE</span>
+                    <span class="confidence-badge trusted">置信度: 可信</span>
+                </div>
+                <pre>if (e.getErrorCode() == ErrorCode.SDR_NOTSUPPORT) {
+    System.out.println("[跳过] 加密功能未实现，跳过可用性验证");
+    Assume.assumeTrue("  加密功能未实现，跳过可用性验证", false);
+}</pre>
+                <div class="problem"><strong>Issue:</strong> The Assume.assumeTrue message has leading spaces which is inconsistent with other similar calls.</div>
+                <div class="fix-label">Fix:</div><pre>if (e.getErrorCode() == ErrorCode.SDR_NOTSUPPORT) {
+    System.out.println("[跳过] 加密功能未实现，跳过可用性验证");
+    Assume.assumeTrue("加密功能未实现，跳过可用性验证", false);
+}</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">Inconsistent Assume.assumeTrue message with leading spaces</div>
+                <div class="issue-location">examples/src/test/java/org/openhitls/sdf4j/examples/KeyManagementTest.java:308-309</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CLAUDE</span>
+                    <span class="confidence-badge trusted">置信度: 可信</span>
+                </div>
+                <pre>if (e.getErrorCode() == ErrorCode.SDR_NOTSUPPORT) {
+    System.out.println("[跳过] 加密功能未实现，跳过可用性验证");
+    Assume.assumeTrue("  加密功能未实现，跳过可用性验证", false);
+}</pre>
+                <div class="problem"><strong>Issue:</strong> The Assume.assumeTrue message has leading spaces.</div>
+                <div class="fix-label">Fix:</div><pre>if (e.getErrorCode() == ErrorCode.SDR_NOTSUPPORT) {
+    System.out.println("[跳过] 加密功能未实现，跳过可用性验证");
+    Assume.assumeTrue("加密功能未实现，跳过可用性验证", false);
+}</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">Inconsistent Assume.assumeTrue message with extraneous text</div>
+                <div class="issue-location">examples/src/test/java/org/openhitls/sdf4j/examples/KeyManagementTest.java:359-360</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CLAUDE</span>
+                    <span class="confidence-badge trusted">置信度: 可信</span>
+                </div>
+                <pre>if (e.getErrorCode() == ErrorCode.SDR_NOTSUPPORT) {
+    System.out.println("[跳过] 获取私钥权限不支持");
+    Assume.assumeTrue("获取私钥权限不需要或不支持，继续测试...", false);
+}</pre>
+                <div class="problem"><strong>Issue:</strong> The Assume.assumeTrue message "获取私钥权限不需要或不支持，继续测试..." is inconsistent with Chinese text mixed with "...".</div>
+                <div class="fix-label">Fix:</div><pre>if (e.getErrorCode() == ErrorCode.SDR_NOTSUPPORT) {
+    System.out.println("[跳过] 获取私钥权限不支持");
+    Assume.assumeTrue("获取私钥权限不支持", false);
+}</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">Inconsistent Assume.assumeTrue message with leading spaces</div>
+                <div class="issue-location">examples/src/test/java/org/openhitls/sdf4j/examples/KeyManagementTest.java:403-404</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CLAUDE</span>
+                    <span class="confidence-badge trusted">置信度: 可信</span>
+                </div>
+                <pre>if (e.getErrorCode() == ErrorCode.SDR_NOTSUPPORT) {
+    System.out.println("[跳过] 加密功能未实现，跳过可用性验证");
+    Assume.assumeTrue("  加密功能未实现，跳过可用性验证", false);
+}</pre>
+                <div class="problem"><strong>Issue:</strong> The Assume.assumeTrue message has leading spaces.</div>
+                <div class="fix-label">Fix:</div><pre>if (e.getErrorCode() == ErrorCode.SDR_NOTSUPPORT) {
+    System.out.println("[跳过] 加密功能未实现，跳过可用性验证");
+    Assume.assumeTrue("加密功能未实现，跳过可用性验证", false);
+}</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">Inconsistent Assume.assumeTrue message with extraneous text</div>
+                <div class="issue-location">examples/src/test/java/org/openhitls/sdf4j/examples/KeyManagementTest.java:464-465</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CLAUDE</span>
+                    <span class="confidence-badge trusted">置信度: 可信</span>
+                </div>
+                <pre>if (e.getErrorCode() == ErrorCode.SDR_NOTSUPPORT) {
+    System.out.println("[跳过] 获取私钥权限不支持");
+    Assume.assumeTrue("获取私钥权限不需要或不支持，继续测试...", false);
+}</pre>
+                <div class="problem"><strong>Issue:</strong> The Assume.assumeTrue message "获取私钥权限不需要或不支持，继续测试..." has Chinese text mixed with "...".</div>
+                <div class="fix-label">Fix:</div><pre>if (e.getErrorCode() == ErrorCode.SDR_NOTSUPPORT) {
+    System.out.println("[跳过] 获取私钥权限不支持");
+    Assume.assumeTrue("获取私钥权限不支持", false);
+}</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">Inconsistent Assume.assumeTrue message format</div>
+                <div class="issue-location">examples/src/test/java/org/openhitls/sdf4j/examples/HashOperationTest.java:463-465</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CLAUDE</span>
+                    <span class="confidence-badge trusted">置信度: 可信</span>
+                </div>
+                <pre>if (e.getErrorCode() == ErrorCode.SDR_NOTSUPPORT) {
+    System.out.println("[跳过] 获取私钥权限不支持");
+    Assume.assumeTrue("获取私钥权限不支持，继续测试...", false);
+}</pre>
+                <div class="problem"><strong>Issue:</strong> The Assume.assumeTrue message format doesn't follow the consistent pattern - it has Chinese mixed with "...".</div>
+                <div class="fix-label">Fix:</div><pre>if (e.getErrorCode() == ErrorCode.SDR_NOTSUPPORT) {
+    System.out.println("[跳过] 获取私钥权限不支持");
+    Assume.assumeTrue("获取私钥权限不支持", false);
+}</pre>
+            </div>
+</div>
+</div></body></html>

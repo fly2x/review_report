@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Code Review: openHiTLS/sdf4j#16 - CODEX</title>
+    <style>
+        :root { --critical: #dc2626; --high: #ea580c; --medium: #ca8a04; --low: #65a30d; }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: system-ui, sans-serif; background: #f8fafc; color: #1e293b; padding: 2rem; line-height: 1.6; }
+        .container { max-width: 900px; margin: 0 auto; }
+        h1 { font-size: 1.5rem; margin-bottom: 0.5rem; }
+        .subtitle { color: #64748b; margin-bottom: 2rem; }
+        .section { margin-bottom: 2rem; }
+        .section-title { font-size: 1.1rem; font-weight: 600; padding: 0.5rem 1rem; border-radius: 0.5rem 0.5rem 0 0; color: white; }
+        .section-title.critical { background: var(--critical); }
+        .section-title.high { background: var(--high); }
+        .section-title.medium { background: var(--medium); }
+        .section-title.low { background: var(--low); }
+        .issue { background: white; border: 1px solid #e2e8f0; border-top: none; padding: 1rem; }
+        .issue:last-child { border-radius: 0 0 0.5rem 0.5rem; }
+        .issue-title { font-weight: 600; margin-bottom: 0.25rem; }
+        .issue-location { font-family: monospace; font-size: 0.875rem; color: #64748b; margin-bottom: 0.75rem; }
+        .issue-source { font-size: 0.75rem; color: #94a3b8; margin-top: 0.5rem; }
+        pre { background: #1e293b; color: #e2e8f0; padding: 0.75rem; border-radius: 0.375rem; overflow-x: auto; font-size: 0.875rem; margin: 0.5rem 0; }
+        .problem { margin: 0.75rem 0; }
+        .fix-label { font-weight: 600; margin-top: 0.75rem; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Code Review: openHiTLS/sdf4j#16 - CODEX</h1>
+        <div class="subtitle"></div>
+<div class="section"><div class="section-title high">High</div>
+<div class="issue">
+                <div class="issue-title">Optional KEK failures now skip the entire test class in `@Before`</div>
+                <div class="issue-location">examples/src/test/java/org/openhitls/sdf4j/examples/SymmetricOperationTest.java:94-97</div>
+                <pre>if (e.getErrorCode() == org.openhitls.sdf4j.constants.ErrorCode.SDR_NOTSUPPORT) {
+    System.out.println("[跳过] KEK 权限获取功能不支持");
+    Assume.assumeTrue("[跳过] KEK 权限获取功能不支持", false);
+}
+...
+if (e.getErrorCode() == ErrorCode.SDR_NOTSUPPORT) {
+    System.out.println("[跳过] SDF_GenerateKeyWithKEK 功能不支持，跳过需要密钥的测试");
+    Assume.assumeTrue("SDF_GenerateKeyWithKEK 功能不支持，跳过需要密钥的测试", false);
+    keyAvailable = false;
+    return;
+}</pre>
+                <div class="problem"><strong>Issue:</strong> `Assume.assumeTrue(false)` is called inside `setUp()`. In JUnit 4 this aborts each test before execution, including tests that do not depend on KEK/session-key setup (for example external-key API tests). This regresses coverage and can hide real failures.</div>
+                <div class="fix-label">Fix:</div><pre>if (e.getErrorCode() == ErrorCode.SDR_NOTSUPPORT) {
+    // KEK access control is optional on some devices; continue.
+    kekAccessRightObtained = false;
+} else {
+    throw e;
+}
+...
+if (e.getErrorCode() == ErrorCode.SDR_NOTSUPPORT || e.getErrorCode() == ErrorCode.SDR_KEYNOTEXIST) {
+    // Only key-dependent tests should skip via assumeKeyAvailable().
+    keyAvailable = false;
+    return;
+}
+throw new SDFException(e.getErrorCode(), "setUp: 密钥生成失败 - " + e.getMessage());</pre>
+                <div class="issue-source">Reviewer: codex</div>
+            </div>
+</div>
+<div class="section"><div class="section-title medium">Medium</div>
+<div class="issue">
+                <div class="issue-title">Treating unsupported access-right API as full test skip drops valid internal-sign coverage</div>
+                <div class="issue-location">examples/src/test/java/org/openhitls/sdf4j/examples/AsymmetricOperationTest.java:349-352</div>
+                <pre>if (e.getErrorCode() == ErrorCode.SDR_NOTSUPPORT) {
+    System.out.println("[跳过] 获取私钥使用权限功能未实现");
+    Assume.assumeTrue("获取私钥使用权限功能未实现", false);
+}</pre>
+                <div class="problem"><strong>Issue:</strong> `SDF_GetPrivateKeyAccessRight` can be unsupported on some devices while internal signing/verifying still works. The new logic now skips the whole test immediately, so a working `SDF_InternalSign_ECC/SDF_InternalVerify_ECC` path is never exercised.</div>
+                <div class="fix-label">Fix:</div><pre>if (e.getErrorCode() == ErrorCode.SDR_NOTSUPPORT) {
+    // Some devices do not require/implement explicit access-right calls.
+    // Continue test; release is still guarded by accessRightObtained.
+} else {
+    System.out.println(e.getMessage());
+    throw e;
+}</pre>
+                <div class="issue-source">Reviewer: codex</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">Optional validation step now converts a successful key-generation test into “skipped”</div>
+                <div class="issue-location">examples/src/test/java/org/openhitls/sdf4j/examples/KeyManagementTest.java:247-250</div>
+                <pre>if (e.getErrorCode() == ErrorCode.SDR_NOTSUPPORT) {
+    System.out.println("[跳过] 加密功能未实现，跳过可用性验证");
+    Assume.assumeTrue("  加密功能未实现，跳过可用性验证", false);
+}</pre>
+                <div class="problem"><strong>Issue:</strong> This catch block is inside `testGenerateKeyWithIPK_ECC` after key generation assertions already passed. If symmetric encrypt/decrypt is unsupported, the test is marked skipped, which hides successful verification of `SDF_GenerateKeyWithIPK_ECC` and weakens regression detection.</div>
+                <div class="fix-label">Fix:</div><pre>if (e.getErrorCode() == ErrorCode.SDR_NOTSUPPORT) {
+    // Keep test result based on key-generation assertions; skip only this sub-check.
+    System.out.println("[跳过] 加密功能未实现，跳过可用性验证");
+} else {
+    System.out.println(e.getMessage());
+    throw e;
+}</pre>
+                <div class="issue-source">Reviewer: codex</div>
+            </div>
+</div>
+<div class="section"><div class="section-title low">Low</div>
+<div class="issue">
+                <div class="issue-title">`assertNotNull` used on primitive-returning getters creates no-op assertions</div>
+                <div class="issue-location">sdf4j/src/test/java/org/openhitls/sdf4j/DeviceManagementTest.java:46-48</div>
+                <pre>assertNotNull("设备版本不应为null", info.getDeviceVersion());
+assertNotNull("标准版本不应为null", info.getStandardVersion());
+assertNotNull("缓冲区大小不应为null", info.getBufferSize());</pre>
+                <div class="problem"><strong>Issue:</strong> `getDeviceVersion()`, `getStandardVersion()`, and `getBufferSize()` return primitives (`long`). `assertNotNull` on primitives always passes due autoboxing, so these checks do not validate anything.</div>
+                <div class="fix-label">Fix:</div><pre>assertTrue("设备版本应为非负值", info.getDeviceVersion() &gt;= 0);
+assertTrue("标准版本应为非负值", info.getStandardVersion() &gt;= 0);
+assertTrue("缓冲区大小应大于0", info.getBufferSize() &gt; 0);</pre>
+                <div class="issue-source">Reviewer: codex</div>
+            </div>
+</div>
+</div></body></html>
