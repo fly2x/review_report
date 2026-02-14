@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Code Review: openHiTLS/sdfp#3 - CODEX</title>
+    <style>
+        :root { --critical: #dc2626; --high: #ea580c; --medium: #ca8a04; --low: #65a30d; }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: system-ui, sans-serif; background: #f8fafc; color: #1e293b; padding: 2rem; line-height: 1.6; }
+        .container { max-width: 900px; margin: 0 auto; }
+        h1 { font-size: 1.5rem; margin-bottom: 0.5rem; }
+        .subtitle { color: #64748b; margin-bottom: 2rem; }
+        .section { margin-bottom: 2rem; }
+        .section-title { font-size: 1.1rem; font-weight: 600; padding: 0.5rem 1rem; border-radius: 0.5rem 0.5rem 0 0; color: white; }
+        .section-title.critical { background: var(--critical); }
+        .section-title.high { background: var(--high); }
+        .section-title.medium { background: var(--medium); }
+        .section-title.low { background: var(--low); }
+        .issue { background: white; border: 1px solid #e2e8f0; border-top: none; padding: 1rem; }
+        .issue:last-child { border-radius: 0 0 0.5rem 0.5rem; }
+        .issue-title { font-weight: 600; margin-bottom: 0.25rem; }
+        .issue-location { font-family: monospace; font-size: 0.875rem; color: #64748b; margin-bottom: 0.75rem; }
+        .issue-source { font-size: 0.75rem; color: #94a3b8; margin-top: 0.5rem; }
+        pre { background: #1e293b; color: #e2e8f0; padding: 0.75rem; border-radius: 0.375rem; overflow-x: auto; font-size: 0.875rem; margin: 0.5rem 0; }
+        .problem { margin: 0.75rem 0; }
+        .fix-label { font-weight: 600; margin-top: 0.75rem; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Code Review: openHiTLS/sdfp#3 - CODEX</h1>
+        <div class="subtitle"></div>
+<div class="section"><div class="section-title high">High</div>
+<div class="issue">
+                <div class="issue-title">Agreement handle is cleared even when key generation fails</div>
+                <div class="issue-location">src/sm2_keyexch.c:64-69</div>
+                <pre>ret = SDF_DL_GenerateKeyWithECC(selfCtx-&gt;hSessionHandle,
+        (unsigned char *)peerCtx-&gt;userId, peerCtx-&gt;userIdLen,
+        &amp;sdfPeerPub, &amp;sdfPeerTmpPub,
+        selfCtx-&gt;hAgreementHandle, &amp;hKeyHandle);
+selfCtx-&gt;hAgreementHandle = NULL;  /* consumed */
+if (ret != SDR_OK) {
+    BSL_ERR_PUSH_ERROR(ret);
+    return BSL_INTERNAL_EXCEPTION;
+}</pre>
+                <div class="problem"><strong>Issue:</strong> `hAgreementHandle` is nulled before checking `SDF_DL_GenerateKeyWithECC` return status. On failure, the context loses the live handle, which can break retries and leak device-side agreement state.</div>
+                <div class="fix-label">Fix:</div><pre>ret = SDF_DL_GenerateKeyWithECC(selfCtx-&gt;hSessionHandle,
+        (unsigned char *)peerCtx-&gt;userId, peerCtx-&gt;userIdLen,
+        &amp;sdfPeerPub, &amp;sdfPeerTmpPub,
+        selfCtx-&gt;hAgreementHandle, &amp;hKeyHandle);
+if (ret != SDR_OK) {
+    BSL_ERR_PUSH_ERROR(ret);
+    return BSL_INTERNAL_EXCEPTION;
+}
+selfCtx-&gt;hAgreementHandle = NULL;  /* consume only on success */</pre>
+                <div class="issue-source">Reviewer: codex</div>
+            </div>
+</div>
+<div class="section"><div class="section-title medium">Medium</div>
+<div class="issue">
+                <div class="issue-title">Uninitialized `ret` is read in error logging path</div>
+                <div class="issue-location">src/sm2_sign.c:64-70</div>
+                <pre>int32_t ret;
+...
+if ((ctx == NULL) || (sign == NULL) || (signLen == NULL) || ((data == NULL) &amp;&amp; (dataLen != 0))) {
+    BSL_ERR_PUSH_ERROR(ret);
+    return CRYPT_NULL_INPUT;
+}
+if (*signLen &lt; CRYPT_SM2_GetSignLen_ex(ctx)) {
+    BSL_ERR_PUSH_ERROR(ret);
+    return CRYPT_SM2_BUFF_LEN_NOT_ENOUGH;
+}</pre>
+                <div class="problem"><strong>Issue:</strong> `ret` is declared but not initialized before being passed to `BSL_ERR_PUSH_ERROR`, which is undefined behavior in C and can push random error codes.</div>
+                <div class="fix-label">Fix:</div><pre>int32_t ret = CRYPT_SUCCESS;
+...
+if ((ctx == NULL) || (sign == NULL) || (signLen == NULL) || ((data == NULL) &amp;&amp; (dataLen != 0))) {
+    BSL_ERR_PUSH_ERROR(CRYPT_NULL_INPUT);
+    return CRYPT_NULL_INPUT;
+}
+if (*signLen &lt; CRYPT_SM2_GetSignLen_ex(ctx)) {
+    BSL_ERR_PUSH_ERROR(CRYPT_SM2_BUFF_LEN_NOT_ENOUGH);
+    return CRYPT_SM2_BUFF_LEN_NOT_ENOUGH;
+}</pre>
+                <div class="issue-source">Reviewer: codex</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">Uninitialized `ret` used when pushing precondition errors</div>
+                <div class="issue-location">src/sm2_keyexch.c:51-57</div>
+                <pre>if (selfCtx-&gt;hAgreementHandle == NULL) {
+    BSL_ERR_PUSH_ERROR(ret);
+    return CRYPT_SM2_NO_PRVKEY;
+}
+if (peerCtx-&gt;PublicKey == NULL || peerCtx-&gt;tmpPubKey == NULL) {
+    BSL_ERR_PUSH_ERROR(ret);
+    return CRYPT_SM2_NO_PUBKEY;
+}</pre>
+                <div class="problem"><strong>Issue:</strong> The function pushes `ret` before `ret` is assigned, causing undefined behavior and non-deterministic error reporting.</div>
+                <div class="fix-label">Fix:</div><pre>if (selfCtx-&gt;hAgreementHandle == NULL) {
+    BSL_ERR_PUSH_ERROR(CRYPT_SM2_NO_PRVKEY);
+    return CRYPT_SM2_NO_PRVKEY;
+}
+if (peerCtx-&gt;PublicKey == NULL || peerCtx-&gt;tmpPubKey == NULL) {
+    BSL_ERR_PUSH_ERROR(CRYPT_SM2_NO_PUBKEY);
+    return CRYPT_SM2_NO_PUBKEY;
+}</pre>
+                <div class="issue-source">Reviewer: codex</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">Key handle leak on post-SDF allocation failure</div>
+                <div class="issue-location">src/sm2_keyexch.c:101-114</div>
+                <pre>ret = SDF_DL_GenerateAgreementDataAndKeyWithECC(..., &amp;hKeyHandle);
+if (ret != SDR_OK) {
+    BSL_ERR_PUSH_ERROR(ret);
+    return BSL_INTERNAL_EXCEPTION;
+}
+
+/* Save self public key if not set */
+if (selfCtx-&gt;PublicKey == NULL) {
+    EccPubKey *pubKey = BSL_SAL_Calloc(1u, sizeof(EccPubKey));
+    if (pubKey == NULL) {
+        return CRYPT_MEM_ALLOC_FAIL;
+    }
+    ...
+}
+EccPubKey *tmpKey = BSL_SAL_Calloc(1u, sizeof(EccPubKey));
+if (tmpKey == NULL) {
+    return CRYPT_MEM_ALLOC_FAIL;
+}</pre>
+                <div class="problem"><strong>Issue:</strong> The responder path creates `hKeyHandle` first, then allocates `pubKey/tmpKey`. If allocation fails, function returns without cleaning the generated key handle, leaking device resources.</div>
+                <div class="fix-label">Fix:</div><pre>EccPubKey *pubKey = NULL;
+EccPubKey *tmpKey = BSL_SAL_Calloc(1u, sizeof(EccPubKey));
+if (tmpKey == NULL) {
+    return CRYPT_MEM_ALLOC_FAIL;
+}
+if (selfCtx-&gt;PublicKey == NULL) {
+    pubKey = BSL_SAL_Calloc(1u, sizeof(EccPubKey));
+    if (pubKey == NULL) {
+        BSL_SAL_Free(tmpKey);
+        return CRYPT_MEM_ALLOC_FAIL;
+    }
+}
+
+ret = SDF_DL_GenerateAgreementDataAndKeyWithECC(selfCtx-&gt;hSessionHandle,
+        selfCtx-&gt;KeyIndex, 128,
+        selfCtx-&gt;userId, selfCtx-&gt;userIdLen,
+        (unsigned char *)peerCtx-&gt;userId, peerCtx-&gt;userIdLen,
+        &amp;sdfSponsorPub, &amp;sdfSponsorTmpPub, &amp;sdfSelfPub, &amp;sdfSelfTmpPub, &amp;hKeyHandle);
+if (ret != SDR_OK) {
+    BSL_SAL_Free(pubKey);
+    BSL_SAL_Free(tmpKey);
+    BSL_ERR_PUSH_ERROR(ret);
+    return BSL_INTERNAL_EXCEPTION;
+}</pre>
+                <div class="issue-source">Reviewer: codex</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">Old key password is freed without zeroization</div>
+                <div class="issue-location">src/rsa_keymgmt.c:1085-1089</div>
+                <pre>BSL_SAL_Free(*pass);
+*pass = NULL;
+*passLen = 0;</pre>
+                <div class="problem"><strong>Issue:</strong> `SetKeyPass` frees previous password memory directly. This leaves prior secret bytes in heap memory and increases secret exposure risk.</div>
+                <div class="fix-label">Fix:</div><pre>if (*pass != NULL &amp;&amp; *passLen &gt; 0) {
+    (void)memset(*pass, 0, *passLen);
+    BSL_SAL_Free(*pass);
+}
+*pass = NULL;
+*passLen = 0;</pre>
+                <div class="issue-source">Reviewer: codex</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">Old key password is freed without zeroization</div>
+                <div class="issue-location">src/sm2_keymgmt.c:516-520</div>
+                <pre>BSL_SAL_Free(*pass);
+*pass = NULL;
+*passLen = 0;</pre>
+                <div class="problem"><strong>Issue:</strong> `SetKeyPass` replaces password storage but does not scrub old password contents before free, leaving sensitive data recoverable from heap.</div>
+                <div class="fix-label">Fix:</div><pre>if (*pass != NULL &amp;&amp; *passLen &gt; 0) {
+    (void)memset(*pass, 0, *passLen);
+    BSL_SAL_Free(*pass);
+}
+*pass = NULL;
+*passLen = 0;</pre>
+                <div class="issue-source">Reviewer: codex</div>
+            </div>
+</div>
+</div></body></html>

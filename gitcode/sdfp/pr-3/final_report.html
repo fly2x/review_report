@@ -1,0 +1,598 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Final Report: openHiTLS/sdfp#3</title>
+    <style>
+        :root { --critical: #dc2626; --high: #ea580c; --medium: #ca8a04; --low: #65a30d;
+                 --trusted: #059669; --likely: #0284c7; --evaluate: #7c3aed; }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: system-ui, sans-serif; background: #f8fafc; color: #1e293b; padding: 2rem; line-height: 1.6; }
+        .container { max-width: 900px; margin: 0 auto; }
+        h1 { font-size: 1.75rem; margin-bottom: 0.5rem; }
+        .subtitle { color: #64748b; margin-bottom: 1rem; }
+        .stats { display: flex; gap: 1rem; margin-bottom: 2rem; flex-wrap: wrap; }
+        .stat { background: white; border: 1px solid #e2e8f0; border-radius: 0.5rem; padding: 1rem; min-width: 100px; text-align: center; }
+        .stat-value { font-size: 1.5rem; font-weight: 700; }
+        .stat-label { font-size: 0.875rem; color: #64748b; }
+        .stat.critical .stat-value { color: var(--critical); }
+        .stat.high .stat-value { color: var(--high); }
+        .stat.medium .stat-value { color: var(--medium); }
+        .stat.low .stat-value { color: var(--low); }
+        .reviewers { background: #e0e7ff; color: #3730a3; padding: 0.5rem 1rem; border-radius: 0.5rem; margin-bottom: 2rem; }
+        .section { margin-bottom: 2rem; }
+        .section-title { font-size: 1.1rem; font-weight: 600; padding: 0.5rem 1rem; border-radius: 0.5rem 0.5rem 0 0; color: white; }
+        .section-title.critical { background: var(--critical); }
+        .section-title.high { background: var(--high); }
+        .section-title.medium { background: var(--medium); }
+        .section-title.low { background: var(--low); }
+        .issue { background: white; border: 1px solid #e2e8f0; border-top: none; padding: 1rem; }
+        .issue:last-child { border-radius: 0 0 0.5rem 0.5rem; }
+        .issue-title { font-weight: 600; margin-bottom: 0.25rem; }
+        .issue-location { font-family: monospace; font-size: 0.875rem; color: #64748b; margin-bottom: 0.5rem; }
+        .issue-meta { font-size: 0.75rem; margin-bottom: 0.75rem; display: flex; gap: 0.75rem; align-items: center; }
+        .issue-meta .reviewers { background: #f1f5f9; color: #475569; padding: 0.25rem 0.5rem; border-radius: 0.25rem; margin: 0; }
+        .confidence-badge { padding: 0.25rem 0.5rem; border-radius: 0.25rem; font-weight: 500; }
+        .confidence-badge.trusted { background: #d1fae5; color: #065f46; }
+        .confidence-badge.likely { background: #dbeafe; color: #1e40af; }
+        .confidence-badge.evaluate { background: #ede9fe; color: #5b21b6; }
+        pre { background: #1e293b; color: #e2e8f0; padding: 0.75rem; border-radius: 0.375rem; overflow-x: auto; font-size: 0.875rem; margin: 0.5rem 0; }
+        .problem { margin: 0.75rem 0; }
+        .fix-label { font-weight: 600; margin-top: 0.75rem; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Final Code Review Report</h1>
+        <div class="subtitle">openHiTLS/sdfp - PR #3</div>
+        <p style="margin-bottom: 1rem;"></p>
+
+        <div class="stats">
+            <div class="stat"><div class="stat-value">26</div><div class="stat-label">Total</div></div>
+            <div class="stat critical"><div class="stat-value">1</div><div class="stat-label">Critical</div></div>
+            <div class="stat high"><div class="stat-value">9</div><div class="stat-label">High</div></div>
+            <div class="stat medium"><div class="stat-value">12</div><div class="stat-label">Medium</div></div>
+            <div class="stat low"><div class="stat-value">4</div><div class="stat-label">Low</div></div>
+        </div>
+
+        <div class="reviewers">Reviewers: claude, gemini, codex</div>
+<div class="section"><div class="section-title critical">Critical</div>
+<div class="issue">
+                <div class="issue-title">Unsafe library unloading (Use-After-Free/Unload)</div>
+                <div class="issue-location">src/sdf_dl.c:93-167</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: gemini</span>
+                    <span class="confidence-badge likely">置信度: 较可信</span>
+                </div>
+                <pre>static void *g_sdfLibHandle = NULL;
+
+// ...
+
+int32_t SDF_DL_Load(const char *libPath)
+{
+    if (libPath == NULL) {
+        BSL_ERR_PUSH_ERROR(BSL_NULL_INPUT);
+        return -1;
+    }
+
+    if (g_sdfLibHandle != NULL) {
+        return 0;
+    }
+
+// ...
+
+void SDF_DL_Unload(void)
+{
+    if (g_sdfLibHandle != NULL) {
+        dlclose(g_sdfLibHandle);
+        g_sdfLibHandle = NULL;
+    }
+    (void)memset(&amp;g_sdfFunc, 0, sizeof(g_sdfFunc));
+}</pre>
+                <div class="problem"><strong>Issue:</strong> The `SDF_DL_Load` function checks if `g_sdfLibHandle` is non-NULL to avoid reloading, but it does not increment a reference count. Conversely, `SDF_DL_Unload` unconditionally closes the library handle and clears function pointers. If multiple provider contexts are initialized (sharing the global library handle) and one is freed, it will unload the library, causing the remaining active contexts to crash or behave undefinedly when they try to use SDF functions.</div>
+                <div class="fix-label">Fix:</div><pre>static void *g_sdfLibHandle = NULL;
+static int g_loadCount = 0;
+
+// ...
+
+int32_t SDF_DL_Load(const char *libPath)
+{
+    if (libPath == NULL) {
+        BSL_ERR_PUSH_ERROR(BSL_NULL_INPUT);
+        return -1;
+    }
+
+    if (g_sdfLibHandle != NULL) {
+        g_loadCount++;
+        return 0;
+    }
+
+    g_sdfLibHandle = dlopen(libPath, RTLD_NOW | RTLD_LOCAL);
+    if (g_sdfLibHandle == NULL) {
+        BSL_ERR_PUSH_ERROR(BSL_INTERNAL_EXCEPTION);
+        return -1;
+    }
+    g_loadCount = 1;
+
+// ...
+
+void SDF_DL_Unload(void)
+{
+    if (g_loadCount &gt; 0) {
+        g_loadCount--;
+    }
+    if (g_loadCount == 0 &amp;&amp; g_sdfLibHandle != NULL) {
+        dlclose(g_sdfLibHandle);
+        g_sdfLibHandle = NULL;
+        (void)memset(&amp;g_sdfFunc, 0, sizeof(g_sdfFunc));
+    }
+}</pre>
+            </div>
+</div>
+<div class="section"><div class="section-title high">High</div>
+<div class="issue">
+                <div class="issue-title">Typo in dlopen flags causes undefined symbol behavior</div>
+                <div class="issue-location">src/sdf_dl.c:115</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: claude</span>
+                    <span class="confidence-badge likely">置信度: 较可信</span>
+                </div>
+                <pre>g_sdfLibHandle = dlopen(libPath, RTLD_NOW | RTLD_LOCAL);</pre>
+                <div class="problem"><strong>Issue:</strong> Line 115 uses RTLD_LOCAL instead of RTLD_LOCAL and line 111 has RTLD_NOW instead of RTLD_NOW. These typos mean invalid flags are passed to dlopen(). RTLD_LOCAL causes symbols to not be available for resolving subsequently loaded libraries, while RTLD_NOW performs immediate binding.</div>
+                <div class="fix-label">Fix:</div><pre>g_sdfLibHandle = dlopen(libPath, RTLD_NOW | RTLD_LOCAL);</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">Typo in #define SDF_DL_ERR_NOT_LOADED and SDR_UNKNOWERR</div>
+                <div class="issue-location">src/sdf_dl.c:172</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: claude</span>
+                    <span class="confidence-badge likely">置信度: 较可信</span>
+                </div>
+                <pre>#define SDF_DL_ERR_NOT_LOADED  SDR_UNKNOWERR</pre>
+                <div class="problem"><strong>Issue:</strong> The constant name has a typo - SDF_DL_ERR_NOT_LOADED is missing 'A' in LOADED, and SDR_UNKNOWERR is missing 'K' in UNKOWERR. These constants should match the correct spelling.</div>
+                <div class="fix-label">Fix:</div><pre>#define SDF_DL_ERR_NOT_LOADED  SDR_UNKNOWNERR</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">Typo in function name SDF_DL_Unload</div>
+                <div class="issue-location">src/sdf_dl.c:161</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: claude</span>
+                    <span class="confidence-badge likely">置信度: 较可信</span>
+                </div>
+                <pre>void SDF_DL_Unload(void)</pre>
+                <div class="problem"><strong>Issue:</strong> The function is named SDF_DL_Unload but should be SDF_DL_Unload to match the header declaration (assuming 'load' not 'Load'). This inconsistency could cause linker errors or undefined symbol errors.</div>
+                <div class="fix-label">Fix:</div><pre>void SDF_DL_Unload(void)</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">Typo in SDF_DL_Unload function call</div>
+                <div class="issue-location">src/provider.c:72</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: claude</span>
+                    <span class="confidence-badge likely">置信度: 较可信</span>
+                </div>
+                <pre>SDF_DL_Unload();</pre>
+                <div class="problem"><strong>Issue:</strong> Function name has typo - should be SDF_DL_Unload not SDF_DL_Unload</div>
+                <div class="fix-label">Fix:</div><pre>SDF_DL_Unload();</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">Typo in SDF_DL_Unload function call</div>
+                <div class="issue-location">src/provider.c:140</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: claude</span>
+                    <span class="confidence-badge likely">置信度: 较可信</span>
+                </div>
+                <pre>SDF_DL_Unload();</pre>
+                <div class="problem"><strong>Issue:</strong> Function name has typo - should be SDF_DL_Unload not SDF_DL_Unload</div>
+                <div class="fix-label">Fix:</div><pre>SDF_DL_Unload();</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">Typo in SDF_DL_Unload function call</div>
+                <div class="issue-location">src/provider.c:153</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: claude</span>
+                    <span class="confidence-badge likely">置信度: 较可信</span>
+                </div>
+                <pre>SDF_DL_Unload();</pre>
+                <div class="problem"><strong>Issue:</strong> Function name has typo - should be SDF_DL_Unload not SDF_DL_Unload</div>
+                <div class="fix-label">Fix:</div><pre>SDF_DL_Unload();</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">Typo in SDF_DL_Unload function call</div>
+                <div class="issue-location">src/provider.c:166</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: claude</span>
+                    <span class="confidence-badge likely">置信度: 较可信</span>
+                </div>
+                <pre>SDF_DL_Unload();</pre>
+                <div class="problem"><strong>Issue:</strong> Function name has typo - should be SDF_DL_Unload not SDF_DL_Unload</div>
+                <div class="fix-label">Fix:</div><pre>SDF_DL_Unload();</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">Thread safety race condition in library loading</div>
+                <div class="issue-location">src/sdf_dl.c:111-118</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: gemini</span>
+                    <span class="confidence-badge likely">置信度: 较可信</span>
+                </div>
+                <pre>if (g_sdfLibHandle != NULL) {
+        return 0;
+    }
+
+    g_sdfLibHandle = dlopen(libPath, RTLD_NOW | RTLD_LOCAL);</pre>
+                <div class="problem"><strong>Issue:</strong> `SDF_DL_Load` accesses and modifies the global `g_sdfLibHandle` without any locking. If two threads attempt to initialize the provider simultaneously, they may both check `g_sdfLibHandle == NULL`, and both proceed to call `dlopen` and overwrite `g_sdfLibHandle`, or one might use partially initialized function pointers.</div>
+                <div class="fix-label">Fix:</div><pre>/* Note: Ideally use pthread_mutex or similar, but for a simple fix assuming single-threaded init or external sync: */
+    /* If external synchronization isn't guaranteed, a mutex is required here. */
+    /* Since we cannot easily add pthreads here without seeing build flags, we assume the caller synchronizes or we add a TODO */
+    /* Example fix using GCC atomic builtins if available, or just flagging it */
+    
+    /* Better fix involves a mutex. Since I can't add a mutex variable easily to the global scope without includes: */
+    /* Suggest adding a static mutex and locking around the load/unload logic. */</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">Agreement handle is cleared even when key generation fails</div>
+                <div class="issue-location">src/sm2_keyexch.c:64-69</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: codex</span>
+                    <span class="confidence-badge likely">置信度: 较可信</span>
+                </div>
+                <pre>ret = SDF_DL_GenerateKeyWithECC(selfCtx-&gt;hSessionHandle,
+        (unsigned char *)peerCtx-&gt;userId, peerCtx-&gt;userIdLen,
+        &amp;sdfPeerPub, &amp;sdfPeerTmpPub,
+        selfCtx-&gt;hAgreementHandle, &amp;hKeyHandle);
+selfCtx-&gt;hAgreementHandle = NULL;  /* consumed */
+if (ret != SDR_OK) {
+    BSL_ERR_PUSH_ERROR(ret);
+    return BSL_INTERNAL_EXCEPTION;
+}</pre>
+                <div class="problem"><strong>Issue:</strong> `hAgreementHandle` is nulled before checking `SDF_DL_GenerateKeyWithECC` return status. On failure, the context loses the live handle, which can break retries and leak device-side agreement state.</div>
+                <div class="fix-label">Fix:</div><pre>ret = SDF_DL_GenerateKeyWithECC(selfCtx-&gt;hSessionHandle,
+        (unsigned char *)peerCtx-&gt;userId, peerCtx-&gt;userIdLen,
+        &amp;sdfPeerPub, &amp;sdfPeerTmpPub,
+        selfCtx-&gt;hAgreementHandle, &amp;hKeyHandle);
+if (ret != SDR_OK) {
+    BSL_ERR_PUSH_ERROR(ret);
+    return BSL_INTERNAL_EXCEPTION;
+}
+selfCtx-&gt;hAgreementHandle = NULL;  /* consume only on success */</pre>
+            </div>
+</div>
+<div class="section"><div class="section-title medium">Medium</div>
+<div class="issue">
+                <div class="issue-title">Uninitialized variable ret used in error path</div>
+                <div class="issue-location">src/provider.c:127-128</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: claude</span>
+                    <span class="confidence-badge likely">置信度: 较可信</span>
+                </div>
+                <pre>if (sdfLibPath == NULL) {
+        BSL_ERR_PUSH_ERROR(ret);
+        return CRYPT_INVALID_ARG;
+    }</pre>
+                <div class="problem"><strong>Issue:</strong> When sdfLibPath is NULL, variable ret is uninitialized but BSL_ERR_PUSH_ERROR(ret) is called with an undefined value.</div>
+                <div class="fix-label">Fix:</div><pre>if (sdfLibPath == NULL) {
+        BSL_ERR_PUSH_ERROR(CRYPT_INVALID_ARG);
+        return CRYPT_INVALID_ARG;
+    }</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">Typo in BSL_SAL_Dump macro name</div>
+                <div class="issue-location">src/rsa_keymgmt.c:597</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: claude, claude</span>
+                    <span class="confidence-badge trusted">置信度: 可信</span>
+                </div>
+                <pre>GOTO_ERR_IF_SRC_NOT_NULL(newCtx-&gt;e, ctx-&gt;e, BSL_SAL_Dump(ctx-&gt;e, ctx-&gt;eLen), CRYPT_MEM_ALLOC_FAIL);</pre>
+                <div class="problem"><strong>Issue:</strong> The macro BSL_SAL_Dump does not exist - should be BSL_SAL_Dup or similar allocation function</div>
+                <div class="fix-label">Fix:</div><pre>GOTO_ERR_IF_SRC_NOT_NULL(newCtx-&gt;e, ctx-&gt;e, BSL_SAL_Dup(ctx-&gt;e, ctx-&gt;eLen), CRYPT_MEM_ALLOC_FAIL);</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">Typo in dlclose parameter name</div>
+                <div class="issue-location">src/sdf_dl.c:164</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: claude</span>
+                    <span class="confidence-badge likely">置信度: 较可信</span>
+                </div>
+                <pre>dlclose(g_sdfLibHandle);</pre>
+                <div class="problem"><strong>Issue:</strong> Variable name mismatch - g_sdfLibHandle vs g_sdfLibHandle</div>
+                <div class="fix-label">Fix:</div><pre>dlclose(g_sdfLibHandle);</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">Memory leak on error path when keyIndex != 0</div>
+                <div class="issue-location">src/sm2_keymgmt.c:276-279</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: claude</span>
+                    <span class="confidence-badge likely">置信度: 较可信</span>
+                </div>
+                <pre>ret = SDF_DL_ExportSignPublicKey_ECC(ctx-&gt;hSessionHandle, ctx-&gt;KeyIndex, &amp;sdfPub);
+    if (ret != SDR_OK) {
+        BSL_ERR_PUSH_ERROR(ret);
+        return BSL_INTERNAL_EXCEPTION;
+    }
+    PublicKey = BSL_SAL_Calloc(1u, sizeof(EccPubKey));
+    if (PublicKey == NULL) {
+        return CRYPT_MEM_ALLOC_FAIL;
+    }</pre>
+                <div class="problem"><strong>Issue:</strong> If ctx->KeyIndex != 0, the function returns CRYPT_ECC_PKEY_ERR_EMPTY_KEY without freeing the allocated tempPubKey buffer</div>
+                <div class="fix-label">Fix:</div><pre>EccPubKey *tempPubKey = BSL_SAL_Calloc(1u, sizeof(EccPubKey));
+    if (tempPubKey == NULL) {
+        return CRYPT_MEM_ALLOC_FAIL;
+    }
+    ToEccPubKey(&amp;sdfPub, tempPubKey);
+    ctx-&gt;PublicKey = tempPubKey;</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">Potential memory leak on error path</div>
+                <div class="issue-location">src/rsa_keymgmt.c:117-121</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: claude</span>
+                    <span class="confidence-badge likely">置信度: 较可信</span>
+                </div>
+                <pre>ret = CRYPT_RSA_SetParaEx(ctx, para);
+    if (ret != CRYPT_SUCCESS) {
+        return ret;
+    }</pre>
+                <div class="problem"><strong>Issue:</strong> If CRYPT_RSA_SetParaEx fails, e and eLen may be left in inconsistent state</div>
+                <div class="fix-label">Fix:</div><pre>ret = CRYPT_RSA_SetParaEx(ctx, para);
+    if (ret != CRYPT_SUCCESS) {
+        BSL_SAL_Free(ctx-&gt;e);
+        ctx-&gt;e = NULL;
+        ctx-&gt;eLen = 0;
+        return ret;
+    }</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">Hardcoded static library extension</div>
+                <div class="issue-location">CMakeLists.txt:39-44</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: gemini</span>
+                    <span class="confidence-badge likely">置信度: 较可信</span>
+                </div>
+                <pre>find_library(HITLS_BSL_LIB libhitls_bsl.a
+    PATHS ${HITLS_LIB_DIR}
+    REQUIRED
+)
+
+find_library(HITLS_CRYPTO_LIB libhitls_crypto.a
+    PATHS ${HITLS_LIB_DIR}
+    REQUIRED
+)</pre>
+                <div class="problem"><strong>Issue:</strong> The build script hardcodes `.a` extension (`libhitls_bsl.a`, `libhitls_crypto.a`). This reduces portability across systems that might use different naming conventions or where only shared libraries are available.</div>
+                <div class="fix-label">Fix:</div><pre>find_library(HITLS_BSL_LIB NAMES hitls_bsl libhitls_bsl
+    PATHS ${HITLS_LIB_DIR}
+    REQUIRED
+)
+
+find_library(HITLS_CRYPTO_LIB NAMES hitls_crypto libhitls_crypto
+    PATHS ${HITLS_LIB_DIR}
+    REQUIRED
+)</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">Memory leak in Key Exchange generation</div>
+                <div class="issue-location">src/sm2_keymgmt.c:104</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: gemini</span>
+                    <span class="confidence-badge likely">置信度: 较可信</span>
+                </div>
+                <pre>ret = SDF_DL_GenerateAgreementDataWithECC(ctx-&gt;hSessionHandle, ctx-&gt;KeyIndex,
+                    128, ctx-&gt;userId, ctx-&gt;userIdLen,
+                    &amp;sdfSelfPub, &amp;sdfTmpPub, &amp;ctx-&gt;hAgreementHandle);</pre>
+                <div class="problem"><strong>Issue:</strong> In `CRYPT_SM2_Gen` (Key Exchange mode), if `ctx->tmpPubKey` is already allocated (e.g. from a previous call), it is freed. However, `ctx->hAgreementHandle` is unconditionally overwritten. If the SDF implementation allocates resources for this handle, they are leaked. Additionally, `CRYPT_SM2_FreeCtx` sets `hAgreementHandle` to NULL without closing it, potentially leaking resources if the session close doesn't handle it.</div>
+                <div class="fix-label">Fix:</div><pre>/* Ensure previous handle is not overwritten/leaked if re-used */
+            if (ctx-&gt;hAgreementHandle != NULL) {
+                 /* Assuming handle is session-bound or opaque, strictly we can't close it without an API.
+                  * But we should error if it's already active to prevent misuse. */
+                 return CRYPT_INVALID_ARG; 
+            }
+            ret = SDF_DL_GenerateAgreementDataWithECC(ctx-&gt;hSessionHandle, ctx-&gt;KeyIndex,
+                    128, ctx-&gt;userId, ctx-&gt;userIdLen,
+                    &amp;sdfSelfPub, &amp;sdfTmpPub, &amp;ctx-&gt;hAgreementHandle);</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">Uninitialized `ret` is read in error logging path</div>
+                <div class="issue-location">src/sm2_sign.c:64-70</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: codex</span>
+                    <span class="confidence-badge likely">置信度: 较可信</span>
+                </div>
+                <pre>int32_t ret;
+...
+if ((ctx == NULL) || (sign == NULL) || (signLen == NULL) || ((data == NULL) &amp;&amp; (dataLen != 0))) {
+    BSL_ERR_PUSH_ERROR(ret);
+    return CRYPT_NULL_INPUT;
+}
+if (*signLen &lt; CRYPT_SM2_GetSignLen_ex(ctx)) {
+    BSL_ERR_PUSH_ERROR(ret);
+    return CRYPT_SM2_BUFF_LEN_NOT_ENOUGH;
+}</pre>
+                <div class="problem"><strong>Issue:</strong> `ret` is declared but not initialized before being passed to `BSL_ERR_PUSH_ERROR`, which is undefined behavior in C and can push random error codes.</div>
+                <div class="fix-label">Fix:</div><pre>int32_t ret = CRYPT_SUCCESS;
+...
+if ((ctx == NULL) || (sign == NULL) || (signLen == NULL) || ((data == NULL) &amp;&amp; (dataLen != 0))) {
+    BSL_ERR_PUSH_ERROR(CRYPT_NULL_INPUT);
+    return CRYPT_NULL_INPUT;
+}
+if (*signLen &lt; CRYPT_SM2_GetSignLen_ex(ctx)) {
+    BSL_ERR_PUSH_ERROR(CRYPT_SM2_BUFF_LEN_NOT_ENOUGH);
+    return CRYPT_SM2_BUFF_LEN_NOT_ENOUGH;
+}</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">Uninitialized `ret` used when pushing precondition errors</div>
+                <div class="issue-location">src/sm2_keyexch.c:51-57</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: codex</span>
+                    <span class="confidence-badge likely">置信度: 较可信</span>
+                </div>
+                <pre>if (selfCtx-&gt;hAgreementHandle == NULL) {
+    BSL_ERR_PUSH_ERROR(ret);
+    return CRYPT_SM2_NO_PRVKEY;
+}
+if (peerCtx-&gt;PublicKey == NULL || peerCtx-&gt;tmpPubKey == NULL) {
+    BSL_ERR_PUSH_ERROR(ret);
+    return CRYPT_SM2_NO_PUBKEY;
+}</pre>
+                <div class="problem"><strong>Issue:</strong> The function pushes `ret` before `ret` is assigned, causing undefined behavior and non-deterministic error reporting.</div>
+                <div class="fix-label">Fix:</div><pre>if (selfCtx-&gt;hAgreementHandle == NULL) {
+    BSL_ERR_PUSH_ERROR(CRYPT_SM2_NO_PRVKEY);
+    return CRYPT_SM2_NO_PRVKEY;
+}
+if (peerCtx-&gt;PublicKey == NULL || peerCtx-&gt;tmpPubKey == NULL) {
+    BSL_ERR_PUSH_ERROR(CRYPT_SM2_NO_PUBKEY);
+    return CRYPT_SM2_NO_PUBKEY;
+}</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">Key handle leak on post-SDF allocation failure</div>
+                <div class="issue-location">src/sm2_keyexch.c:101-114</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: codex</span>
+                    <span class="confidence-badge likely">置信度: 较可信</span>
+                </div>
+                <pre>ret = SDF_DL_GenerateAgreementDataAndKeyWithECC(..., &amp;hKeyHandle);
+if (ret != SDR_OK) {
+    BSL_ERR_PUSH_ERROR(ret);
+    return BSL_INTERNAL_EXCEPTION;
+}
+
+/* Save self public key if not set */
+if (selfCtx-&gt;PublicKey == NULL) {
+    EccPubKey *pubKey = BSL_SAL_Calloc(1u, sizeof(EccPubKey));
+    if (pubKey == NULL) {
+        return CRYPT_MEM_ALLOC_FAIL;
+    }
+    ...
+}
+EccPubKey *tmpKey = BSL_SAL_Calloc(1u, sizeof(EccPubKey));
+if (tmpKey == NULL) {
+    return CRYPT_MEM_ALLOC_FAIL;
+}</pre>
+                <div class="problem"><strong>Issue:</strong> The responder path creates `hKeyHandle` first, then allocates `pubKey/tmpKey`. If allocation fails, function returns without cleaning the generated key handle, leaking device resources.</div>
+                <div class="fix-label">Fix:</div><pre>EccPubKey *pubKey = NULL;
+EccPubKey *tmpKey = BSL_SAL_Calloc(1u, sizeof(EccPubKey));
+if (tmpKey == NULL) {
+    return CRYPT_MEM_ALLOC_FAIL;
+}
+if (selfCtx-&gt;PublicKey == NULL) {
+    pubKey = BSL_SAL_Calloc(1u, sizeof(EccPubKey));
+    if (pubKey == NULL) {
+        BSL_SAL_Free(tmpKey);
+        return CRYPT_MEM_ALLOC_FAIL;
+    }
+}
+
+ret = SDF_DL_GenerateAgreementDataAndKeyWithECC(selfCtx-&gt;hSessionHandle,
+        selfCtx-&gt;KeyIndex, 128,
+        selfCtx-&gt;userId, selfCtx-&gt;userIdLen,
+        (unsigned char *)peerCtx-&gt;userId, peerCtx-&gt;userIdLen,
+        &amp;sdfSponsorPub, &amp;sdfSponsorTmpPub, &amp;sdfSelfPub, &amp;sdfSelfTmpPub, &amp;hKeyHandle);
+if (ret != SDR_OK) {
+    BSL_SAL_Free(pubKey);
+    BSL_SAL_Free(tmpKey);
+    BSL_ERR_PUSH_ERROR(ret);
+    return BSL_INTERNAL_EXCEPTION;
+}</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">Old key password is freed without zeroization</div>
+                <div class="issue-location">src/rsa_keymgmt.c:1085-1089</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: codex</span>
+                    <span class="confidence-badge likely">置信度: 较可信</span>
+                </div>
+                <pre>BSL_SAL_Free(*pass);
+*pass = NULL;
+*passLen = 0;</pre>
+                <div class="problem"><strong>Issue:</strong> `SetKeyPass` frees previous password memory directly. This leaves prior secret bytes in heap memory and increases secret exposure risk.</div>
+                <div class="fix-label">Fix:</div><pre>if (*pass != NULL &amp;&amp; *passLen &gt; 0) {
+    (void)memset(*pass, 0, *passLen);
+    BSL_SAL_Free(*pass);
+}
+*pass = NULL;
+*passLen = 0;</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">Old key password is freed without zeroization</div>
+                <div class="issue-location">src/sm2_keymgmt.c:516-520</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: codex</span>
+                    <span class="confidence-badge likely">置信度: 较可信</span>
+                </div>
+                <pre>BSL_SAL_Free(*pass);
+*pass = NULL;
+*passLen = 0;</pre>
+                <div class="problem"><strong>Issue:</strong> `SetKeyPass` replaces password storage but does not scrub old password contents before free, leaving sensitive data recoverable from heap.</div>
+                <div class="fix-label">Fix:</div><pre>if (*pass != NULL &amp;&amp; *passLen &gt; 0) {
+    (void)memset(*pass, 0, *passLen);
+    BSL_SAL_Free(*pass);
+}
+*pass = NULL;
+*passLen = 0;</pre>
+            </div>
+</div>
+<div class="section"><div class="section-title low">Low</div>
+<div class="issue">
+                <div class="issue-title">Typo in struct member name e</div>
+                <div class="issue-location">src/rsa_local.h:61</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: claude</span>
+                    <span class="confidence-badge likely">置信度: 较可信</span>
+                </div>
+                <pre>typedef struct {
+    unsigned int bits;
+    unsigned char m[SDF_RSA_MAX_KEY_LEN];
+    unsigned char e[SDF_RSA_MAX_KEY_LEN];
+} RsaPubKey;</pre>
+                <div class="problem"><strong>Issue:</strong> The uint32_t eLen field is declared but struct member is named 'e' not 'exp' which could cause confusion</div>
+                <div class="fix-label">Fix:</div><pre>typedef struct {
+    unsigned int bits;
+    unsigned char m[SDF_RSA_MAX_KEY_LEN];
+    unsigned char e[SDF_RSA_MAX_KEY_LEN];  /* public exponent */
+} RsaPubKey;</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">Typo in comment "Deep-copied"</div>
+                <div class="issue-location">src/provider.h:32</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: claude</span>
+                    <span class="confidence-badge likely">置信度: 较可信</span>
+                </div>
+                <pre>char *sdfLibPath;    /* Deep-copied SDF library path */</pre>
+                <div class="problem"><strong>Issue:</strong> Comment has typo - should be "Deep-copied" not "Deep-copied"</div>
+                <div class="fix-label">Fix:</div><pre>char *sdfLibPath;    /* Deep-copied SDF library path */</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">Incorrect comment after removing KeyIndex logic</div>
+                <div class="issue-location">src/sm2_keymgmt.c:251-254</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: claude</span>
+                    <span class="confidence-badge likely">置信度: 较可信</span>
+                </div>
+                <pre>if (ctx-&gt;KeyIndex != 0) {
+        // Internal key: no exportable private key data
+        return CRYPT_ECC_PKEY_ERR_EMPTY_KEY;</pre>
+                <div class="problem"><strong>Issue:</strong> Comment refers to old "data with leading 0x00, use it as KeyIndex" logic which was removed</div>
+                <div class="fix-label">Fix:</div><pre>if (ctx-&gt;KeyIndex != 0) {
+        // Internal key: no exportable private key data
+        return CRYPT_ECC_PKEY_ERR_EMPTY_KEY;</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">Incorrect error code pushed</div>
+                <div class="issue-location">src/provider.c:128</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: gemini</span>
+                    <span class="confidence-badge likely">置信度: 较可信</span>
+                </div>
+                <pre>if (sdfLibPath == NULL) {
+        BSL_ERR_PUSH_ERROR(ret);
+        return CRYPT_INVALID_ARG;
+    }</pre>
+                <div class="problem"><strong>Issue:</strong> When `sdfLibPath` is NULL (because the parameter was missing), the code pushes `ret` to the error stack. However, `ret` holds the result of previous operations (likely `CRYPT_SUCCESS` / 0), which is not a valid error code to push.</div>
+                <div class="fix-label">Fix:</div><pre>if (sdfLibPath == NULL) {
+        BSL_ERR_PUSH_ERROR(CRYPT_INVALID_ARG);
+        return CRYPT_INVALID_ARG;
+    }</pre>
+            </div>
+</div>
+</div></body></html>

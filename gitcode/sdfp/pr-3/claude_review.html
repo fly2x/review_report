@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Code Review: openHiTLS/sdfp#3 - CLAUDE</title>
+    <style>
+        :root { --critical: #dc2626; --high: #ea580c; --medium: #ca8a04; --low: #65a30d; }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: system-ui, sans-serif; background: #f8fafc; color: #1e293b; padding: 2rem; line-height: 1.6; }
+        .container { max-width: 900px; margin: 0 auto; }
+        h1 { font-size: 1.5rem; margin-bottom: 0.5rem; }
+        .subtitle { color: #64748b; margin-bottom: 2rem; }
+        .section { margin-bottom: 2rem; }
+        .section-title { font-size: 1.1rem; font-weight: 600; padding: 0.5rem 1rem; border-radius: 0.5rem 0.5rem 0 0; color: white; }
+        .section-title.critical { background: var(--critical); }
+        .section-title.high { background: var(--high); }
+        .section-title.medium { background: var(--medium); }
+        .section-title.low { background: var(--low); }
+        .issue { background: white; border: 1px solid #e2e8f0; border-top: none; padding: 1rem; }
+        .issue:last-child { border-radius: 0 0 0.5rem 0.5rem; }
+        .issue-title { font-weight: 600; margin-bottom: 0.25rem; }
+        .issue-location { font-family: monospace; font-size: 0.875rem; color: #64748b; margin-bottom: 0.75rem; }
+        .issue-source { font-size: 0.75rem; color: #94a3b8; margin-top: 0.5rem; }
+        pre { background: #1e293b; color: #e2e8f0; padding: 0.75rem; border-radius: 0.375rem; overflow-x: auto; font-size: 0.875rem; margin: 0.5rem 0; }
+        .problem { margin: 0.75rem 0; }
+        .fix-label { font-weight: 600; margin-top: 0.75rem; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Code Review: openHiTLS/sdfp#3 - CLAUDE</h1>
+        <div class="subtitle"></div>
+<div class="section"><div class="section-title high">High</div>
+<div class="issue">
+                <div class="issue-title">Typo in dlopen flags causes undefined symbol behavior</div>
+                <div class="issue-location">src/sdf_dl.c:115</div>
+                <pre>g_sdfLibHandle = dlopen(libPath, RTLD_NOW | RTLD_LOCAL);</pre>
+                <div class="problem"><strong>Issue:</strong> Line 115 uses RTLD_LOCAL instead of RTLD_LOCAL and line 111 has RTLD_NOW instead of RTLD_NOW. These typos mean invalid flags are passed to dlopen(). RTLD_LOCAL causes symbols to not be available for resolving subsequently loaded libraries, while RTLD_NOW performs immediate binding.</div>
+                <div class="fix-label">Fix:</div><pre>g_sdfLibHandle = dlopen(libPath, RTLD_NOW | RTLD_LOCAL);</pre>
+                <div class="issue-source">Reviewer: claude</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">Typo in #define SDF_DL_ERR_NOT_LOADED and SDR_UNKNOWERR</div>
+                <div class="issue-location">src/sdf_dl.c:172</div>
+                <pre>#define SDF_DL_ERR_NOT_LOADED  SDR_UNKNOWERR</pre>
+                <div class="problem"><strong>Issue:</strong> The constant name has a typo - SDF_DL_ERR_NOT_LOADED is missing 'A' in LOADED, and SDR_UNKNOWERR is missing 'K' in UNKOWERR. These constants should match the correct spelling.</div>
+                <div class="fix-label">Fix:</div><pre>#define SDF_DL_ERR_NOT_LOADED  SDR_UNKNOWNERR</pre>
+                <div class="issue-source">Reviewer: claude</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">Typo in function name SDF_DL_Unload</div>
+                <div class="issue-location">src/sdf_dl.c:161</div>
+                <pre>void SDF_DL_Unload(void)</pre>
+                <div class="problem"><strong>Issue:</strong> The function is named SDF_DL_Unload but should be SDF_DL_Unload to match the header declaration (assuming 'load' not 'Load'). This inconsistency could cause linker errors or undefined symbol errors.</div>
+                <div class="fix-label">Fix:</div><pre>void SDF_DL_Unload(void)</pre>
+                <div class="issue-source">Reviewer: claude</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">Typo in SDF_DL_Unload function call</div>
+                <div class="issue-location">src/provider.c:72</div>
+                <pre>SDF_DL_Unload();</pre>
+                <div class="problem"><strong>Issue:</strong> Function name has typo - should be SDF_DL_Unload not SDF_DL_Unload</div>
+                <div class="fix-label">Fix:</div><pre>SDF_DL_Unload();</pre>
+                <div class="issue-source">Reviewer: claude</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">Typo in SDF_DL_Unload function call</div>
+                <div class="issue-location">src/provider.c:140</div>
+                <pre>SDF_DL_Unload();</pre>
+                <div class="problem"><strong>Issue:</strong> Function name has typo - should be SDF_DL_Unload not SDF_DL_Unload</div>
+                <div class="fix-label">Fix:</div><pre>SDF_DL_Unload();</pre>
+                <div class="issue-source">Reviewer: claude</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">Typo in SDF_DL_Unload function call</div>
+                <div class="issue-location">src/provider.c:153</div>
+                <pre>SDF_DL_Unload();</pre>
+                <div class="problem"><strong>Issue:</strong> Function name has typo - should be SDF_DL_Unload not SDF_DL_Unload</div>
+                <div class="fix-label">Fix:</div><pre>SDF_DL_Unload();</pre>
+                <div class="issue-source">Reviewer: claude</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">Typo in SDF_DL_Unload function call</div>
+                <div class="issue-location">src/provider.c:166</div>
+                <pre>SDF_DL_Unload();</pre>
+                <div class="problem"><strong>Issue:</strong> Function name has typo - should be SDF_DL_Unload not SDF_DL_Unload</div>
+                <div class="fix-label">Fix:</div><pre>SDF_DL_Unload();</pre>
+                <div class="issue-source">Reviewer: claude</div>
+            </div>
+</div>
+<div class="section"><div class="section-title medium">Medium</div>
+<div class="issue">
+                <div class="issue-title">Uninitialized variable ret used in error path</div>
+                <div class="issue-location">src/provider.c:127-128</div>
+                <pre>if (sdfLibPath == NULL) {
+        BSL_ERR_PUSH_ERROR(ret);
+        return CRYPT_INVALID_ARG;
+    }</pre>
+                <div class="problem"><strong>Issue:</strong> When sdfLibPath is NULL, variable ret is uninitialized but BSL_ERR_PUSH_ERROR(ret) is called with an undefined value.</div>
+                <div class="fix-label">Fix:</div><pre>if (sdfLibPath == NULL) {
+        BSL_ERR_PUSH_ERROR(CRYPT_INVALID_ARG);
+        return CRYPT_INVALID_ARG;
+    }</pre>
+                <div class="issue-source">Reviewer: claude</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">Typo in BSL_SAL_Dump macro name</div>
+                <div class="issue-location">src/rsa_keymgmt.c:597</div>
+                <pre>GOTO_ERR_IF_SRC_NOT_NULL(newCtx-&gt;e, ctx-&gt;e, BSL_SAL_Dump(ctx-&gt;e, ctx-&gt;eLen), CRYPT_MEM_ALLOC_FAIL);</pre>
+                <div class="problem"><strong>Issue:</strong> The macro BSL_SAL_Dump does not exist - should be BSL_SAL_Dup or similar allocation function</div>
+                <div class="fix-label">Fix:</div><pre>GOTO_ERR_IF_SRC_NOT_NULL(newCtx-&gt;e, ctx-&gt;e, BSL_SAL_Dup(ctx-&gt;e, ctx-&gt;eLen), CRYPT_MEM_ALLOC_FAIL);</pre>
+                <div class="issue-source">Reviewer: claude</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">Typo in BSL_SAL_Dump macro name</div>
+                <div class="issue-location">src/rsa_keymgmt.c:600</div>
+                <pre>GOTO_ERR_IF_SRC_NOT_NULL(newCtx-&gt;label.data, ctx-&gt;label.data, BSL_SAL_Dump(ctx-&gt;label.data,</pre>
+                <div class="problem"><strong>Issue:</strong> The macro BSL_SAL_Dump does not exist - should be BSL_SAL_Dup or similar allocation function</div>
+                <div class="fix-label">Fix:</div><pre>GOTO_ERR_IF_SRC_NOT_NULL(newCtx-&gt;label.data, ctx-&gt;label.data, BSL_SAL_Dup(ctx-&gt;label.data,</pre>
+                <div class="issue-source">Reviewer: claude</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">Typo in dlclose parameter name</div>
+                <div class="issue-location">src/sdf_dl.c:164</div>
+                <pre>dlclose(g_sdfLibHandle);</pre>
+                <div class="problem"><strong>Issue:</strong> Variable name mismatch - g_sdfLibHandle vs g_sdfLibHandle</div>
+                <div class="fix-label">Fix:</div><pre>dlclose(g_sdfLibHandle);</pre>
+                <div class="issue-source">Reviewer: claude</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">Memory leak on error path when keyIndex != 0</div>
+                <div class="issue-location">src/sm2_keymgmt.c:276-279</div>
+                <pre>ret = SDF_DL_ExportSignPublicKey_ECC(ctx-&gt;hSessionHandle, ctx-&gt;KeyIndex, &amp;sdfPub);
+    if (ret != SDR_OK) {
+        BSL_ERR_PUSH_ERROR(ret);
+        return BSL_INTERNAL_EXCEPTION;
+    }
+    PublicKey = BSL_SAL_Calloc(1u, sizeof(EccPubKey));
+    if (PublicKey == NULL) {
+        return CRYPT_MEM_ALLOC_FAIL;
+    }</pre>
+                <div class="problem"><strong>Issue:</strong> If ctx->KeyIndex != 0, the function returns CRYPT_ECC_PKEY_ERR_EMPTY_KEY without freeing the allocated tempPubKey buffer</div>
+                <div class="fix-label">Fix:</div><pre>EccPubKey *tempPubKey = BSL_SAL_Calloc(1u, sizeof(EccPubKey));
+    if (tempPubKey == NULL) {
+        return CRYPT_MEM_ALLOC_FAIL;
+    }
+    ToEccPubKey(&amp;sdfPub, tempPubKey);
+    ctx-&gt;PublicKey = tempPubKey;</pre>
+                <div class="issue-source">Reviewer: claude</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">Potential memory leak on error path</div>
+                <div class="issue-location">src/rsa_keymgmt.c:117-121</div>
+                <pre>ret = CRYPT_RSA_SetParaEx(ctx, para);
+    if (ret != CRYPT_SUCCESS) {
+        return ret;
+    }</pre>
+                <div class="problem"><strong>Issue:</strong> If CRYPT_RSA_SetParaEx fails, e and eLen may be left in inconsistent state</div>
+                <div class="fix-label">Fix:</div><pre>ret = CRYPT_RSA_SetParaEx(ctx, para);
+    if (ret != CRYPT_SUCCESS) {
+        BSL_SAL_Free(ctx-&gt;e);
+        ctx-&gt;e = NULL;
+        ctx-&gt;eLen = 0;
+        return ret;
+    }</pre>
+                <div class="issue-source">Reviewer: claude</div>
+            </div>
+</div>
+<div class="section"><div class="section-title low">Low</div>
+<div class="issue">
+                <div class="issue-title">Typo in struct member name e</div>
+                <div class="issue-location">src/rsa_local.h:61</div>
+                <pre>typedef struct {
+    unsigned int bits;
+    unsigned char m[SDF_RSA_MAX_KEY_LEN];
+    unsigned char e[SDF_RSA_MAX_KEY_LEN];
+} RsaPubKey;</pre>
+                <div class="problem"><strong>Issue:</strong> The uint32_t eLen field is declared but struct member is named 'e' not 'exp' which could cause confusion</div>
+                <div class="fix-label">Fix:</div><pre>typedef struct {
+    unsigned int bits;
+    unsigned char m[SDF_RSA_MAX_KEY_LEN];
+    unsigned char e[SDF_RSA_MAX_KEY_LEN];  /* public exponent */
+} RsaPubKey;</pre>
+                <div class="issue-source">Reviewer: claude</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">Typo in comment "Deep-copied"</div>
+                <div class="issue-location">src/provider.h:32</div>
+                <pre>char *sdfLibPath;    /* Deep-copied SDF library path */</pre>
+                <div class="problem"><strong>Issue:</strong> Comment has typo - should be "Deep-copied" not "Deep-copied"</div>
+                <div class="fix-label">Fix:</div><pre>char *sdfLibPath;    /* Deep-copied SDF library path */</pre>
+                <div class="issue-source">Reviewer: claude</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">Incorrect comment after removing KeyIndex logic</div>
+                <div class="issue-location">src/sm2_keymgmt.c:251-254</div>
+                <pre>if (ctx-&gt;KeyIndex != 0) {
+        // Internal key: no exportable private key data
+        return CRYPT_ECC_PKEY_ERR_EMPTY_KEY;</pre>
+                <div class="problem"><strong>Issue:</strong> Comment refers to old "data with leading 0x00, use it as KeyIndex" logic which was removed</div>
+                <div class="fix-label">Fix:</div><pre>if (ctx-&gt;KeyIndex != 0) {
+        // Internal key: no exportable private key data
+        return CRYPT_ECC_PKEY_ERR_EMPTY_KEY;</pre>
+                <div class="issue-source">Reviewer: claude</div>
+            </div>
+</div>
+</div></body></html>

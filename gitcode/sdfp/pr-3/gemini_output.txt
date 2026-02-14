@@ -1,0 +1,191 @@
+I will start by checking the statistics of the differences between the specified commits to understand the scope of the changes.
+I will examine the changes in `src/CMakeLists.txt` and `src/version.lds` to understand the build configuration and versioning updates.
+I will retrieve the differences for `src/CMakeLists.txt` separately to ensure I have the complete context for the build configuration changes.
+I will check the differences in the root `CMakeLists.txt` file to understand the changes made to the build configuration.
+I will examine the changes in `src/provider.c` and `src/provider.h` to understand the updates to the provider implementation and its interface.
+I will examine `src/sdf_dl.c` and `src/sdf_dl.h` to verify how `SDF_DL_Load` and `SDF_DL_Unload` are implemented, specifically checking for reference counting or safe handling of multiple calls, and I will also investigate the inconsistency between `BSL_SAL_FREE` and `BSL_SAL_Free`.
+I will examine `src/rsa_keymgmt.c`, `src/rsa_sign.c`, and `src/rsa_pkeycipher.c` to see how the new control parameters like `CRYPT_CTRL_PASS` are used and to assess the changes in the RSA implementation.
+I will examine `src/rsa_local.h` and `src/rsa_padding.c` to verify the typedef updates and any changes to the padding implementation.
+I will examine `src/sm2_local.h` and `src/sm2_keymgmt.c` to verify the SM2 key management implementation and related header definitions.
+I will examine `src/sm2_keyexch.c`, `src/sm2_sign.c`, and `src/sm2_pkeycipher.c` to evaluate the implementation of SM2 key exchange, signing, and public key encryption/decryption.
+===ISSUE===
+FILE: src/sdf_dl.c
+LINE: 93-167
+SEVERITY: critical
+TITLE: Unsafe library unloading (Use-After-Free/Unload)
+PROBLEM: The `SDF_DL_Load` function checks if `g_sdfLibHandle` is non-NULL to avoid reloading, but it does not increment a reference count. Conversely, `SDF_DL_Unload` unconditionally closes the library handle and clears function pointers. If multiple provider contexts are initialized (sharing the global library handle) and one is freed, it will unload the library, causing the remaining active contexts to crash or behave undefinedly when they try to use SDF functions.
+CODE:
+```c
+static void *g_sdfLibHandle = NULL;
+
+// ...
+
+int32_t SDF_DL_Load(const char *libPath)
+{
+    if (libPath == NULL) {
+        BSL_ERR_PUSH_ERROR(BSL_NULL_INPUT);
+        return -1;
+    }
+
+    if (g_sdfLibHandle != NULL) {
+        return 0;
+    }
+
+// ...
+
+void SDF_DL_Unload(void)
+{
+    if (g_sdfLibHandle != NULL) {
+        dlclose(g_sdfLibHandle);
+        g_sdfLibHandle = NULL;
+    }
+    (void)memset(&g_sdfFunc, 0, sizeof(g_sdfFunc));
+}
+```
+FIX:
+```c
+static void *g_sdfLibHandle = NULL;
+static int g_loadCount = 0;
+
+// ...
+
+int32_t SDF_DL_Load(const char *libPath)
+{
+    if (libPath == NULL) {
+        BSL_ERR_PUSH_ERROR(BSL_NULL_INPUT);
+        return -1;
+    }
+
+    if (g_sdfLibHandle != NULL) {
+        g_loadCount++;
+        return 0;
+    }
+
+    g_sdfLibHandle = dlopen(libPath, RTLD_NOW | RTLD_LOCAL);
+    if (g_sdfLibHandle == NULL) {
+        BSL_ERR_PUSH_ERROR(BSL_INTERNAL_EXCEPTION);
+        return -1;
+    }
+    g_loadCount = 1;
+
+// ...
+
+void SDF_DL_Unload(void)
+{
+    if (g_loadCount > 0) {
+        g_loadCount--;
+    }
+    if (g_loadCount == 0 && g_sdfLibHandle != NULL) {
+        dlclose(g_sdfLibHandle);
+        g_sdfLibHandle = NULL;
+        (void)memset(&g_sdfFunc, 0, sizeof(g_sdfFunc));
+    }
+}
+```
+===END===
+
+===ISSUE===
+FILE: src/sdf_dl.c
+LINE: 111-118
+SEVERITY: high
+TITLE: Thread safety race condition in library loading
+PROBLEM: `SDF_DL_Load` accesses and modifies the global `g_sdfLibHandle` without any locking. If two threads attempt to initialize the provider simultaneously, they may both check `g_sdfLibHandle == NULL`, and both proceed to call `dlopen` and overwrite `g_sdfLibHandle`, or one might use partially initialized function pointers.
+CODE:
+```c
+    if (g_sdfLibHandle != NULL) {
+        return 0;
+    }
+
+    g_sdfLibHandle = dlopen(libPath, RTLD_NOW | RTLD_LOCAL);
+```
+FIX:
+```c
+    /* Note: Ideally use pthread_mutex or similar, but for a simple fix assuming single-threaded init or external sync: */
+    /* If external synchronization isn't guaranteed, a mutex is required here. */
+    /* Since we cannot easily add pthreads here without seeing build flags, we assume the caller synchronizes or we add a TODO */
+    /* Example fix using GCC atomic builtins if available, or just flagging it */
+    
+    /* Better fix involves a mutex. Since I can't add a mutex variable easily to the global scope without includes: */
+    /* Suggest adding a static mutex and locking around the load/unload logic. */
+```
+===END===
+
+===ISSUE===
+FILE: src/provider.c
+LINE: 128
+SEVERITY: low
+TITLE: Incorrect error code pushed
+PROBLEM: When `sdfLibPath` is NULL (because the parameter was missing), the code pushes `ret` to the error stack. However, `ret` holds the result of previous operations (likely `CRYPT_SUCCESS` / 0), which is not a valid error code to push.
+CODE:
+```c
+    if (sdfLibPath == NULL) {
+        BSL_ERR_PUSH_ERROR(ret);
+        return CRYPT_INVALID_ARG;
+    }
+```
+FIX:
+```c
+    if (sdfLibPath == NULL) {
+        BSL_ERR_PUSH_ERROR(CRYPT_INVALID_ARG);
+        return CRYPT_INVALID_ARG;
+    }
+```
+===END===
+
+===ISSUE===
+FILE: CMakeLists.txt
+LINE: 39-44
+SEVERITY: medium
+TITLE: Hardcoded static library extension
+PROBLEM: The build script hardcodes `.a` extension (`libhitls_bsl.a`, `libhitls_crypto.a`). This reduces portability across systems that might use different naming conventions or where only shared libraries are available.
+CODE:
+```cmake
+find_library(HITLS_BSL_LIB libhitls_bsl.a
+    PATHS ${HITLS_LIB_DIR}
+    REQUIRED
+)
+
+find_library(HITLS_CRYPTO_LIB libhitls_crypto.a
+    PATHS ${HITLS_LIB_DIR}
+    REQUIRED
+)
+```
+FIX:
+```cmake
+find_library(HITLS_BSL_LIB NAMES hitls_bsl libhitls_bsl
+    PATHS ${HITLS_LIB_DIR}
+    REQUIRED
+)
+
+find_library(HITLS_CRYPTO_LIB NAMES hitls_crypto libhitls_crypto
+    PATHS ${HITLS_LIB_DIR}
+    REQUIRED
+)
+```
+===END===
+
+===ISSUE===
+FILE: src/sm2_keymgmt.c
+LINE: 104
+SEVERITY: medium
+TITLE: Memory leak in Key Exchange generation
+PROBLEM: In `CRYPT_SM2_Gen` (Key Exchange mode), if `ctx->tmpPubKey` is already allocated (e.g. from a previous call), it is freed. However, `ctx->hAgreementHandle` is unconditionally overwritten. If the SDF implementation allocates resources for this handle, they are leaked. Additionally, `CRYPT_SM2_FreeCtx` sets `hAgreementHandle` to NULL without closing it, potentially leaking resources if the session close doesn't handle it.
+CODE:
+```c
+            ret = SDF_DL_GenerateAgreementDataWithECC(ctx->hSessionHandle, ctx->KeyIndex,
+                    128, ctx->userId, ctx->userIdLen,
+                    &sdfSelfPub, &sdfTmpPub, &ctx->hAgreementHandle);
+```
+FIX:
+```c
+            /* Ensure previous handle is not overwritten/leaked if re-used */
+            if (ctx->hAgreementHandle != NULL) {
+                 /* Assuming handle is session-bound or opaque, strictly we can't close it without an API.
+                  * But we should error if it's already active to prevent misuse. */
+                 return CRYPT_INVALID_ARG; 
+            }
+            ret = SDF_DL_GenerateAgreementDataWithECC(ctx->hSessionHandle, ctx->KeyIndex,
+                    128, ctx->userId, ctx->userIdLen,
+                    &sdfSelfPub, &sdfTmpPub, &ctx->hAgreementHandle);
+```
+===END===

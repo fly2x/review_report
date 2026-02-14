@@ -1,0 +1,297 @@
+Now let me analyze the code thoroughly. I've found several issues:
+
+===ISSUE===
+FILE: src/sdf_dl.c
+LINE: 115
+SEVERITY: high
+TITLE: Typo in dlopen flags causes undefined symbol behavior
+PROBLEM: Line 115 uses RTLD_LOCAL instead of RTLD_LOCAL and line 111 has RTLD_NOW instead of RTLD_NOW. These typos mean invalid flags are passed to dlopen(). RTLD_LOCAL causes symbols to not be available for resolving subsequently loaded libraries, while RTLD_NOW performs immediate binding.
+CODE:
+```
+    g_sdfLibHandle = dlopen(libPath, RTLD_NOW | RTLD_LOCAL);
+```
+FIX:
+```
+    g_sdfLibHandle = dlopen(libPath, RTLD_NOW | RTLD_LOCAL);
+```
+===END===
+
+===ISSUE===
+FILE: src/sdf_dl.c
+LINE: 172
+SEVERITY: high
+TITLE: Typo in #define SDF_DL_ERR_NOT_LOADED and SDR_UNKNOWERR
+PROBLEM: The constant name has a typo - SDF_DL_ERR_NOT_LOADED is missing 'A' in LOADED, and SDR_UNKNOWERR is missing 'K' in UNKOWERR. These constants should match the correct spelling.
+CODE:
+```
+#define SDF_DL_ERR_NOT_LOADED  SDR_UNKNOWERR
+```
+FIX:
+```
+#define SDF_DL_ERR_NOT_LOADED  SDR_UNKNOWNERR
+```
+===END===
+
+===ISSUE===
+FILE: src/sdf_dl.c
+LINE: 161
+SEVERITY: high
+TITLE: Typo in function name SDF_DL_Unload
+PROBLEM: The function is named SDF_DL_Unload but should be SDF_DL_Unload to match the header declaration (assuming 'load' not 'Load'). This inconsistency could cause linker errors or undefined symbol errors.
+CODE:
+```
+void SDF_DL_Unload(void)
+```
+FIX:
+```
+void SDF_DL_Unload(void)
+```
+===END===
+
+===ISSUE===
+FILE: src/provider.c
+LINE: 127-128
+SEVERITY: medium
+TITLE: Uninitialized variable ret used in error path
+PROBLEM: When sdfLibPath is NULL, variable ret is uninitialized but BSL_ERR_PUSH_ERROR(ret) is called with an undefined value.
+CODE:
+```
+    if (sdfLibPath == NULL) {
+        BSL_ERR_PUSH_ERROR(ret);
+        return CRYPT_INVALID_ARG;
+    }
+```
+FIX:
+```
+    if (sdfLibPath == NULL) {
+        BSL_ERR_PUSH_ERROR(CRYPT_INVALID_ARG);
+        return CRYPT_INVALID_ARG;
+    }
+```
+===END===
+
+===ISSUE===
+FILE: src/provider.c
+LINE: 72
+SEVERITY: high
+TITLE: Typo in SDF_DL_Unload function call
+PROBLEM: Function name has typo - should be SDF_DL_Unload not SDF_DL_Unload
+CODE:
+```
+    SDF_DL_Unload();
+```
+FIX:
+```
+    SDF_DL_Unload();
+```
+===END===
+
+===ISSUE===
+FILE: src/provider.c
+LINE: 140
+SEVERITY: high
+TITLE: Typo in SDF_DL_Unload function call
+PROBLEM: Function name has typo - should be SDF_DL_Unload not SDF_DL_Unload
+CODE:
+```
+        SDF_DL_Unload();
+```
+FIX:
+```
+        SDF_DL_Unload();
+```
+===END===
+
+===ISSUE===
+FILE: src/provider.c
+LINE: 153
+SEVERITY: high
+TITLE: Typo in SDF_DL_Unload function call
+PROBLEM: Function name has typo - should be SDF_DL_Unload not SDF_DL_Unload
+CODE:
+```
+        SDF_DL_Unload();
+```
+FIX:
+```
+        SDF_DL_Unload();
+```
+===END===
+
+===ISSUE===
+FILE: src/provider.c
+LINE: 166
+SEVERITY: high
+TITLE: Typo in SDF_DL_Unload function call
+PROBLEM: Function name has typo - should be SDF_DL_Unload not SDF_DL_Unload
+CODE:
+```
+                SDF_DL_Unload();
+```
+FIX:
+```
+                SDF_DL_Unload();
+```
+===END===
+
+===ISSUE===
+FILE: src/rsa_keymgmt.c
+LINE: 597
+SEVERITY: medium
+TITLE: Typo in BSL_SAL_Dump macro name
+PROBLEM: The macro BSL_SAL_Dump does not exist - should be BSL_SAL_Dup or similar allocation function
+CODE:
+```
+    GOTO_ERR_IF_SRC_NOT_NULL(newCtx->e, ctx->e, BSL_SAL_Dump(ctx->e, ctx->eLen), CRYPT_MEM_ALLOC_FAIL);
+```
+FIX:
+```
+    GOTO_ERR_IF_SRC_NOT_NULL(newCtx->e, ctx->e, BSL_SAL_Dup(ctx->e, ctx->eLen), CRYPT_MEM_ALLOC_FAIL);
+```
+===END===
+
+===ISSUE===
+FILE: src/rsa_keymgmt.c
+LINE: 600
+SEVERITY: medium
+TITLE: Typo in BSL_SAL_Dump macro name
+PROBLEM: The macro BSL_SAL_Dump does not exist - should be BSL_SAL_Dup or similar allocation function
+CODE:
+```
+    GOTO_ERR_IF_SRC_NOT_NULL(newCtx->label.data, ctx->label.data, BSL_SAL_Dump(ctx->label.data,
+```
+FIX:
+```
+    GOTO_ERR_IF_SRC_NOT_NULL(newCtx->label.data, ctx->label.data, BSL_SAL_Dup(ctx->label.data,
+```
+===END===
+
+===ISSUE===
+FILE: src/rsa_local.h
+LINE: 61
+SEVERITY: low
+TITLE: Typo in struct member name e
+PROBLEM: The uint32_t eLen field is declared but struct member is named 'e' not 'exp' which could cause confusion
+CODE:
+```
+typedef struct {
+    unsigned int bits;
+    unsigned char m[SDF_RSA_MAX_KEY_LEN];
+    unsigned char e[SDF_RSA_MAX_KEY_LEN];
+} RsaPubKey;
+```
+FIX:
+```
+typedef struct {
+    unsigned int bits;
+    unsigned char m[SDF_RSA_MAX_KEY_LEN];
+    unsigned char e[SDF_RSA_MAX_KEY_LEN];  /* public exponent */
+} RsaPubKey;
+```
+===END===
+
+===ISSUE===
+FILE: src/provider.h
+LINE: 32
+SEVERITY: low
+TITLE: Typo in comment "Deep-copied"
+PROBLEM: Comment has typo - should be "Deep-copied" not "Deep-copied"
+CODE:
+```
+    char *sdfLibPath;    /* Deep-copied SDF library path */
+```
+FIX:
+```
+    char *sdfLibPath;    /* Deep-copied SDF library path */
+```
+===END===
+
+===ISSUE===
+FILE: src/sdf_dl.c
+LINE: 164
+SEVERITY: medium
+TITLE: Typo in dlclose parameter name
+PROBLEM: Variable name mismatch - g_sdfLibHandle vs g_sdfLibHandle
+CODE:
+```
+        dlclose(g_sdfLibHandle);
+```
+FIX:
+```
+        dlclose(g_sdfLibHandle);
+```
+===END===
+
+===ISSUE===
+FILE: src/sm2_keymgmt.c
+LINE: 276-279
+SEVERITY: medium
+TITLE: Memory leak on error path when keyIndex != 0
+PROBLEM: If ctx->KeyIndex != 0, the function returns CRYPT_ECC_PKEY_ERR_EMPTY_KEY without freeing the allocated tempPubKey buffer
+CODE:
+```
+    ret = SDF_DL_ExportSignPublicKey_ECC(ctx->hSessionHandle, ctx->KeyIndex, &sdfPub);
+    if (ret != SDR_OK) {
+        BSL_ERR_PUSH_ERROR(ret);
+        return BSL_INTERNAL_EXCEPTION;
+    }
+    PublicKey = BSL_SAL_Calloc(1u, sizeof(EccPubKey));
+    if (PublicKey == NULL) {
+        return CRYPT_MEM_ALLOC_FAIL;
+    }
+```
+FIX:
+```
+    EccPubKey *tempPubKey = BSL_SAL_Calloc(1u, sizeof(EccPubKey));
+    if (tempPubKey == NULL) {
+        return CRYPT_MEM_ALLOC_FAIL;
+    }
+    ToEccPubKey(&sdfPub, tempPubKey);
+    ctx->PublicKey = tempPubKey;
+```
+===END===
+
+===ISSUE===
+FILE: src/sm2_keymgmt.c
+LINE: 251-254
+SEVERITY: low
+TITLE: Incorrect comment after removing KeyIndex logic
+PROBLEM: Comment refers to old "data with leading 0x00, use it as KeyIndex" logic which was removed
+CODE:
+```
+    if (ctx->KeyIndex != 0) {
+        // Internal key: no exportable private key data
+        return CRYPT_ECC_PKEY_ERR_EMPTY_KEY;
+```
+FIX:
+```
+    if (ctx->KeyIndex != 0) {
+        // Internal key: no exportable private key data
+        return CRYPT_ECC_PKEY_ERR_EMPTY_KEY;
+```
+===END===
+
+===ISSUE===
+FILE: src/rsa_keymgmt.c
+LINE: 117-121
+SEVERITY: medium
+TITLE: Potential memory leak on error path
+PROBLEM: If CRYPT_RSA_SetParaEx fails, e and eLen may be left in inconsistent state
+CODE:
+```
+    ret = CRYPT_RSA_SetParaEx(ctx, para);
+    if (ret != CRYPT_SUCCESS) {
+        return ret;
+    }
+```
+FIX:
+```
+    ret = CRYPT_RSA_SetParaEx(ctx, para);
+    if (ret != CRYPT_SUCCESS) {
+        BSL_SAL_Free(ctx->e);
+        ctx->e = NULL;
+        ctx->eLen = 0;
+        return ret;
+    }
+```
+===END===

@@ -1,0 +1,62 @@
+[
+  {
+    "source": "codex",
+    "file": "src/sm2_keyexch.c",
+    "line": "64-69",
+    "severity": "high",
+    "title": "Agreement handle is cleared even when key generation fails",
+    "problem": "`hAgreementHandle` is nulled before checking `SDF_DL_GenerateKeyWithECC` return status. On failure, the context loses the live handle, which can break retries and leak device-side agreement state.",
+    "code": "ret = SDF_DL_GenerateKeyWithECC(selfCtx->hSessionHandle,\n        (unsigned char *)peerCtx->userId, peerCtx->userIdLen,\n        &sdfPeerPub, &sdfPeerTmpPub,\n        selfCtx->hAgreementHandle, &hKeyHandle);\nselfCtx->hAgreementHandle = NULL;  /* consumed */\nif (ret != SDR_OK) {\n    BSL_ERR_PUSH_ERROR(ret);\n    return BSL_INTERNAL_EXCEPTION;\n}",
+    "fix": "ret = SDF_DL_GenerateKeyWithECC(selfCtx->hSessionHandle,\n        (unsigned char *)peerCtx->userId, peerCtx->userIdLen,\n        &sdfPeerPub, &sdfPeerTmpPub,\n        selfCtx->hAgreementHandle, &hKeyHandle);\nif (ret != SDR_OK) {\n    BSL_ERR_PUSH_ERROR(ret);\n    return BSL_INTERNAL_EXCEPTION;\n}\nselfCtx->hAgreementHandle = NULL;  /* consume only on success */"
+  },
+  {
+    "source": "codex",
+    "file": "src/sm2_sign.c",
+    "line": "64-70",
+    "severity": "medium",
+    "title": "Uninitialized `ret` is read in error logging path",
+    "problem": "`ret` is declared but not initialized before being passed to `BSL_ERR_PUSH_ERROR`, which is undefined behavior in C and can push random error codes.",
+    "code": "int32_t ret;\n...\nif ((ctx == NULL) || (sign == NULL) || (signLen == NULL) || ((data == NULL) && (dataLen != 0))) {\n    BSL_ERR_PUSH_ERROR(ret);\n    return CRYPT_NULL_INPUT;\n}\nif (*signLen < CRYPT_SM2_GetSignLen_ex(ctx)) {\n    BSL_ERR_PUSH_ERROR(ret);\n    return CRYPT_SM2_BUFF_LEN_NOT_ENOUGH;\n}",
+    "fix": "int32_t ret = CRYPT_SUCCESS;\n...\nif ((ctx == NULL) || (sign == NULL) || (signLen == NULL) || ((data == NULL) && (dataLen != 0))) {\n    BSL_ERR_PUSH_ERROR(CRYPT_NULL_INPUT);\n    return CRYPT_NULL_INPUT;\n}\nif (*signLen < CRYPT_SM2_GetSignLen_ex(ctx)) {\n    BSL_ERR_PUSH_ERROR(CRYPT_SM2_BUFF_LEN_NOT_ENOUGH);\n    return CRYPT_SM2_BUFF_LEN_NOT_ENOUGH;\n}"
+  },
+  {
+    "source": "codex",
+    "file": "src/sm2_keyexch.c",
+    "line": "51-57",
+    "severity": "medium",
+    "title": "Uninitialized `ret` used when pushing precondition errors",
+    "problem": "The function pushes `ret` before `ret` is assigned, causing undefined behavior and non-deterministic error reporting.",
+    "code": "if (selfCtx->hAgreementHandle == NULL) {\n    BSL_ERR_PUSH_ERROR(ret);\n    return CRYPT_SM2_NO_PRVKEY;\n}\nif (peerCtx->PublicKey == NULL || peerCtx->tmpPubKey == NULL) {\n    BSL_ERR_PUSH_ERROR(ret);\n    return CRYPT_SM2_NO_PUBKEY;\n}",
+    "fix": "if (selfCtx->hAgreementHandle == NULL) {\n    BSL_ERR_PUSH_ERROR(CRYPT_SM2_NO_PRVKEY);\n    return CRYPT_SM2_NO_PRVKEY;\n}\nif (peerCtx->PublicKey == NULL || peerCtx->tmpPubKey == NULL) {\n    BSL_ERR_PUSH_ERROR(CRYPT_SM2_NO_PUBKEY);\n    return CRYPT_SM2_NO_PUBKEY;\n}"
+  },
+  {
+    "source": "codex",
+    "file": "src/sm2_keyexch.c",
+    "line": "101-114",
+    "severity": "medium",
+    "title": "Key handle leak on post-SDF allocation failure",
+    "problem": "The responder path creates `hKeyHandle` first, then allocates `pubKey/tmpKey`. If allocation fails, function returns without cleaning the generated key handle, leaking device resources.",
+    "code": "ret = SDF_DL_GenerateAgreementDataAndKeyWithECC(..., &hKeyHandle);\nif (ret != SDR_OK) {\n    BSL_ERR_PUSH_ERROR(ret);\n    return BSL_INTERNAL_EXCEPTION;\n}\n\n/* Save self public key if not set */\nif (selfCtx->PublicKey == NULL) {\n    EccPubKey *pubKey = BSL_SAL_Calloc(1u, sizeof(EccPubKey));\n    if (pubKey == NULL) {\n        return CRYPT_MEM_ALLOC_FAIL;\n    }\n    ...\n}\nEccPubKey *tmpKey = BSL_SAL_Calloc(1u, sizeof(EccPubKey));\nif (tmpKey == NULL) {\n    return CRYPT_MEM_ALLOC_FAIL;\n}",
+    "fix": "EccPubKey *pubKey = NULL;\nEccPubKey *tmpKey = BSL_SAL_Calloc(1u, sizeof(EccPubKey));\nif (tmpKey == NULL) {\n    return CRYPT_MEM_ALLOC_FAIL;\n}\nif (selfCtx->PublicKey == NULL) {\n    pubKey = BSL_SAL_Calloc(1u, sizeof(EccPubKey));\n    if (pubKey == NULL) {\n        BSL_SAL_Free(tmpKey);\n        return CRYPT_MEM_ALLOC_FAIL;\n    }\n}\n\nret = SDF_DL_GenerateAgreementDataAndKeyWithECC(selfCtx->hSessionHandle,\n        selfCtx->KeyIndex, 128,\n        selfCtx->userId, selfCtx->userIdLen,\n        (unsigned char *)peerCtx->userId, peerCtx->userIdLen,\n        &sdfSponsorPub, &sdfSponsorTmpPub, &sdfSelfPub, &sdfSelfTmpPub, &hKeyHandle);\nif (ret != SDR_OK) {\n    BSL_SAL_Free(pubKey);\n    BSL_SAL_Free(tmpKey);\n    BSL_ERR_PUSH_ERROR(ret);\n    return BSL_INTERNAL_EXCEPTION;\n}"
+  },
+  {
+    "source": "codex",
+    "file": "src/rsa_keymgmt.c",
+    "line": "1085-1089",
+    "severity": "medium",
+    "title": "Old key password is freed without zeroization",
+    "problem": "`SetKeyPass` frees previous password memory directly. This leaves prior secret bytes in heap memory and increases secret exposure risk.",
+    "code": "BSL_SAL_Free(*pass);\n*pass = NULL;\n*passLen = 0;",
+    "fix": "if (*pass != NULL && *passLen > 0) {\n    (void)memset(*pass, 0, *passLen);\n    BSL_SAL_Free(*pass);\n}\n*pass = NULL;\n*passLen = 0;"
+  },
+  {
+    "source": "codex",
+    "file": "src/sm2_keymgmt.c",
+    "line": "516-520",
+    "severity": "medium",
+    "title": "Old key password is freed without zeroization",
+    "problem": "`SetKeyPass` replaces password storage but does not scrub old password contents before free, leaving sensitive data recoverable from heap.",
+    "code": "BSL_SAL_Free(*pass);\n*pass = NULL;\n*passLen = 0;",
+    "fix": "if (*pass != NULL && *passLen > 0) {\n    (void)memset(*pass, 0, *passLen);\n    BSL_SAL_Free(*pass);\n}\n*pass = NULL;\n*passLen = 0;"
+  }
+]

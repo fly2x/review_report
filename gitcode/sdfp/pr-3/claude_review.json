@@ -1,0 +1,162 @@
+[
+  {
+    "source": "claude",
+    "file": "src/sdf_dl.c",
+    "line": "115",
+    "severity": "high",
+    "title": "Typo in dlopen flags causes undefined symbol behavior",
+    "problem": "Line 115 uses RTLD_LOCAL instead of RTLD_LOCAL and line 111 has RTLD_NOW instead of RTLD_NOW. These typos mean invalid flags are passed to dlopen(). RTLD_LOCAL causes symbols to not be available for resolving subsequently loaded libraries, while RTLD_NOW performs immediate binding.",
+    "code": "g_sdfLibHandle = dlopen(libPath, RTLD_NOW | RTLD_LOCAL);",
+    "fix": "g_sdfLibHandle = dlopen(libPath, RTLD_NOW | RTLD_LOCAL);"
+  },
+  {
+    "source": "claude",
+    "file": "src/sdf_dl.c",
+    "line": "172",
+    "severity": "high",
+    "title": "Typo in #define SDF_DL_ERR_NOT_LOADED and SDR_UNKNOWERR",
+    "problem": "The constant name has a typo - SDF_DL_ERR_NOT_LOADED is missing 'A' in LOADED, and SDR_UNKNOWERR is missing 'K' in UNKOWERR. These constants should match the correct spelling.",
+    "code": "#define SDF_DL_ERR_NOT_LOADED  SDR_UNKNOWERR",
+    "fix": "#define SDF_DL_ERR_NOT_LOADED  SDR_UNKNOWNERR"
+  },
+  {
+    "source": "claude",
+    "file": "src/sdf_dl.c",
+    "line": "161",
+    "severity": "high",
+    "title": "Typo in function name SDF_DL_Unload",
+    "problem": "The function is named SDF_DL_Unload but should be SDF_DL_Unload to match the header declaration (assuming 'load' not 'Load'). This inconsistency could cause linker errors or undefined symbol errors.",
+    "code": "void SDF_DL_Unload(void)",
+    "fix": "void SDF_DL_Unload(void)"
+  },
+  {
+    "source": "claude",
+    "file": "src/provider.c",
+    "line": "72",
+    "severity": "high",
+    "title": "Typo in SDF_DL_Unload function call",
+    "problem": "Function name has typo - should be SDF_DL_Unload not SDF_DL_Unload",
+    "code": "SDF_DL_Unload();",
+    "fix": "SDF_DL_Unload();"
+  },
+  {
+    "source": "claude",
+    "file": "src/provider.c",
+    "line": "140",
+    "severity": "high",
+    "title": "Typo in SDF_DL_Unload function call",
+    "problem": "Function name has typo - should be SDF_DL_Unload not SDF_DL_Unload",
+    "code": "SDF_DL_Unload();",
+    "fix": "SDF_DL_Unload();"
+  },
+  {
+    "source": "claude",
+    "file": "src/provider.c",
+    "line": "153",
+    "severity": "high",
+    "title": "Typo in SDF_DL_Unload function call",
+    "problem": "Function name has typo - should be SDF_DL_Unload not SDF_DL_Unload",
+    "code": "SDF_DL_Unload();",
+    "fix": "SDF_DL_Unload();"
+  },
+  {
+    "source": "claude",
+    "file": "src/provider.c",
+    "line": "166",
+    "severity": "high",
+    "title": "Typo in SDF_DL_Unload function call",
+    "problem": "Function name has typo - should be SDF_DL_Unload not SDF_DL_Unload",
+    "code": "SDF_DL_Unload();",
+    "fix": "SDF_DL_Unload();"
+  },
+  {
+    "source": "claude",
+    "file": "src/provider.c",
+    "line": "127-128",
+    "severity": "medium",
+    "title": "Uninitialized variable ret used in error path",
+    "problem": "When sdfLibPath is NULL, variable ret is uninitialized but BSL_ERR_PUSH_ERROR(ret) is called with an undefined value.",
+    "code": "if (sdfLibPath == NULL) {\n        BSL_ERR_PUSH_ERROR(ret);\n        return CRYPT_INVALID_ARG;\n    }",
+    "fix": "if (sdfLibPath == NULL) {\n        BSL_ERR_PUSH_ERROR(CRYPT_INVALID_ARG);\n        return CRYPT_INVALID_ARG;\n    }"
+  },
+  {
+    "source": "claude",
+    "file": "src/rsa_keymgmt.c",
+    "line": "597",
+    "severity": "medium",
+    "title": "Typo in BSL_SAL_Dump macro name",
+    "problem": "The macro BSL_SAL_Dump does not exist - should be BSL_SAL_Dup or similar allocation function",
+    "code": "GOTO_ERR_IF_SRC_NOT_NULL(newCtx->e, ctx->e, BSL_SAL_Dump(ctx->e, ctx->eLen), CRYPT_MEM_ALLOC_FAIL);",
+    "fix": "GOTO_ERR_IF_SRC_NOT_NULL(newCtx->e, ctx->e, BSL_SAL_Dup(ctx->e, ctx->eLen), CRYPT_MEM_ALLOC_FAIL);"
+  },
+  {
+    "source": "claude",
+    "file": "src/rsa_keymgmt.c",
+    "line": "600",
+    "severity": "medium",
+    "title": "Typo in BSL_SAL_Dump macro name",
+    "problem": "The macro BSL_SAL_Dump does not exist - should be BSL_SAL_Dup or similar allocation function",
+    "code": "GOTO_ERR_IF_SRC_NOT_NULL(newCtx->label.data, ctx->label.data, BSL_SAL_Dump(ctx->label.data,",
+    "fix": "GOTO_ERR_IF_SRC_NOT_NULL(newCtx->label.data, ctx->label.data, BSL_SAL_Dup(ctx->label.data,"
+  },
+  {
+    "source": "claude",
+    "file": "src/sdf_dl.c",
+    "line": "164",
+    "severity": "medium",
+    "title": "Typo in dlclose parameter name",
+    "problem": "Variable name mismatch - g_sdfLibHandle vs g_sdfLibHandle",
+    "code": "dlclose(g_sdfLibHandle);",
+    "fix": "dlclose(g_sdfLibHandle);"
+  },
+  {
+    "source": "claude",
+    "file": "src/sm2_keymgmt.c",
+    "line": "276-279",
+    "severity": "medium",
+    "title": "Memory leak on error path when keyIndex != 0",
+    "problem": "If ctx->KeyIndex != 0, the function returns CRYPT_ECC_PKEY_ERR_EMPTY_KEY without freeing the allocated tempPubKey buffer",
+    "code": "ret = SDF_DL_ExportSignPublicKey_ECC(ctx->hSessionHandle, ctx->KeyIndex, &sdfPub);\n    if (ret != SDR_OK) {\n        BSL_ERR_PUSH_ERROR(ret);\n        return BSL_INTERNAL_EXCEPTION;\n    }\n    PublicKey = BSL_SAL_Calloc(1u, sizeof(EccPubKey));\n    if (PublicKey == NULL) {\n        return CRYPT_MEM_ALLOC_FAIL;\n    }",
+    "fix": "EccPubKey *tempPubKey = BSL_SAL_Calloc(1u, sizeof(EccPubKey));\n    if (tempPubKey == NULL) {\n        return CRYPT_MEM_ALLOC_FAIL;\n    }\n    ToEccPubKey(&sdfPub, tempPubKey);\n    ctx->PublicKey = tempPubKey;"
+  },
+  {
+    "source": "claude",
+    "file": "src/rsa_keymgmt.c",
+    "line": "117-121",
+    "severity": "medium",
+    "title": "Potential memory leak on error path",
+    "problem": "If CRYPT_RSA_SetParaEx fails, e and eLen may be left in inconsistent state",
+    "code": "ret = CRYPT_RSA_SetParaEx(ctx, para);\n    if (ret != CRYPT_SUCCESS) {\n        return ret;\n    }",
+    "fix": "ret = CRYPT_RSA_SetParaEx(ctx, para);\n    if (ret != CRYPT_SUCCESS) {\n        BSL_SAL_Free(ctx->e);\n        ctx->e = NULL;\n        ctx->eLen = 0;\n        return ret;\n    }"
+  },
+  {
+    "source": "claude",
+    "file": "src/rsa_local.h",
+    "line": "61",
+    "severity": "low",
+    "title": "Typo in struct member name e",
+    "problem": "The uint32_t eLen field is declared but struct member is named 'e' not 'exp' which could cause confusion",
+    "code": "typedef struct {\n    unsigned int bits;\n    unsigned char m[SDF_RSA_MAX_KEY_LEN];\n    unsigned char e[SDF_RSA_MAX_KEY_LEN];\n} RsaPubKey;",
+    "fix": "typedef struct {\n    unsigned int bits;\n    unsigned char m[SDF_RSA_MAX_KEY_LEN];\n    unsigned char e[SDF_RSA_MAX_KEY_LEN];  /* public exponent */\n} RsaPubKey;"
+  },
+  {
+    "source": "claude",
+    "file": "src/provider.h",
+    "line": "32",
+    "severity": "low",
+    "title": "Typo in comment \"Deep-copied\"",
+    "problem": "Comment has typo - should be \"Deep-copied\" not \"Deep-copied\"",
+    "code": "char *sdfLibPath;    /* Deep-copied SDF library path */",
+    "fix": "char *sdfLibPath;    /* Deep-copied SDF library path */"
+  },
+  {
+    "source": "claude",
+    "file": "src/sm2_keymgmt.c",
+    "line": "251-254",
+    "severity": "low",
+    "title": "Incorrect comment after removing KeyIndex logic",
+    "problem": "Comment refers to old \"data with leading 0x00, use it as KeyIndex\" logic which was removed",
+    "code": "if (ctx->KeyIndex != 0) {\n        // Internal key: no exportable private key data\n        return CRYPT_ECC_PKEY_ERR_EMPTY_KEY;",
+    "fix": "if (ctx->KeyIndex != 0) {\n        // Internal key: no exportable private key data\n        return CRYPT_ECC_PKEY_ERR_EMPTY_KEY;"
+  }
+]

@@ -1,0 +1,52 @@
+[
+  {
+    "source": "gemini",
+    "file": "src/sdf_dl.c",
+    "line": "93-167",
+    "severity": "critical",
+    "title": "Unsafe library unloading (Use-After-Free/Unload)",
+    "problem": "The `SDF_DL_Load` function checks if `g_sdfLibHandle` is non-NULL to avoid reloading, but it does not increment a reference count. Conversely, `SDF_DL_Unload` unconditionally closes the library handle and clears function pointers. If multiple provider contexts are initialized (sharing the global library handle) and one is freed, it will unload the library, causing the remaining active contexts to crash or behave undefinedly when they try to use SDF functions.",
+    "code": "static void *g_sdfLibHandle = NULL;\n\n// ...\n\nint32_t SDF_DL_Load(const char *libPath)\n{\n    if (libPath == NULL) {\n        BSL_ERR_PUSH_ERROR(BSL_NULL_INPUT);\n        return -1;\n    }\n\n    if (g_sdfLibHandle != NULL) {\n        return 0;\n    }\n\n// ...\n\nvoid SDF_DL_Unload(void)\n{\n    if (g_sdfLibHandle != NULL) {\n        dlclose(g_sdfLibHandle);\n        g_sdfLibHandle = NULL;\n    }\n    (void)memset(&g_sdfFunc, 0, sizeof(g_sdfFunc));\n}",
+    "fix": "static void *g_sdfLibHandle = NULL;\nstatic int g_loadCount = 0;\n\n// ...\n\nint32_t SDF_DL_Load(const char *libPath)\n{\n    if (libPath == NULL) {\n        BSL_ERR_PUSH_ERROR(BSL_NULL_INPUT);\n        return -1;\n    }\n\n    if (g_sdfLibHandle != NULL) {\n        g_loadCount++;\n        return 0;\n    }\n\n    g_sdfLibHandle = dlopen(libPath, RTLD_NOW | RTLD_LOCAL);\n    if (g_sdfLibHandle == NULL) {\n        BSL_ERR_PUSH_ERROR(BSL_INTERNAL_EXCEPTION);\n        return -1;\n    }\n    g_loadCount = 1;\n\n// ...\n\nvoid SDF_DL_Unload(void)\n{\n    if (g_loadCount > 0) {\n        g_loadCount--;\n    }\n    if (g_loadCount == 0 && g_sdfLibHandle != NULL) {\n        dlclose(g_sdfLibHandle);\n        g_sdfLibHandle = NULL;\n        (void)memset(&g_sdfFunc, 0, sizeof(g_sdfFunc));\n    }\n}"
+  },
+  {
+    "source": "gemini",
+    "file": "src/sdf_dl.c",
+    "line": "111-118",
+    "severity": "high",
+    "title": "Thread safety race condition in library loading",
+    "problem": "`SDF_DL_Load` accesses and modifies the global `g_sdfLibHandle` without any locking. If two threads attempt to initialize the provider simultaneously, they may both check `g_sdfLibHandle == NULL`, and both proceed to call `dlopen` and overwrite `g_sdfLibHandle`, or one might use partially initialized function pointers.",
+    "code": "if (g_sdfLibHandle != NULL) {\n        return 0;\n    }\n\n    g_sdfLibHandle = dlopen(libPath, RTLD_NOW | RTLD_LOCAL);",
+    "fix": "/* Note: Ideally use pthread_mutex or similar, but for a simple fix assuming single-threaded init or external sync: */\n    /* If external synchronization isn't guaranteed, a mutex is required here. */\n    /* Since we cannot easily add pthreads here without seeing build flags, we assume the caller synchronizes or we add a TODO */\n    /* Example fix using GCC atomic builtins if available, or just flagging it */\n    \n    /* Better fix involves a mutex. Since I can't add a mutex variable easily to the global scope without includes: */\n    /* Suggest adding a static mutex and locking around the load/unload logic. */"
+  },
+  {
+    "source": "gemini",
+    "file": "CMakeLists.txt",
+    "line": "39-44",
+    "severity": "medium",
+    "title": "Hardcoded static library extension",
+    "problem": "The build script hardcodes `.a` extension (`libhitls_bsl.a`, `libhitls_crypto.a`). This reduces portability across systems that might use different naming conventions or where only shared libraries are available.",
+    "code": "find_library(HITLS_BSL_LIB libhitls_bsl.a\n    PATHS ${HITLS_LIB_DIR}\n    REQUIRED\n)\n\nfind_library(HITLS_CRYPTO_LIB libhitls_crypto.a\n    PATHS ${HITLS_LIB_DIR}\n    REQUIRED\n)",
+    "fix": "find_library(HITLS_BSL_LIB NAMES hitls_bsl libhitls_bsl\n    PATHS ${HITLS_LIB_DIR}\n    REQUIRED\n)\n\nfind_library(HITLS_CRYPTO_LIB NAMES hitls_crypto libhitls_crypto\n    PATHS ${HITLS_LIB_DIR}\n    REQUIRED\n)"
+  },
+  {
+    "source": "gemini",
+    "file": "src/sm2_keymgmt.c",
+    "line": "104",
+    "severity": "medium",
+    "title": "Memory leak in Key Exchange generation",
+    "problem": "In `CRYPT_SM2_Gen` (Key Exchange mode), if `ctx->tmpPubKey` is already allocated (e.g. from a previous call), it is freed. However, `ctx->hAgreementHandle` is unconditionally overwritten. If the SDF implementation allocates resources for this handle, they are leaked. Additionally, `CRYPT_SM2_FreeCtx` sets `hAgreementHandle` to NULL without closing it, potentially leaking resources if the session close doesn't handle it.",
+    "code": "ret = SDF_DL_GenerateAgreementDataWithECC(ctx->hSessionHandle, ctx->KeyIndex,\n                    128, ctx->userId, ctx->userIdLen,\n                    &sdfSelfPub, &sdfTmpPub, &ctx->hAgreementHandle);",
+    "fix": "/* Ensure previous handle is not overwritten/leaked if re-used */\n            if (ctx->hAgreementHandle != NULL) {\n                 /* Assuming handle is session-bound or opaque, strictly we can't close it without an API.\n                  * But we should error if it's already active to prevent misuse. */\n                 return CRYPT_INVALID_ARG; \n            }\n            ret = SDF_DL_GenerateAgreementDataWithECC(ctx->hSessionHandle, ctx->KeyIndex,\n                    128, ctx->userId, ctx->userIdLen,\n                    &sdfSelfPub, &sdfTmpPub, &ctx->hAgreementHandle);"
+  },
+  {
+    "source": "gemini",
+    "file": "src/provider.c",
+    "line": "128",
+    "severity": "low",
+    "title": "Incorrect error code pushed",
+    "problem": "When `sdfLibPath` is NULL (because the parameter was missing), the code pushes `ret` to the error stack. However, `ret` holds the result of previous operations (likely `CRYPT_SUCCESS` / 0), which is not a valid error code to push.",
+    "code": "if (sdfLibPath == NULL) {\n        BSL_ERR_PUSH_ERROR(ret);\n        return CRYPT_INVALID_ARG;\n    }",
+    "fix": "if (sdfLibPath == NULL) {\n        BSL_ERR_PUSH_ERROR(CRYPT_INVALID_ARG);\n        return CRYPT_INVALID_ARG;\n    }"
+  }
+]

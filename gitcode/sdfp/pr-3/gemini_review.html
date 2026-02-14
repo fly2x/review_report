@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Code Review: openHiTLS/sdfp#3 - GEMINI</title>
+    <style>
+        :root { --critical: #dc2626; --high: #ea580c; --medium: #ca8a04; --low: #65a30d; }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: system-ui, sans-serif; background: #f8fafc; color: #1e293b; padding: 2rem; line-height: 1.6; }
+        .container { max-width: 900px; margin: 0 auto; }
+        h1 { font-size: 1.5rem; margin-bottom: 0.5rem; }
+        .subtitle { color: #64748b; margin-bottom: 2rem; }
+        .section { margin-bottom: 2rem; }
+        .section-title { font-size: 1.1rem; font-weight: 600; padding: 0.5rem 1rem; border-radius: 0.5rem 0.5rem 0 0; color: white; }
+        .section-title.critical { background: var(--critical); }
+        .section-title.high { background: var(--high); }
+        .section-title.medium { background: var(--medium); }
+        .section-title.low { background: var(--low); }
+        .issue { background: white; border: 1px solid #e2e8f0; border-top: none; padding: 1rem; }
+        .issue:last-child { border-radius: 0 0 0.5rem 0.5rem; }
+        .issue-title { font-weight: 600; margin-bottom: 0.25rem; }
+        .issue-location { font-family: monospace; font-size: 0.875rem; color: #64748b; margin-bottom: 0.75rem; }
+        .issue-source { font-size: 0.75rem; color: #94a3b8; margin-top: 0.5rem; }
+        pre { background: #1e293b; color: #e2e8f0; padding: 0.75rem; border-radius: 0.375rem; overflow-x: auto; font-size: 0.875rem; margin: 0.5rem 0; }
+        .problem { margin: 0.75rem 0; }
+        .fix-label { font-weight: 600; margin-top: 0.75rem; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Code Review: openHiTLS/sdfp#3 - GEMINI</h1>
+        <div class="subtitle"></div>
+<div class="section"><div class="section-title critical">Critical</div>
+<div class="issue">
+                <div class="issue-title">Unsafe library unloading (Use-After-Free/Unload)</div>
+                <div class="issue-location">src/sdf_dl.c:93-167</div>
+                <pre>static void *g_sdfLibHandle = NULL;
+
+// ...
+
+int32_t SDF_DL_Load(const char *libPath)
+{
+    if (libPath == NULL) {
+        BSL_ERR_PUSH_ERROR(BSL_NULL_INPUT);
+        return -1;
+    }
+
+    if (g_sdfLibHandle != NULL) {
+        return 0;
+    }
+
+// ...
+
+void SDF_DL_Unload(void)
+{
+    if (g_sdfLibHandle != NULL) {
+        dlclose(g_sdfLibHandle);
+        g_sdfLibHandle = NULL;
+    }
+    (void)memset(&amp;g_sdfFunc, 0, sizeof(g_sdfFunc));
+}</pre>
+                <div class="problem"><strong>Issue:</strong> The `SDF_DL_Load` function checks if `g_sdfLibHandle` is non-NULL to avoid reloading, but it does not increment a reference count. Conversely, `SDF_DL_Unload` unconditionally closes the library handle and clears function pointers. If multiple provider contexts are initialized (sharing the global library handle) and one is freed, it will unload the library, causing the remaining active contexts to crash or behave undefinedly when they try to use SDF functions.</div>
+                <div class="fix-label">Fix:</div><pre>static void *g_sdfLibHandle = NULL;
+static int g_loadCount = 0;
+
+// ...
+
+int32_t SDF_DL_Load(const char *libPath)
+{
+    if (libPath == NULL) {
+        BSL_ERR_PUSH_ERROR(BSL_NULL_INPUT);
+        return -1;
+    }
+
+    if (g_sdfLibHandle != NULL) {
+        g_loadCount++;
+        return 0;
+    }
+
+    g_sdfLibHandle = dlopen(libPath, RTLD_NOW | RTLD_LOCAL);
+    if (g_sdfLibHandle == NULL) {
+        BSL_ERR_PUSH_ERROR(BSL_INTERNAL_EXCEPTION);
+        return -1;
+    }
+    g_loadCount = 1;
+
+// ...
+
+void SDF_DL_Unload(void)
+{
+    if (g_loadCount &gt; 0) {
+        g_loadCount--;
+    }
+    if (g_loadCount == 0 &amp;&amp; g_sdfLibHandle != NULL) {
+        dlclose(g_sdfLibHandle);
+        g_sdfLibHandle = NULL;
+        (void)memset(&amp;g_sdfFunc, 0, sizeof(g_sdfFunc));
+    }
+}</pre>
+                <div class="issue-source">Reviewer: gemini</div>
+            </div>
+</div>
+<div class="section"><div class="section-title high">High</div>
+<div class="issue">
+                <div class="issue-title">Thread safety race condition in library loading</div>
+                <div class="issue-location">src/sdf_dl.c:111-118</div>
+                <pre>if (g_sdfLibHandle != NULL) {
+        return 0;
+    }
+
+    g_sdfLibHandle = dlopen(libPath, RTLD_NOW | RTLD_LOCAL);</pre>
+                <div class="problem"><strong>Issue:</strong> `SDF_DL_Load` accesses and modifies the global `g_sdfLibHandle` without any locking. If two threads attempt to initialize the provider simultaneously, they may both check `g_sdfLibHandle == NULL`, and both proceed to call `dlopen` and overwrite `g_sdfLibHandle`, or one might use partially initialized function pointers.</div>
+                <div class="fix-label">Fix:</div><pre>/* Note: Ideally use pthread_mutex or similar, but for a simple fix assuming single-threaded init or external sync: */
+    /* If external synchronization isn't guaranteed, a mutex is required here. */
+    /* Since we cannot easily add pthreads here without seeing build flags, we assume the caller synchronizes or we add a TODO */
+    /* Example fix using GCC atomic builtins if available, or just flagging it */
+    
+    /* Better fix involves a mutex. Since I can't add a mutex variable easily to the global scope without includes: */
+    /* Suggest adding a static mutex and locking around the load/unload logic. */</pre>
+                <div class="issue-source">Reviewer: gemini</div>
+            </div>
+</div>
+<div class="section"><div class="section-title medium">Medium</div>
+<div class="issue">
+                <div class="issue-title">Hardcoded static library extension</div>
+                <div class="issue-location">CMakeLists.txt:39-44</div>
+                <pre>find_library(HITLS_BSL_LIB libhitls_bsl.a
+    PATHS ${HITLS_LIB_DIR}
+    REQUIRED
+)
+
+find_library(HITLS_CRYPTO_LIB libhitls_crypto.a
+    PATHS ${HITLS_LIB_DIR}
+    REQUIRED
+)</pre>
+                <div class="problem"><strong>Issue:</strong> The build script hardcodes `.a` extension (`libhitls_bsl.a`, `libhitls_crypto.a`). This reduces portability across systems that might use different naming conventions or where only shared libraries are available.</div>
+                <div class="fix-label">Fix:</div><pre>find_library(HITLS_BSL_LIB NAMES hitls_bsl libhitls_bsl
+    PATHS ${HITLS_LIB_DIR}
+    REQUIRED
+)
+
+find_library(HITLS_CRYPTO_LIB NAMES hitls_crypto libhitls_crypto
+    PATHS ${HITLS_LIB_DIR}
+    REQUIRED
+)</pre>
+                <div class="issue-source">Reviewer: gemini</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">Memory leak in Key Exchange generation</div>
+                <div class="issue-location">src/sm2_keymgmt.c:104</div>
+                <pre>ret = SDF_DL_GenerateAgreementDataWithECC(ctx-&gt;hSessionHandle, ctx-&gt;KeyIndex,
+                    128, ctx-&gt;userId, ctx-&gt;userIdLen,
+                    &amp;sdfSelfPub, &amp;sdfTmpPub, &amp;ctx-&gt;hAgreementHandle);</pre>
+                <div class="problem"><strong>Issue:</strong> In `CRYPT_SM2_Gen` (Key Exchange mode), if `ctx->tmpPubKey` is already allocated (e.g. from a previous call), it is freed. However, `ctx->hAgreementHandle` is unconditionally overwritten. If the SDF implementation allocates resources for this handle, they are leaked. Additionally, `CRYPT_SM2_FreeCtx` sets `hAgreementHandle` to NULL without closing it, potentially leaking resources if the session close doesn't handle it.</div>
+                <div class="fix-label">Fix:</div><pre>/* Ensure previous handle is not overwritten/leaked if re-used */
+            if (ctx-&gt;hAgreementHandle != NULL) {
+                 /* Assuming handle is session-bound or opaque, strictly we can't close it without an API.
+                  * But we should error if it's already active to prevent misuse. */
+                 return CRYPT_INVALID_ARG; 
+            }
+            ret = SDF_DL_GenerateAgreementDataWithECC(ctx-&gt;hSessionHandle, ctx-&gt;KeyIndex,
+                    128, ctx-&gt;userId, ctx-&gt;userIdLen,
+                    &amp;sdfSelfPub, &amp;sdfTmpPub, &amp;ctx-&gt;hAgreementHandle);</pre>
+                <div class="issue-source">Reviewer: gemini</div>
+            </div>
+</div>
+<div class="section"><div class="section-title low">Low</div>
+<div class="issue">
+                <div class="issue-title">Incorrect error code pushed</div>
+                <div class="issue-location">src/provider.c:128</div>
+                <pre>if (sdfLibPath == NULL) {
+        BSL_ERR_PUSH_ERROR(ret);
+        return CRYPT_INVALID_ARG;
+    }</pre>
+                <div class="problem"><strong>Issue:</strong> When `sdfLibPath` is NULL (because the parameter was missing), the code pushes `ret` to the error stack. However, `ret` holds the result of previous operations (likely `CRYPT_SUCCESS` / 0), which is not a valid error code to push.</div>
+                <div class="fix-label">Fix:</div><pre>if (sdfLibPath == NULL) {
+        BSL_ERR_PUSH_ERROR(CRYPT_INVALID_ARG);
+        return CRYPT_INVALID_ARG;
+    }</pre>
+                <div class="issue-source">Reviewer: gemini</div>
+            </div>
+</div>
+</div></body></html>
