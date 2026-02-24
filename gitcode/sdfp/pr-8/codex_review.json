@@ -1,0 +1,62 @@
+[
+  {
+    "source": "codex",
+    "file": "src/sm4_cipher.c",
+    "line": "128-156",
+    "severity": "high",
+    "title": "KEK handle reuse path is broken by unconditional key destruction",
+    "problem": "`CRYPT_SM4_InitCtx` validates that a KEK-generated `hKeyHandle` exists, then immediately destroys it before init. When caller uses `GEN_DEK_WITH_KEK` and then `CipherInit(..., NULL, 0, ...)`, no new key is imported and `EncryptInit/DecryptInit` gets a NULL key handle.",
+    "code": "if (ctx->hKeyHandle != NULL) {\n    (void)SDF_DL_DestroyKey(ctx->hSessionHandle, ctx->hKeyHandle);\n    ctx->hKeyHandle = NULL;\n}\n\nint ret = SDR_OK;\nif (ctx->keySource == KEY_SRC_RAW) {\n    ret = SDF_DL_ImportKey(ctx->hSessionHandle, (unsigned char *)key, keyLen, &ctx->hKeyHandle);\n    ...\n} else if (key != NULL && keyLen > 0) {\n    ...\n    ret = SDF_DL_ImportKeyWithKEK(ctx->hSessionHandle, SGD_SM4_ECB, ctx->kekIndex,\n        (unsigned char *)key, keyLen, &ctx->hKeyHandle);\n}",
+    "fix": "bool reuseExistingKekHandle = (ctx->keySource == KEY_SRC_KEK && key == NULL && keyLen == 0);\n\nif (!reuseExistingKekHandle && ctx->hKeyHandle != NULL) {\n    (void)SDF_DL_DestroyKey(ctx->hSessionHandle, ctx->hKeyHandle);\n    ctx->hKeyHandle = NULL;\n}\n\nint ret = SDR_OK;\nif (ctx->keySource == KEY_SRC_RAW) {\n    ret = SDF_DL_ImportKey(ctx->hSessionHandle, (unsigned char *)key, keyLen, &ctx->hKeyHandle);\n    if (ret != SDR_OK) { BSL_ERR_PUSH_ERROR(ret); return SDFP_ERR_ENCRYPT; }\n} else if (!reuseExistingKekHandle) {\n    ret = SDF_DL_ImportKeyWithKEK(ctx->hSessionHandle, SGD_SM4_ECB, ctx->kekIndex,\n        (unsigned char *)key, keyLen, &ctx->hKeyHandle);\n    if (ret != SDR_OK) { BSL_ERR_PUSH_ERROR(ret); return SDFP_ERR_ENCRYPT; }\n}"
+  },
+  {
+    "source": "codex",
+    "file": "src/sm4_gcm.c",
+    "line": "135-148",
+    "severity": "high",
+    "title": "GCM KEK-handle init deletes the generated key before use",
+    "problem": "`GCM_InitCtx` has the same handle lifecycle bug as CBC/ECB: it destroys `hKeyHandle` unconditionally, so `GEN_DEK_WITH_KEK` followed by `InitCtx(..., NULL, 0, ...)` cannot work.",
+    "code": "/* Destroy old key handle if re-initialising */\nif (ctx->hKeyHandle != NULL) {\n    (void)SDF_DL_DestroyKey(ctx->hSessionHandle, ctx->hKeyHandle);\n    ctx->hKeyHandle = NULL;\n}\n\nint ret = SDR_OK;\nif (ctx->keySource == GCM_KEY_SRC_RAW) {\n    ret = SDF_DL_ImportKey(ctx->hSessionHandle, (unsigned char *)key, keyLen, &ctx->hKeyHandle);\n} else if (key != NULL && keyLen > 0) {\n    ret = SDF_DL_ImportKeyWithKEK(ctx->hSessionHandle, SGD_SM4_GCM, ctx->kekIndex,\n        (unsigned char *)key, keyLen, &ctx->hKeyHandle);\n}",
+    "fix": "bool reuseExistingKekHandle = (ctx->keySource == GCM_KEY_SRC_KEK && key == NULL && keyLen == 0);\n\nif (!reuseExistingKekHandle && ctx->hKeyHandle != NULL) {\n    (void)SDF_DL_DestroyKey(ctx->hSessionHandle, ctx->hKeyHandle);\n    ctx->hKeyHandle = NULL;\n}\n\nint ret = SDR_OK;\nif (ctx->keySource == GCM_KEY_SRC_RAW) {\n    ret = SDF_DL_ImportKey(ctx->hSessionHandle, (unsigned char *)key, keyLen, &ctx->hKeyHandle);\n} else if (!reuseExistingKekHandle) {\n    ret = SDF_DL_ImportKeyWithKEK(ctx->hSessionHandle, SGD_SM4_ECB, ctx->kekIndex,\n        (unsigned char *)key, keyLen, &ctx->hKeyHandle);\n}"
+  },
+  {
+    "source": "codex",
+    "file": "demo/sm4_cbc.c",
+    "line": "131-136",
+    "severity": "high",
+    "title": "Demo uses different KEK ctrl IDs than provider implementation",
+    "problem": "The demo calls `CRYPT_CTRL_SM4_SET_KEK_ID` / `CRYPT_CTRL_SM4_GEN_DEK_WITH_KEK`, but the provider exports `CRYPT_CTRL_SET_KEK_ID` / `CRYPT_CTRL_GEN_DEK_WITH_KEK` in `provider.h`. This mismatch can fail to compile or call wrong ctrl IDs depending on headers.",
+    "code": "if (CRYPT_EAL_CipherCtrl(ctx, CRYPT_CTRL_SM4_SET_KEK_ID, &kekIndex, sizeof(kekIndex)) != CRYPT_SUCCESS) {\n    ...\n}\nint32_t ret = CRYPT_EAL_CipherCtrl(ctx, CRYPT_CTRL_SM4_GEN_DEK_WITH_KEK, wrapped, wrappedLen);",
+    "fix": "if (CRYPT_EAL_CipherCtrl(ctx, CRYPT_CTRL_SET_KEK_ID, &kekIndex, sizeof(kekIndex)) != CRYPT_SUCCESS) {\n    ...\n}\nint32_t ret = CRYPT_EAL_CipherCtrl(ctx, CRYPT_CTRL_GEN_DEK_WITH_KEK, wrapped, wrappedLen);"
+  },
+  {
+    "source": "codex",
+    "file": "src/sdf_dl.c",
+    "line": "202-209",
+    "severity": "high",
+    "title": "Provider load now hard-fails if any SM4/GCM symbol is missing",
+    "problem": "New SM4/AEAD symbols are loaded with `LOAD_SYM` (required). If a device SDK lacks one of these APIs, `SDF_DL_Load` fails and the whole provider cannot load, regressing existing SM2/RSA functionality.",
+    "code": "LOAD_SYM(genKeyWithKek,           SDF_GenerateKeyWithKEK);\nLOAD_SYM(importKeyWithKek,        SDF_ImportKeyWithKEK);\nLOAD_SYM(authEncInit,             SDF_AuthEncInit);\nLOAD_SYM(authEncUpdate,           SDF_AuthEncUpdate);\nLOAD_SYM(authEncFinal,            SDF_AuthEncFinal);\nLOAD_SYM(authDecInit,             SDF_AuthDecInit);\nLOAD_SYM(authDecUpdate,           SDF_AuthDecUpdate);\nLOAD_SYM(authDecFinal,            SDF_AuthDecFinal);",
+    "fix": "#define LOAD_SYM_OPTIONAL(field, sdfName) \\\n    do { g_sdfFunc.field = (typeof(g_sdfFunc.field))dlsym(g_sdfLibHandle, #sdfName); } while (0)\n\n/* Keep provider load compatible when optional SM4/GCM APIs are absent */\nLOAD_SYM_OPTIONAL(genKeyWithKek,    SDF_GenerateKeyWithKEK);\nLOAD_SYM_OPTIONAL(importKeyWithKek, SDF_ImportKeyWithKEK);\nLOAD_SYM_OPTIONAL(authEncInit,      SDF_AuthEncInit);\nLOAD_SYM_OPTIONAL(authEncUpdate,    SDF_AuthEncUpdate);\nLOAD_SYM_OPTIONAL(authEncFinal,     SDF_AuthEncFinal);\nLOAD_SYM_OPTIONAL(authDecInit,      SDF_AuthDecInit);\nLOAD_SYM_OPTIONAL(authDecUpdate,    SDF_AuthDecUpdate);\nLOAD_SYM_OPTIONAL(authDecFinal,     SDF_AuthDecFinal);"
+  },
+  {
+    "source": "codex",
+    "file": "src/sm4_gcm.c",
+    "line": "215-218",
+    "severity": "medium",
+    "title": "`CRYPT_CTRL_SET_TAGLEN` is ignored during encryption final",
+    "problem": "The ctrl handler stores requested tag length in `ctx->tagLen`, but `GCM_Final` always passes `SM4_GCM_TAG_MAX` to `SDF_DL_AuthEncFinal`, so caller-requested tag length is not honored.",
+    "code": "unsigned int tagOutLen = SM4_GCM_TAG_MAX;\nret = SDF_DL_AuthEncFinal(ctx->hSessionHandle, out, &tmpLen, ctx->tag, &tagOutLen);\nif (ret == SDR_OK) {\n    ctx->tagLen = tagOutLen;\n}",
+    "fix": "unsigned int tagOutLen = ctx->tagLen;\nret = SDF_DL_AuthEncFinal(ctx->hSessionHandle, out, &tmpLen, ctx->tag, &tagOutLen);\nif (ret == SDR_OK) {\n    if (tagOutLen == 0 || tagOutLen > SM4_GCM_TAG_MAX) {\n        return CRYPT_INVALID_ARG;\n    }\n    ctx->tagLen = tagOutLen;\n}"
+  },
+  {
+    "source": "codex",
+    "file": "demo/sm4_gcm.c",
+    "line": "90-93",
+    "severity": "medium",
+    "title": "Demo can return success even when encryption/decryption flow fails",
+    "problem": "Several failure branches jump to cleanup without setting `ret`, and plaintext mismatch only prints `[FAIL]` but keeps `ret==0`; final `return ret` can report success to CTest even on failure.",
+    "code": "if (encCtx == NULL) {\n    fprintf(stderr, \"CipherNewCtx (enc) failed\\n\");\n    goto cleanup;\n}\n...\nif (decCtx == NULL) {\n    fprintf(stderr, \"CipherNewCtx (dec) failed\\n\");\n    goto cleanup;\n}\n...\nif (decLen == ptLen && memcmp(decrypted, plaintext, ptLen) == 0) {\n    printf(\"\\n[PASS] Plaintext matches!\\n\");\n} else {\n    printf(\"\\n[FAIL] Plaintext mismatch!\\n\");\n}\n...\nreturn ret;",
+    "fix": "if (encCtx == NULL) {\n    fprintf(stderr, \"CipherNewCtx (enc) failed\\n\");\n    ret = 1;\n    goto cleanup;\n}\n...\nif (decCtx == NULL) {\n    fprintf(stderr, \"CipherNewCtx (dec) failed\\n\");\n    ret = 1;\n    goto cleanup;\n}\n...\nif (decLen == ptLen && memcmp(decrypted, plaintext, ptLen) == 0) {\n    printf(\"\\n[PASS] Plaintext matches!\\n\");\n} else {\n    printf(\"\\n[FAIL] Plaintext mismatch!\\n\");\n    ret = 1;\n}\n...\nreturn (ret == 0) ? 0 : 1;"
+  }
+]

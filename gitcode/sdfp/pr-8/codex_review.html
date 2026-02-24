@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Code Review: openHiTLS/sdfp#8 - CODEX</title>
+    <style>
+        :root { --critical: #dc2626; --high: #ea580c; --medium: #ca8a04; --low: #65a30d; }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: system-ui, sans-serif; background: #f8fafc; color: #1e293b; padding: 2rem; line-height: 1.6; }
+        .container { max-width: 900px; margin: 0 auto; }
+        h1 { font-size: 1.5rem; margin-bottom: 0.5rem; }
+        .subtitle { color: #64748b; margin-bottom: 2rem; }
+        .section { margin-bottom: 2rem; }
+        .section-title { font-size: 1.1rem; font-weight: 600; padding: 0.5rem 1rem; border-radius: 0.5rem 0.5rem 0 0; color: white; }
+        .section-title.critical { background: var(--critical); }
+        .section-title.high { background: var(--high); }
+        .section-title.medium { background: var(--medium); }
+        .section-title.low { background: var(--low); }
+        .issue { background: white; border: 1px solid #e2e8f0; border-top: none; padding: 1rem; }
+        .issue:last-child { border-radius: 0 0 0.5rem 0.5rem; }
+        .issue-title { font-weight: 600; margin-bottom: 0.25rem; }
+        .issue-location { font-family: monospace; font-size: 0.875rem; color: #64748b; margin-bottom: 0.75rem; }
+        .issue-source { font-size: 0.75rem; color: #94a3b8; margin-top: 0.5rem; }
+        pre { background: #1e293b; color: #e2e8f0; padding: 0.75rem; border-radius: 0.375rem; overflow-x: auto; font-size: 0.875rem; margin: 0.5rem 0; }
+        .problem { margin: 0.75rem 0; }
+        .fix-label { font-weight: 600; margin-top: 0.75rem; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Code Review: openHiTLS/sdfp#8 - CODEX</h1>
+        <div class="subtitle"></div>
+<div class="section"><div class="section-title high">High</div>
+<div class="issue">
+                <div class="issue-title">KEK handle reuse path is broken by unconditional key destruction</div>
+                <div class="issue-location">src/sm4_cipher.c:128-156</div>
+                <pre>if (ctx-&gt;hKeyHandle != NULL) {
+    (void)SDF_DL_DestroyKey(ctx-&gt;hSessionHandle, ctx-&gt;hKeyHandle);
+    ctx-&gt;hKeyHandle = NULL;
+}
+
+int ret = SDR_OK;
+if (ctx-&gt;keySource == KEY_SRC_RAW) {
+    ret = SDF_DL_ImportKey(ctx-&gt;hSessionHandle, (unsigned char *)key, keyLen, &amp;ctx-&gt;hKeyHandle);
+    ...
+} else if (key != NULL &amp;&amp; keyLen &gt; 0) {
+    ...
+    ret = SDF_DL_ImportKeyWithKEK(ctx-&gt;hSessionHandle, SGD_SM4_ECB, ctx-&gt;kekIndex,
+        (unsigned char *)key, keyLen, &amp;ctx-&gt;hKeyHandle);
+}</pre>
+                <div class="problem"><strong>Issue:</strong> `CRYPT_SM4_InitCtx` validates that a KEK-generated `hKeyHandle` exists, then immediately destroys it before init. When caller uses `GEN_DEK_WITH_KEK` and then `CipherInit(..., NULL, 0, ...)`, no new key is imported and `EncryptInit/DecryptInit` gets a NULL key handle.</div>
+                <div class="fix-label">Fix:</div><pre>bool reuseExistingKekHandle = (ctx-&gt;keySource == KEY_SRC_KEK &amp;&amp; key == NULL &amp;&amp; keyLen == 0);
+
+if (!reuseExistingKekHandle &amp;&amp; ctx-&gt;hKeyHandle != NULL) {
+    (void)SDF_DL_DestroyKey(ctx-&gt;hSessionHandle, ctx-&gt;hKeyHandle);
+    ctx-&gt;hKeyHandle = NULL;
+}
+
+int ret = SDR_OK;
+if (ctx-&gt;keySource == KEY_SRC_RAW) {
+    ret = SDF_DL_ImportKey(ctx-&gt;hSessionHandle, (unsigned char *)key, keyLen, &amp;ctx-&gt;hKeyHandle);
+    if (ret != SDR_OK) { BSL_ERR_PUSH_ERROR(ret); return SDFP_ERR_ENCRYPT; }
+} else if (!reuseExistingKekHandle) {
+    ret = SDF_DL_ImportKeyWithKEK(ctx-&gt;hSessionHandle, SGD_SM4_ECB, ctx-&gt;kekIndex,
+        (unsigned char *)key, keyLen, &amp;ctx-&gt;hKeyHandle);
+    if (ret != SDR_OK) { BSL_ERR_PUSH_ERROR(ret); return SDFP_ERR_ENCRYPT; }
+}</pre>
+                <div class="issue-source">Reviewer: codex</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">GCM KEK-handle init deletes the generated key before use</div>
+                <div class="issue-location">src/sm4_gcm.c:135-148</div>
+                <pre>/* Destroy old key handle if re-initialising */
+if (ctx-&gt;hKeyHandle != NULL) {
+    (void)SDF_DL_DestroyKey(ctx-&gt;hSessionHandle, ctx-&gt;hKeyHandle);
+    ctx-&gt;hKeyHandle = NULL;
+}
+
+int ret = SDR_OK;
+if (ctx-&gt;keySource == GCM_KEY_SRC_RAW) {
+    ret = SDF_DL_ImportKey(ctx-&gt;hSessionHandle, (unsigned char *)key, keyLen, &amp;ctx-&gt;hKeyHandle);
+} else if (key != NULL &amp;&amp; keyLen &gt; 0) {
+    ret = SDF_DL_ImportKeyWithKEK(ctx-&gt;hSessionHandle, SGD_SM4_GCM, ctx-&gt;kekIndex,
+        (unsigned char *)key, keyLen, &amp;ctx-&gt;hKeyHandle);
+}</pre>
+                <div class="problem"><strong>Issue:</strong> `GCM_InitCtx` has the same handle lifecycle bug as CBC/ECB: it destroys `hKeyHandle` unconditionally, so `GEN_DEK_WITH_KEK` followed by `InitCtx(..., NULL, 0, ...)` cannot work.</div>
+                <div class="fix-label">Fix:</div><pre>bool reuseExistingKekHandle = (ctx-&gt;keySource == GCM_KEY_SRC_KEK &amp;&amp; key == NULL &amp;&amp; keyLen == 0);
+
+if (!reuseExistingKekHandle &amp;&amp; ctx-&gt;hKeyHandle != NULL) {
+    (void)SDF_DL_DestroyKey(ctx-&gt;hSessionHandle, ctx-&gt;hKeyHandle);
+    ctx-&gt;hKeyHandle = NULL;
+}
+
+int ret = SDR_OK;
+if (ctx-&gt;keySource == GCM_KEY_SRC_RAW) {
+    ret = SDF_DL_ImportKey(ctx-&gt;hSessionHandle, (unsigned char *)key, keyLen, &amp;ctx-&gt;hKeyHandle);
+} else if (!reuseExistingKekHandle) {
+    ret = SDF_DL_ImportKeyWithKEK(ctx-&gt;hSessionHandle, SGD_SM4_ECB, ctx-&gt;kekIndex,
+        (unsigned char *)key, keyLen, &amp;ctx-&gt;hKeyHandle);
+}</pre>
+                <div class="issue-source">Reviewer: codex</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">Demo uses different KEK ctrl IDs than provider implementation</div>
+                <div class="issue-location">demo/sm4_cbc.c:131-136</div>
+                <pre>if (CRYPT_EAL_CipherCtrl(ctx, CRYPT_CTRL_SM4_SET_KEK_ID, &amp;kekIndex, sizeof(kekIndex)) != CRYPT_SUCCESS) {
+    ...
+}
+int32_t ret = CRYPT_EAL_CipherCtrl(ctx, CRYPT_CTRL_SM4_GEN_DEK_WITH_KEK, wrapped, wrappedLen);</pre>
+                <div class="problem"><strong>Issue:</strong> The demo calls `CRYPT_CTRL_SM4_SET_KEK_ID` / `CRYPT_CTRL_SM4_GEN_DEK_WITH_KEK`, but the provider exports `CRYPT_CTRL_SET_KEK_ID` / `CRYPT_CTRL_GEN_DEK_WITH_KEK` in `provider.h`. This mismatch can fail to compile or call wrong ctrl IDs depending on headers.</div>
+                <div class="fix-label">Fix:</div><pre>if (CRYPT_EAL_CipherCtrl(ctx, CRYPT_CTRL_SET_KEK_ID, &amp;kekIndex, sizeof(kekIndex)) != CRYPT_SUCCESS) {
+    ...
+}
+int32_t ret = CRYPT_EAL_CipherCtrl(ctx, CRYPT_CTRL_GEN_DEK_WITH_KEK, wrapped, wrappedLen);</pre>
+                <div class="issue-source">Reviewer: codex</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">Provider load now hard-fails if any SM4/GCM symbol is missing</div>
+                <div class="issue-location">src/sdf_dl.c:202-209</div>
+                <pre>LOAD_SYM(genKeyWithKek,           SDF_GenerateKeyWithKEK);
+LOAD_SYM(importKeyWithKek,        SDF_ImportKeyWithKEK);
+LOAD_SYM(authEncInit,             SDF_AuthEncInit);
+LOAD_SYM(authEncUpdate,           SDF_AuthEncUpdate);
+LOAD_SYM(authEncFinal,            SDF_AuthEncFinal);
+LOAD_SYM(authDecInit,             SDF_AuthDecInit);
+LOAD_SYM(authDecUpdate,           SDF_AuthDecUpdate);
+LOAD_SYM(authDecFinal,            SDF_AuthDecFinal);</pre>
+                <div class="problem"><strong>Issue:</strong> New SM4/AEAD symbols are loaded with `LOAD_SYM` (required). If a device SDK lacks one of these APIs, `SDF_DL_Load` fails and the whole provider cannot load, regressing existing SM2/RSA functionality.</div>
+                <div class="fix-label">Fix:</div><pre>#define LOAD_SYM_OPTIONAL(field, sdfName) \
+    do { g_sdfFunc.field = (typeof(g_sdfFunc.field))dlsym(g_sdfLibHandle, #sdfName); } while (0)
+
+/* Keep provider load compatible when optional SM4/GCM APIs are absent */
+LOAD_SYM_OPTIONAL(genKeyWithKek,    SDF_GenerateKeyWithKEK);
+LOAD_SYM_OPTIONAL(importKeyWithKek, SDF_ImportKeyWithKEK);
+LOAD_SYM_OPTIONAL(authEncInit,      SDF_AuthEncInit);
+LOAD_SYM_OPTIONAL(authEncUpdate,    SDF_AuthEncUpdate);
+LOAD_SYM_OPTIONAL(authEncFinal,     SDF_AuthEncFinal);
+LOAD_SYM_OPTIONAL(authDecInit,      SDF_AuthDecInit);
+LOAD_SYM_OPTIONAL(authDecUpdate,    SDF_AuthDecUpdate);
+LOAD_SYM_OPTIONAL(authDecFinal,     SDF_AuthDecFinal);</pre>
+                <div class="issue-source">Reviewer: codex</div>
+            </div>
+</div>
+<div class="section"><div class="section-title medium">Medium</div>
+<div class="issue">
+                <div class="issue-title">`CRYPT_CTRL_SET_TAGLEN` is ignored during encryption final</div>
+                <div class="issue-location">src/sm4_gcm.c:215-218</div>
+                <pre>unsigned int tagOutLen = SM4_GCM_TAG_MAX;
+ret = SDF_DL_AuthEncFinal(ctx-&gt;hSessionHandle, out, &amp;tmpLen, ctx-&gt;tag, &amp;tagOutLen);
+if (ret == SDR_OK) {
+    ctx-&gt;tagLen = tagOutLen;
+}</pre>
+                <div class="problem"><strong>Issue:</strong> The ctrl handler stores requested tag length in `ctx->tagLen`, but `GCM_Final` always passes `SM4_GCM_TAG_MAX` to `SDF_DL_AuthEncFinal`, so caller-requested tag length is not honored.</div>
+                <div class="fix-label">Fix:</div><pre>unsigned int tagOutLen = ctx-&gt;tagLen;
+ret = SDF_DL_AuthEncFinal(ctx-&gt;hSessionHandle, out, &amp;tmpLen, ctx-&gt;tag, &amp;tagOutLen);
+if (ret == SDR_OK) {
+    if (tagOutLen == 0 || tagOutLen &gt; SM4_GCM_TAG_MAX) {
+        return CRYPT_INVALID_ARG;
+    }
+    ctx-&gt;tagLen = tagOutLen;
+}</pre>
+                <div class="issue-source">Reviewer: codex</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">Demo can return success even when encryption/decryption flow fails</div>
+                <div class="issue-location">demo/sm4_gcm.c:90-93</div>
+                <pre>if (encCtx == NULL) {
+    fprintf(stderr, "CipherNewCtx (enc) failed\n");
+    goto cleanup;
+}
+...
+if (decCtx == NULL) {
+    fprintf(stderr, "CipherNewCtx (dec) failed\n");
+    goto cleanup;
+}
+...
+if (decLen == ptLen &amp;&amp; memcmp(decrypted, plaintext, ptLen) == 0) {
+    printf("\n[PASS] Plaintext matches!\n");
+} else {
+    printf("\n[FAIL] Plaintext mismatch!\n");
+}
+...
+return ret;</pre>
+                <div class="problem"><strong>Issue:</strong> Several failure branches jump to cleanup without setting `ret`, and plaintext mismatch only prints `[FAIL]` but keeps `ret==0`; final `return ret` can report success to CTest even on failure.</div>
+                <div class="fix-label">Fix:</div><pre>if (encCtx == NULL) {
+    fprintf(stderr, "CipherNewCtx (enc) failed\n");
+    ret = 1;
+    goto cleanup;
+}
+...
+if (decCtx == NULL) {
+    fprintf(stderr, "CipherNewCtx (dec) failed\n");
+    ret = 1;
+    goto cleanup;
+}
+...
+if (decLen == ptLen &amp;&amp; memcmp(decrypted, plaintext, ptLen) == 0) {
+    printf("\n[PASS] Plaintext matches!\n");
+} else {
+    printf("\n[FAIL] Plaintext mismatch!\n");
+    ret = 1;
+}
+...
+return (ret == 0) ? 0 : 1;</pre>
+                <div class="issue-source">Reviewer: codex</div>
+            </div>
+</div>
+</div></body></html>

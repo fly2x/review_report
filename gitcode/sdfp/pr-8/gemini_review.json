@@ -1,0 +1,122 @@
+[
+  {
+    "source": "gemini",
+    "file": "demo/sm4_cbc.c",
+    "line": "131-136",
+    "severity": "critical",
+    "title": "Compilation failure due to undefined macros",
+    "problem": "The macros `CRYPT_CTRL_SM4_SET_KEK_ID` and `CRYPT_CTRL_SM4_GEN_DEK_WITH_KEK` are undefined and will cause a compile-time failure. They must be `CRYPT_CTRL_SET_KEK_ID` and `CRYPT_CTRL_GEN_DEK_WITH_KEK`.",
+    "code": "if (CRYPT_EAL_CipherCtrl(ctx, CRYPT_CTRL_SM4_SET_KEK_ID, &kekIndex, sizeof(kekIndex)) != CRYPT_SUCCESS) {\n        printf(\"[kek-handle] SET_KEK_ID failed\\n\");\n        CRYPT_EAL_CipherFreeCtx(ctx);\n        return -1;\n    }\n    int32_t ret = CRYPT_EAL_CipherCtrl(ctx, CRYPT_CTRL_SM4_GEN_DEK_WITH_KEK, wrapped, wrappedLen);",
+    "fix": "if (CRYPT_EAL_CipherCtrl(ctx, CRYPT_CTRL_SET_KEK_ID, &kekIndex, sizeof(kekIndex)) != CRYPT_SUCCESS) {\n        printf(\"[kek-handle] SET_KEK_ID failed\\n\");\n        CRYPT_EAL_CipherFreeCtx(ctx);\n        return -1;\n    }\n    int32_t ret = CRYPT_EAL_CipherCtrl(ctx, CRYPT_CTRL_GEN_DEK_WITH_KEK, wrapped, wrappedLen);"
+  },
+  {
+    "source": "gemini",
+    "file": "demo/sm4_cbc.c",
+    "line": "197-202",
+    "severity": "critical",
+    "title": "Undefined macros for KEK control",
+    "problem": "`CRYPT_CTRL_SM4_SET_KEK_ID` and `CRYPT_CTRL_SM4_GEN_DEK_WITH_KEK` are undefined. They must be `CRYPT_CTRL_SET_KEK_ID` and `CRYPT_CTRL_GEN_DEK_WITH_KEK`.",
+    "code": "if (CRYPT_EAL_CipherCtrl(gen, CRYPT_CTRL_SM4_SET_KEK_ID, &kekIndex, sizeof(kekIndex)) != CRYPT_SUCCESS) {\n        printf(\"[kek-import] SET_KEK_ID failed\\n\");\n        CRYPT_EAL_CipherFreeCtx(gen);\n        return -1;\n    }\n    int32_t ret = CRYPT_EAL_CipherCtrl(gen, CRYPT_CTRL_SM4_GEN_DEK_WITH_KEK, wrapped, wrappedLen);",
+    "fix": "if (CRYPT_EAL_CipherCtrl(gen, CRYPT_CTRL_SET_KEK_ID, &kekIndex, sizeof(kekIndex)) != CRYPT_SUCCESS) {\n        printf(\"[kek-import] SET_KEK_ID failed\\n\");\n        CRYPT_EAL_CipherFreeCtx(gen);\n        return -1;\n    }\n    int32_t ret = CRYPT_EAL_CipherCtrl(gen, CRYPT_CTRL_GEN_DEK_WITH_KEK, wrapped, wrappedLen);"
+  },
+  {
+    "source": "gemini",
+    "file": "demo/sm4_cbc.c",
+    "line": "215-216",
+    "severity": "critical",
+    "title": "Undefined macro CRYPT_CTRL_SM4_SET_KEK_ID",
+    "problem": "Undefined macro used. Must be `CRYPT_CTRL_SET_KEK_ID`.",
+    "code": "if (CRYPT_EAL_CipherCtrl(enc, CRYPT_CTRL_SM4_SET_KEK_ID, &kekIndex, sizeof(kekIndex)) != CRYPT_SUCCESS) {\n        printf(\"[kek-import] enc SET_KEK_ID failed\\n\");",
+    "fix": "if (CRYPT_EAL_CipherCtrl(enc, CRYPT_CTRL_SET_KEK_ID, &kekIndex, sizeof(kekIndex)) != CRYPT_SUCCESS) {\n        printf(\"[kek-import] enc SET_KEK_ID failed\\n\");"
+  },
+  {
+    "source": "gemini",
+    "file": "demo/sm4_cbc.c",
+    "line": "242-243",
+    "severity": "critical",
+    "title": "Undefined macro CRYPT_CTRL_SM4_SET_KEK_ID",
+    "problem": "Undefined macro used. Must be `CRYPT_CTRL_SET_KEK_ID`.",
+    "code": "if (CRYPT_EAL_CipherCtrl(dec, CRYPT_CTRL_SM4_SET_KEK_ID, &kekIndex, sizeof(kekIndex)) != CRYPT_SUCCESS) {\n        printf(\"[kek-import] dec SET_KEK_ID failed\\n\");",
+    "fix": "if (CRYPT_EAL_CipherCtrl(dec, CRYPT_CTRL_SET_KEK_ID, &kekIndex, sizeof(kekIndex)) != CRYPT_SUCCESS) {\n        printf(\"[kek-import] dec SET_KEK_ID failed\\n\");"
+  },
+  {
+    "source": "gemini",
+    "file": "src/sm4_cipher.c",
+    "line": "126-129",
+    "severity": "critical",
+    "title": "Pre-generated KEK handle is unconditionally destroyed during InitCtx",
+    "problem": "`CRYPT_SM4_InitCtx` unconditionally destroys `ctx->hKeyHandle`. If a handle was pre-generated via `GEN_DEK_WITH_KEK` and `InitCtx` is called with `key == NULL` to reuse it, the handle gets wiped out right before use, causing encryption to fail. The handle should only be destroyed when importing a new key.",
+    "code": "if (ctx->hKeyHandle != NULL) {\n        (void)SDF_DL_DestroyKey(ctx->hSessionHandle, ctx->hKeyHandle);\n        ctx->hKeyHandle = NULL;\n    }",
+    "fix": "if (ctx->hKeyHandle != NULL && key != NULL && keyLen > 0) {\n        (void)SDF_DL_DestroyKey(ctx->hSessionHandle, ctx->hKeyHandle);\n        ctx->hKeyHandle = NULL;\n    }"
+  },
+  {
+    "source": "gemini",
+    "file": "src/sm4_gcm.c",
+    "line": "132-135",
+    "severity": "critical",
+    "title": "Pre-generated KEK handle is unconditionally destroyed during InitCtx",
+    "problem": "In `GCM_InitCtx`, `ctx->hKeyHandle` is unconditionally destroyed. If a key handle was pre-generated via the `CRYPT_CTRL_GEN_DEK_WITH_KEK` control and the user invokes `InitCtx` to use it, it will be wiped out before initialization, causing the cipher operation to fail.",
+    "code": "/* Destroy old key handle if re-initialising */\n    if (ctx->hKeyHandle != NULL) {\n        (void)SDF_DL_DestroyKey(ctx->hSessionHandle, ctx->hKeyHandle);\n        ctx->hKeyHandle = NULL;\n    }",
+    "fix": "/* Destroy old key handle only if a new key is provided for re-initialising */\n    if (ctx->hKeyHandle != NULL && key != NULL && keyLen > 0) {\n        (void)SDF_DL_DestroyKey(ctx->hSessionHandle, ctx->hKeyHandle);\n        ctx->hKeyHandle = NULL;\n    }"
+  },
+  {
+    "source": "gemini",
+    "file": "src/sm3_md.c",
+    "line": "104-109",
+    "severity": "high",
+    "title": "Reusing SM3 context fails after DeInit because session is closed",
+    "problem": "`CRYPT_SM3_DeInit` calls `SDFP_SM3_CleanCtx(ctx)` which closes `hSessionHandle`. If the provider attempts to reuse the context after `DeInit` (which is standard behavior for openHiTLS hash contexts), `CRYPT_SM3_InitCtx` will reject it with `CRYPT_NULL_INPUT` because `ctx->hSessionHandle` is `NULL`.",
+    "code": "static int32_t CRYPT_SM3_DeInit(void *c)\n{\n    SDFP_SM3_Ctx *ctx = (SDFP_SM3_Ctx *)c;\n    SDFP_SM3_CleanCtx(ctx);\n    return CRYPT_SUCCESS;\n}",
+    "fix": "static int32_t CRYPT_SM3_DeInit(void *c)\n{\n    (void)c;\n    return CRYPT_SUCCESS;\n}"
+  },
+  {
+    "source": "gemini",
+    "file": "src/sm4_cipher.c",
+    "line": "219-223",
+    "severity": "high",
+    "title": "Context becomes unusable after DeinitCtx closes the session",
+    "problem": "`CRYPT_SM4_DeinitCtx` calls `SDFP_SM4_Clean(ctx)`, which completely closes `hSessionHandle`. Because `InitCtx` checks `ctx->hSessionHandle == NULL`, any attempt to reuse the context after `DeinitCtx` (e.g., to re-init with new parameters) will fail with `CRYPT_NULL_INPUT`. It should only destroy the key handle.",
+    "code": "static int32_t CRYPT_SM4_DeinitCtx(void *c)\n{\n    SDFP_SM4_Ctx *ctx = (SDFP_SM4_Ctx *)c;\n    SDFP_SM4_Clean(ctx);\n    return CRYPT_SUCCESS;\n}",
+    "fix": "static int32_t CRYPT_SM4_DeinitCtx(void *c)\n{\n    SDFP_SM4_Ctx *ctx = (SDFP_SM4_Ctx *)c;\n    if (ctx == NULL) {\n        return CRYPT_SUCCESS;\n    }\n    if (ctx->hKeyHandle != NULL && ctx->hSessionHandle != NULL) {\n        (void)SDF_DL_DestroyKey(ctx->hSessionHandle, ctx->hKeyHandle);\n        ctx->hKeyHandle = NULL;\n    }\n    BSL_SAL_CleanseData(ctx->iv, sizeof(ctx->iv));\n    ctx->ivLen = 0;\n    ctx->keySource = KEY_SRC_RAW;\n    ctx->kekIndex = 0;\n    return CRYPT_SUCCESS;\n}"
+  },
+  {
+    "source": "gemini",
+    "file": "src/sm4_cipher.c",
+    "line": "142-143",
+    "severity": "medium",
+    "title": "Hardcoded ECB algorithm ID for KEK import",
+    "problem": "The imported key's intended algorithm is `ctx->sdfAlgId` (which might be `SGD_SM4_CBC`), but `SGD_SM4_ECB` is hardcoded. Strict SDF hardware implementations will reject using an ECB key for CBC operations.",
+    "code": "ret = SDF_DL_ImportKeyWithKEK(ctx->hSessionHandle, SGD_SM4_ECB, ctx->kekIndex,\n            (unsigned char *)key, keyLen, &ctx->hKeyHandle);",
+    "fix": "ret = SDF_DL_ImportKeyWithKEK(ctx->hSessionHandle, ctx->sdfAlgId, ctx->kekIndex,\n            (unsigned char *)key, keyLen, &ctx->hKeyHandle);"
+  },
+  {
+    "source": "gemini",
+    "file": "src/sm4_cipher.c",
+    "line": "251-252",
+    "severity": "medium",
+    "title": "Hardcoded ECB algorithm ID for KEK generation",
+    "problem": "When generating a key wrapped with KEK, its intended usage algorithm is hardcoded to `SGD_SM4_ECB` instead of the actual `ctx->sdfAlgId` (e.g., `SGD_SM4_CBC`). This limits the generated key from being used with CBC on strict devices.",
+    "code": "int ret = SDF_DL_GenerateKeyWithKEK(ctx->hSessionHandle, 128, SGD_SM4_ECB,\n                ctx->kekIndex, wrapBuf, &wrapLen, &ctx->hKeyHandle);",
+    "fix": "int ret = SDF_DL_GenerateKeyWithKEK(ctx->hSessionHandle, 128, ctx->sdfAlgId,\n                ctx->kekIndex, wrapBuf, &wrapLen, &ctx->hKeyHandle);"
+  },
+  {
+    "source": "gemini",
+    "file": "demo/sm4_cbc.c",
+    "line": "1-2",
+    "severity": "low",
+    "title": "Duplicate include of stdio.h",
+    "problem": "`<stdio.h>` is included twice consecutively.",
+    "code": "#include <stdio.h>\n#include <stdio.h>",
+    "fix": "#include <stdio.h>"
+  },
+  {
+    "source": "gemini",
+    "file": "src/sm3_md.c",
+    "line": "111-127",
+    "severity": "low",
+    "title": "Dead code and unused function CRYPT_SM3_DupCtx",
+    "problem": "`CRYPT_SM3_DupCtx` is defined as a static function but is never added to the `g_EalMdSm3` function array, resulting in a compiler warning for unused static function. Furthermore, its implementation of returning a fresh, uninitialized session state instead of a true clone is dangerous.",
+    "code": "static void *CRYPT_SM3_DupCtx(const void *c)\n{\n    const SDFP_SM3_Ctx *src = (const SDFP_SM3_Ctx *)c;\n    if (src == NULL || src->hSessionHandle == NULL) {\n        return NULL;\n    }\n    /* Duplicate by opening a fresh session; hash state is not cloned */\n    SDFP_SM3_Ctx *dst = (SDFP_SM3_Ctx *)BSL_SAL_Calloc(1u, sizeof(SDFP_SM3_Ctx));\n    if (dst == NULL) {\n        return NULL;\n    }\n    int ret = SDF_DL_OpenSession(src->hDeviceHandle, &dst->hSessionHandle);\n    if (ret != SDR_OK) {\n        BSL_ERR_PUSH_ERROR(ret);\n        BSL_SAL_Free(dst);\n        return NULL;\n    }\n    dst->hDeviceHandle = src->hDeviceHandle;\n    return dst;\n}",
+    "fix": "/* Removed CRYPT_SM3_DupCtx as SDF hash state cannot be cloned and it's unused */"
+  }
+]

@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Code Review: openHiTLS/sdfp#8 - GEMINI</title>
+    <style>
+        :root { --critical: #dc2626; --high: #ea580c; --medium: #ca8a04; --low: #65a30d; }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: system-ui, sans-serif; background: #f8fafc; color: #1e293b; padding: 2rem; line-height: 1.6; }
+        .container { max-width: 900px; margin: 0 auto; }
+        h1 { font-size: 1.5rem; margin-bottom: 0.5rem; }
+        .subtitle { color: #64748b; margin-bottom: 2rem; }
+        .section { margin-bottom: 2rem; }
+        .section-title { font-size: 1.1rem; font-weight: 600; padding: 0.5rem 1rem; border-radius: 0.5rem 0.5rem 0 0; color: white; }
+        .section-title.critical { background: var(--critical); }
+        .section-title.high { background: var(--high); }
+        .section-title.medium { background: var(--medium); }
+        .section-title.low { background: var(--low); }
+        .issue { background: white; border: 1px solid #e2e8f0; border-top: none; padding: 1rem; }
+        .issue:last-child { border-radius: 0 0 0.5rem 0.5rem; }
+        .issue-title { font-weight: 600; margin-bottom: 0.25rem; }
+        .issue-location { font-family: monospace; font-size: 0.875rem; color: #64748b; margin-bottom: 0.75rem; }
+        .issue-source { font-size: 0.75rem; color: #94a3b8; margin-top: 0.5rem; }
+        pre { background: #1e293b; color: #e2e8f0; padding: 0.75rem; border-radius: 0.375rem; overflow-x: auto; font-size: 0.875rem; margin: 0.5rem 0; }
+        .problem { margin: 0.75rem 0; }
+        .fix-label { font-weight: 600; margin-top: 0.75rem; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Code Review: openHiTLS/sdfp#8 - GEMINI</h1>
+        <div class="subtitle"></div>
+<div class="section"><div class="section-title critical">Critical</div>
+<div class="issue">
+                <div class="issue-title">Compilation failure due to undefined macros</div>
+                <div class="issue-location">demo/sm4_cbc.c:131-136</div>
+                <pre>if (CRYPT_EAL_CipherCtrl(ctx, CRYPT_CTRL_SM4_SET_KEK_ID, &amp;kekIndex, sizeof(kekIndex)) != CRYPT_SUCCESS) {
+        printf("[kek-handle] SET_KEK_ID failed\n");
+        CRYPT_EAL_CipherFreeCtx(ctx);
+        return -1;
+    }
+    int32_t ret = CRYPT_EAL_CipherCtrl(ctx, CRYPT_CTRL_SM4_GEN_DEK_WITH_KEK, wrapped, wrappedLen);</pre>
+                <div class="problem"><strong>Issue:</strong> The macros `CRYPT_CTRL_SM4_SET_KEK_ID` and `CRYPT_CTRL_SM4_GEN_DEK_WITH_KEK` are undefined and will cause a compile-time failure. They must be `CRYPT_CTRL_SET_KEK_ID` and `CRYPT_CTRL_GEN_DEK_WITH_KEK`.</div>
+                <div class="fix-label">Fix:</div><pre>if (CRYPT_EAL_CipherCtrl(ctx, CRYPT_CTRL_SET_KEK_ID, &amp;kekIndex, sizeof(kekIndex)) != CRYPT_SUCCESS) {
+        printf("[kek-handle] SET_KEK_ID failed\n");
+        CRYPT_EAL_CipherFreeCtx(ctx);
+        return -1;
+    }
+    int32_t ret = CRYPT_EAL_CipherCtrl(ctx, CRYPT_CTRL_GEN_DEK_WITH_KEK, wrapped, wrappedLen);</pre>
+                <div class="issue-source">Reviewer: gemini</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">Undefined macros for KEK control</div>
+                <div class="issue-location">demo/sm4_cbc.c:197-202</div>
+                <pre>if (CRYPT_EAL_CipherCtrl(gen, CRYPT_CTRL_SM4_SET_KEK_ID, &amp;kekIndex, sizeof(kekIndex)) != CRYPT_SUCCESS) {
+        printf("[kek-import] SET_KEK_ID failed\n");
+        CRYPT_EAL_CipherFreeCtx(gen);
+        return -1;
+    }
+    int32_t ret = CRYPT_EAL_CipherCtrl(gen, CRYPT_CTRL_SM4_GEN_DEK_WITH_KEK, wrapped, wrappedLen);</pre>
+                <div class="problem"><strong>Issue:</strong> `CRYPT_CTRL_SM4_SET_KEK_ID` and `CRYPT_CTRL_SM4_GEN_DEK_WITH_KEK` are undefined. They must be `CRYPT_CTRL_SET_KEK_ID` and `CRYPT_CTRL_GEN_DEK_WITH_KEK`.</div>
+                <div class="fix-label">Fix:</div><pre>if (CRYPT_EAL_CipherCtrl(gen, CRYPT_CTRL_SET_KEK_ID, &amp;kekIndex, sizeof(kekIndex)) != CRYPT_SUCCESS) {
+        printf("[kek-import] SET_KEK_ID failed\n");
+        CRYPT_EAL_CipherFreeCtx(gen);
+        return -1;
+    }
+    int32_t ret = CRYPT_EAL_CipherCtrl(gen, CRYPT_CTRL_GEN_DEK_WITH_KEK, wrapped, wrappedLen);</pre>
+                <div class="issue-source">Reviewer: gemini</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">Undefined macro CRYPT_CTRL_SM4_SET_KEK_ID</div>
+                <div class="issue-location">demo/sm4_cbc.c:215-216</div>
+                <pre>if (CRYPT_EAL_CipherCtrl(enc, CRYPT_CTRL_SM4_SET_KEK_ID, &amp;kekIndex, sizeof(kekIndex)) != CRYPT_SUCCESS) {
+        printf("[kek-import] enc SET_KEK_ID failed\n");</pre>
+                <div class="problem"><strong>Issue:</strong> Undefined macro used. Must be `CRYPT_CTRL_SET_KEK_ID`.</div>
+                <div class="fix-label">Fix:</div><pre>if (CRYPT_EAL_CipherCtrl(enc, CRYPT_CTRL_SET_KEK_ID, &amp;kekIndex, sizeof(kekIndex)) != CRYPT_SUCCESS) {
+        printf("[kek-import] enc SET_KEK_ID failed\n");</pre>
+                <div class="issue-source">Reviewer: gemini</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">Undefined macro CRYPT_CTRL_SM4_SET_KEK_ID</div>
+                <div class="issue-location">demo/sm4_cbc.c:242-243</div>
+                <pre>if (CRYPT_EAL_CipherCtrl(dec, CRYPT_CTRL_SM4_SET_KEK_ID, &amp;kekIndex, sizeof(kekIndex)) != CRYPT_SUCCESS) {
+        printf("[kek-import] dec SET_KEK_ID failed\n");</pre>
+                <div class="problem"><strong>Issue:</strong> Undefined macro used. Must be `CRYPT_CTRL_SET_KEK_ID`.</div>
+                <div class="fix-label">Fix:</div><pre>if (CRYPT_EAL_CipherCtrl(dec, CRYPT_CTRL_SET_KEK_ID, &amp;kekIndex, sizeof(kekIndex)) != CRYPT_SUCCESS) {
+        printf("[kek-import] dec SET_KEK_ID failed\n");</pre>
+                <div class="issue-source">Reviewer: gemini</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">Pre-generated KEK handle is unconditionally destroyed during InitCtx</div>
+                <div class="issue-location">src/sm4_cipher.c:126-129</div>
+                <pre>if (ctx-&gt;hKeyHandle != NULL) {
+        (void)SDF_DL_DestroyKey(ctx-&gt;hSessionHandle, ctx-&gt;hKeyHandle);
+        ctx-&gt;hKeyHandle = NULL;
+    }</pre>
+                <div class="problem"><strong>Issue:</strong> `CRYPT_SM4_InitCtx` unconditionally destroys `ctx->hKeyHandle`. If a handle was pre-generated via `GEN_DEK_WITH_KEK` and `InitCtx` is called with `key == NULL` to reuse it, the handle gets wiped out right before use, causing encryption to fail. The handle should only be destroyed when importing a new key.</div>
+                <div class="fix-label">Fix:</div><pre>if (ctx-&gt;hKeyHandle != NULL &amp;&amp; key != NULL &amp;&amp; keyLen &gt; 0) {
+        (void)SDF_DL_DestroyKey(ctx-&gt;hSessionHandle, ctx-&gt;hKeyHandle);
+        ctx-&gt;hKeyHandle = NULL;
+    }</pre>
+                <div class="issue-source">Reviewer: gemini</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">Pre-generated KEK handle is unconditionally destroyed during InitCtx</div>
+                <div class="issue-location">src/sm4_gcm.c:132-135</div>
+                <pre>/* Destroy old key handle if re-initialising */
+    if (ctx-&gt;hKeyHandle != NULL) {
+        (void)SDF_DL_DestroyKey(ctx-&gt;hSessionHandle, ctx-&gt;hKeyHandle);
+        ctx-&gt;hKeyHandle = NULL;
+    }</pre>
+                <div class="problem"><strong>Issue:</strong> In `GCM_InitCtx`, `ctx->hKeyHandle` is unconditionally destroyed. If a key handle was pre-generated via the `CRYPT_CTRL_GEN_DEK_WITH_KEK` control and the user invokes `InitCtx` to use it, it will be wiped out before initialization, causing the cipher operation to fail.</div>
+                <div class="fix-label">Fix:</div><pre>/* Destroy old key handle only if a new key is provided for re-initialising */
+    if (ctx-&gt;hKeyHandle != NULL &amp;&amp; key != NULL &amp;&amp; keyLen &gt; 0) {
+        (void)SDF_DL_DestroyKey(ctx-&gt;hSessionHandle, ctx-&gt;hKeyHandle);
+        ctx-&gt;hKeyHandle = NULL;
+    }</pre>
+                <div class="issue-source">Reviewer: gemini</div>
+            </div>
+</div>
+<div class="section"><div class="section-title high">High</div>
+<div class="issue">
+                <div class="issue-title">Reusing SM3 context fails after DeInit because session is closed</div>
+                <div class="issue-location">src/sm3_md.c:104-109</div>
+                <pre>static int32_t CRYPT_SM3_DeInit(void *c)
+{
+    SDFP_SM3_Ctx *ctx = (SDFP_SM3_Ctx *)c;
+    SDFP_SM3_CleanCtx(ctx);
+    return CRYPT_SUCCESS;
+}</pre>
+                <div class="problem"><strong>Issue:</strong> `CRYPT_SM3_DeInit` calls `SDFP_SM3_CleanCtx(ctx)` which closes `hSessionHandle`. If the provider attempts to reuse the context after `DeInit` (which is standard behavior for openHiTLS hash contexts), `CRYPT_SM3_InitCtx` will reject it with `CRYPT_NULL_INPUT` because `ctx->hSessionHandle` is `NULL`.</div>
+                <div class="fix-label">Fix:</div><pre>static int32_t CRYPT_SM3_DeInit(void *c)
+{
+    (void)c;
+    return CRYPT_SUCCESS;
+}</pre>
+                <div class="issue-source">Reviewer: gemini</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">Context becomes unusable after DeinitCtx closes the session</div>
+                <div class="issue-location">src/sm4_cipher.c:219-223</div>
+                <pre>static int32_t CRYPT_SM4_DeinitCtx(void *c)
+{
+    SDFP_SM4_Ctx *ctx = (SDFP_SM4_Ctx *)c;
+    SDFP_SM4_Clean(ctx);
+    return CRYPT_SUCCESS;
+}</pre>
+                <div class="problem"><strong>Issue:</strong> `CRYPT_SM4_DeinitCtx` calls `SDFP_SM4_Clean(ctx)`, which completely closes `hSessionHandle`. Because `InitCtx` checks `ctx->hSessionHandle == NULL`, any attempt to reuse the context after `DeinitCtx` (e.g., to re-init with new parameters) will fail with `CRYPT_NULL_INPUT`. It should only destroy the key handle.</div>
+                <div class="fix-label">Fix:</div><pre>static int32_t CRYPT_SM4_DeinitCtx(void *c)
+{
+    SDFP_SM4_Ctx *ctx = (SDFP_SM4_Ctx *)c;
+    if (ctx == NULL) {
+        return CRYPT_SUCCESS;
+    }
+    if (ctx-&gt;hKeyHandle != NULL &amp;&amp; ctx-&gt;hSessionHandle != NULL) {
+        (void)SDF_DL_DestroyKey(ctx-&gt;hSessionHandle, ctx-&gt;hKeyHandle);
+        ctx-&gt;hKeyHandle = NULL;
+    }
+    BSL_SAL_CleanseData(ctx-&gt;iv, sizeof(ctx-&gt;iv));
+    ctx-&gt;ivLen = 0;
+    ctx-&gt;keySource = KEY_SRC_RAW;
+    ctx-&gt;kekIndex = 0;
+    return CRYPT_SUCCESS;
+}</pre>
+                <div class="issue-source">Reviewer: gemini</div>
+            </div>
+</div>
+<div class="section"><div class="section-title medium">Medium</div>
+<div class="issue">
+                <div class="issue-title">Hardcoded ECB algorithm ID for KEK import</div>
+                <div class="issue-location">src/sm4_cipher.c:142-143</div>
+                <pre>ret = SDF_DL_ImportKeyWithKEK(ctx-&gt;hSessionHandle, SGD_SM4_ECB, ctx-&gt;kekIndex,
+            (unsigned char *)key, keyLen, &amp;ctx-&gt;hKeyHandle);</pre>
+                <div class="problem"><strong>Issue:</strong> The imported key's intended algorithm is `ctx->sdfAlgId` (which might be `SGD_SM4_CBC`), but `SGD_SM4_ECB` is hardcoded. Strict SDF hardware implementations will reject using an ECB key for CBC operations.</div>
+                <div class="fix-label">Fix:</div><pre>ret = SDF_DL_ImportKeyWithKEK(ctx-&gt;hSessionHandle, ctx-&gt;sdfAlgId, ctx-&gt;kekIndex,
+            (unsigned char *)key, keyLen, &amp;ctx-&gt;hKeyHandle);</pre>
+                <div class="issue-source">Reviewer: gemini</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">Hardcoded ECB algorithm ID for KEK generation</div>
+                <div class="issue-location">src/sm4_cipher.c:251-252</div>
+                <pre>int ret = SDF_DL_GenerateKeyWithKEK(ctx-&gt;hSessionHandle, 128, SGD_SM4_ECB,
+                ctx-&gt;kekIndex, wrapBuf, &amp;wrapLen, &amp;ctx-&gt;hKeyHandle);</pre>
+                <div class="problem"><strong>Issue:</strong> When generating a key wrapped with KEK, its intended usage algorithm is hardcoded to `SGD_SM4_ECB` instead of the actual `ctx->sdfAlgId` (e.g., `SGD_SM4_CBC`). This limits the generated key from being used with CBC on strict devices.</div>
+                <div class="fix-label">Fix:</div><pre>int ret = SDF_DL_GenerateKeyWithKEK(ctx-&gt;hSessionHandle, 128, ctx-&gt;sdfAlgId,
+                ctx-&gt;kekIndex, wrapBuf, &amp;wrapLen, &amp;ctx-&gt;hKeyHandle);</pre>
+                <div class="issue-source">Reviewer: gemini</div>
+            </div>
+</div>
+<div class="section"><div class="section-title low">Low</div>
+<div class="issue">
+                <div class="issue-title">Duplicate include of stdio.h</div>
+                <div class="issue-location">demo/sm4_cbc.c:1-2</div>
+                <pre>#include &lt;stdio.h&gt;
+#include &lt;stdio.h&gt;</pre>
+                <div class="problem"><strong>Issue:</strong> `<stdio.h>` is included twice consecutively.</div>
+                <div class="fix-label">Fix:</div><pre>#include &lt;stdio.h&gt;</pre>
+                <div class="issue-source">Reviewer: gemini</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">Dead code and unused function CRYPT_SM3_DupCtx</div>
+                <div class="issue-location">src/sm3_md.c:111-127</div>
+                <pre>static void *CRYPT_SM3_DupCtx(const void *c)
+{
+    const SDFP_SM3_Ctx *src = (const SDFP_SM3_Ctx *)c;
+    if (src == NULL || src-&gt;hSessionHandle == NULL) {
+        return NULL;
+    }
+    /* Duplicate by opening a fresh session; hash state is not cloned */
+    SDFP_SM3_Ctx *dst = (SDFP_SM3_Ctx *)BSL_SAL_Calloc(1u, sizeof(SDFP_SM3_Ctx));
+    if (dst == NULL) {
+        return NULL;
+    }
+    int ret = SDF_DL_OpenSession(src-&gt;hDeviceHandle, &amp;dst-&gt;hSessionHandle);
+    if (ret != SDR_OK) {
+        BSL_ERR_PUSH_ERROR(ret);
+        BSL_SAL_Free(dst);
+        return NULL;
+    }
+    dst-&gt;hDeviceHandle = src-&gt;hDeviceHandle;
+    return dst;
+}</pre>
+                <div class="problem"><strong>Issue:</strong> `CRYPT_SM3_DupCtx` is defined as a static function but is never added to the `g_EalMdSm3` function array, resulting in a compiler warning for unused static function. Furthermore, its implementation of returning a fresh, uninitialized session state instead of a true clone is dangerous.</div>
+                <div class="fix-label">Fix:</div><pre>/* Removed CRYPT_SM3_DupCtx as SDF hash state cannot be cloned and it's unused */</pre>
+                <div class="issue-source">Reviewer: gemini</div>
+            </div>
+</div>
+</div></body></html>

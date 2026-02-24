@@ -1,0 +1,442 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Final Report: openHiTLS/sdfp#8</title>
+    <style>
+        :root { --critical: #dc2626; --high: #ea580c; --medium: #ca8a04; --low: #65a30d;
+                 --trusted: #059669; --likely: #0284c7; --evaluate: #7c3aed; }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: system-ui, sans-serif; background: #f8fafc; color: #1e293b; padding: 2rem; line-height: 1.6; }
+        .container { max-width: 900px; margin: 0 auto; }
+        h1 { font-size: 1.75rem; margin-bottom: 0.5rem; }
+        .subtitle { color: #64748b; margin-bottom: 1rem; }
+        .stats { display: flex; gap: 1rem; margin-bottom: 2rem; flex-wrap: wrap; }
+        .stat { background: white; border: 1px solid #e2e8f0; border-radius: 0.5rem; padding: 1rem; min-width: 100px; text-align: center; }
+        .stat-value { font-size: 1.5rem; font-weight: 700; }
+        .stat-label { font-size: 0.875rem; color: #64748b; }
+        .stat.critical .stat-value { color: var(--critical); }
+        .stat.high .stat-value { color: var(--high); }
+        .stat.medium .stat-value { color: var(--medium); }
+        .stat.low .stat-value { color: var(--low); }
+        .reviewers { background: #e0e7ff; color: #3730a3; padding: 0.5rem 1rem; border-radius: 0.5rem; margin-bottom: 2rem; }
+        .section { margin-bottom: 2rem; }
+        .section-title { font-size: 1.1rem; font-weight: 600; padding: 0.5rem 1rem; border-radius: 0.5rem 0.5rem 0 0; color: white; }
+        .section-title.critical { background: var(--critical); }
+        .section-title.high { background: var(--high); }
+        .section-title.medium { background: var(--medium); }
+        .section-title.low { background: var(--low); }
+        .issue { background: white; border: 1px solid #e2e8f0; border-top: none; padding: 1rem; }
+        .issue:last-child { border-radius: 0 0 0.5rem 0.5rem; }
+        .issue-title { font-weight: 600; margin-bottom: 0.25rem; }
+        .issue-location { font-family: monospace; font-size: 0.875rem; color: #64748b; margin-bottom: 0.5rem; }
+        .issue-meta { font-size: 0.75rem; margin-bottom: 0.75rem; display: flex; gap: 0.75rem; align-items: center; }
+        .issue-meta .reviewers { background: #f1f5f9; color: #475569; padding: 0.25rem 0.5rem; border-radius: 0.25rem; margin: 0; }
+        .confidence-badge { padding: 0.25rem 0.5rem; border-radius: 0.25rem; font-weight: 500; }
+        .confidence-badge.trusted { background: #d1fae5; color: #065f46; }
+        .confidence-badge.likely { background: #dbeafe; color: #1e40af; }
+        .confidence-badge.evaluate { background: #ede9fe; color: #5b21b6; }
+        pre { background: #1e293b; color: #e2e8f0; padding: 0.75rem; border-radius: 0.375rem; overflow-x: auto; font-size: 0.875rem; margin: 0.5rem 0; }
+        .problem { margin: 0.75rem 0; }
+        .fix-label { font-weight: 600; margin-top: 0.75rem; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Final Code Review Report</h1>
+        <div class="subtitle">openHiTLS/sdfp - PR #8</div>
+        <p style="margin-bottom: 1rem;"></p>
+
+        <div class="stats">
+            <div class="stat"><div class="stat-value">15</div><div class="stat-label">Total</div></div>
+            <div class="stat critical"><div class="stat-value">3</div><div class="stat-label">Critical</div></div>
+            <div class="stat high"><div class="stat-value">5</div><div class="stat-label">High</div></div>
+            <div class="stat medium"><div class="stat-value">4</div><div class="stat-label">Medium</div></div>
+            <div class="stat low"><div class="stat-value">3</div><div class="stat-label">Low</div></div>
+        </div>
+
+        <div class="reviewers">Reviewers: claude, gemini, codex</div>
+<div class="section"><div class="section-title critical">Critical</div>
+<div class="issue">
+                <div class="issue-title">Undefined control command macros causing compilation failure</div>
+                <div class="issue-location">demo/sm4_cbc.c:131</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CLAUDE, GEMINI, CODEX</span>
+                    <span class="confidence-badge trusted">置信度: 可信</span>
+                </div>
+                <pre>if (CRYPT_EAL_CipherCtrl(ctx, CRYPT_CTRL_SM4_SET_KEK_ID, &amp;kekIndex, sizeof(kekIndex)) != CRYPT_SUCCESS) {
+    printf("[kek-handle] SET_KEK_ID failed\n");
+    ...
+}
+int32_t ret = CRYPT_EAL_CipherCtrl(ctx, CRYPT_CTRL_SM4_GEN_DEK_WITH_KEK, wrapped, wrappedLen);</pre>
+                <div class="problem"><strong>Issue:</strong> The demo uses CRYPT_CTRL_SM4_SET_KEK_ID and CRYPT_CTRL_SM4_GEN_DEK_WITH_KEK which are not defined in provider.h. The actual macros are CRYPT_CTRL_SET_KEK_ID (110) and CRYPT_CTRL_GEN_DEK_WITH_KEK (111) without the SM4_ prefix. This will cause compilation to fail.</div>
+                <div class="fix-label">Fix:</div><pre>if (CRYPT_EAL_CipherCtrl(ctx, CRYPT_CTRL_SET_KEK_ID, &amp;kekIndex, sizeof(kekIndex)) != CRYPT_SUCCESS) {
+    printf("[kek-handle] SET_KEK_ID failed\n");
+    ...
+}
+int32_t ret = CRYPT_EAL_CipherCtrl(ctx, CRYPT_CTRL_GEN_DEK_WITH_KEK, wrapped, wrappedLen);</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">KEK handle destroyed before use causing NULL key handle</div>
+                <div class="issue-location">src/sm4_cipher.c:128-151</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CLAUDE, GEMINI, CODEX</span>
+                    <span class="confidence-badge trusted">置信度: 可信</span>
+                </div>
+                <pre>if (ctx-&gt;hKeyHandle != NULL) {
+    (void)SDF_DL_DestroyKey(ctx-&gt;hSessionHandle, ctx-&gt;hKeyHandle);
+    ctx-&gt;hKeyHandle = NULL;
+}
+
+int ret = SDR_OK;
+if (ctx-&gt;keySource == KEY_SRC_RAW) {
+    ret = SDF_DL_ImportKey(...);
+} else if (key != NULL &amp;&amp; keyLen &gt; 0) {
+    ret = SDF_DL_ImportKeyWithKEK(...);
+}
+/* If keySource==KEY_SRC_KEK, key==NULL, hKeyHandle was just destroyed, but not recreated */</pre>
+                <div class="problem"><strong>Issue:</strong> When using KEK mode with a pre-generated key handle (via CRYPT_CTRL_GEN_DEK_WITH_KEK), calling InitCtx with NULL/0 key parameters destroys the existing hKeyHandle at lines 128-131, but then doesn't recreate it because key==NULL. This causes hKeyHandle to be NULL when EncryptInit/DecryptInit is called at lines 154-160. The test_kek_handle() function in demo/sm4_cbc.c relies on reusing the key handle after GEN_DEK_WITH_KEK.</div>
+                <div class="fix-label">Fix:</div><pre>/* Only destroy if we're going to create a new one */
+if ((ctx-&gt;keySource == KEY_SRC_RAW) || (key != NULL &amp;&amp; keyLen &gt; 0)) {
+    if (ctx-&gt;hKeyHandle != NULL) {
+        (void)SDF_DL_DestroyKey(ctx-&gt;hSessionHandle, ctx-&gt;hKeyHandle);
+        ctx-&gt;hKeyHandle = NULL;
+    }
+}
+
+int ret = SDR_OK;
+if (ctx-&gt;keySource == KEY_SRC_RAW) {
+    ret = SDF_DL_ImportKey(ctx-&gt;hSessionHandle, (unsigned char *)key, keyLen, &amp;ctx-&gt;hKeyHandle);
+    if (ret != SDR_OK) { BSL_ERR_PUSH_ERROR(ret); return SDFP_ERR_ENCRYPT; }
+} else if (key != NULL &amp;&amp; keyLen &gt; 0) {
+    ret = SDF_DL_ImportKeyWithKEK(ctx-&gt;hSessionHandle, ctx-&gt;sdfAlgId, ctx-&gt;kekIndex,
+        (unsigned char *)key, keyLen, &amp;ctx-&gt;hKeyHandle);
+    if (ret != SDR_OK) { BSL_ERR_PUSH_ERROR(ret); return SDFP_ERR_ENCRYPT; }
+}</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">KEK handle destroyed before use in GCM mode</div>
+                <div class="issue-location">src/sm4_gcm.c:136-149</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CLAUDE, GEMINI, CODEX</span>
+                    <span class="confidence-badge trusted">置信度: 可信</span>
+                </div>
+                <pre>/* Destroy old key handle if re-initialising */
+if (ctx-&gt;hKeyHandle != NULL) {
+    (void)SDF_DL_DestroyKey(ctx-&gt;hSessionHandle, ctx-&gt;hKeyHandle);
+    ctx-&gt;hKeyHandle = NULL;
+}
+
+int ret = SDR_OK;
+if (ctx-&gt;keySource == GCM_KEY_SRC_RAW) {
+    ret = SDF_DL_ImportKey(...);
+} else if (key != NULL &amp;&amp; keyLen &gt; 0) {
+    ret = SDF_DL_ImportKeyWithKEK(...);
+}
+/* else: hKeyHandle is already set by GEN_KEY ctrl, use it directly */
+/* But it was just destroyed above! */</pre>
+                <div class="problem"><strong>Issue:</strong> Same issue as sm4_cipher.c. When using KEK mode with a pre-generated key handle, calling InitCtx with NULL/0 key destroys the existing hKeyHandle at lines 136-139, but doesn't recreate it for the KEY_SRC_KEK + key==NULL case.</div>
+                <div class="fix-label">Fix:</div><pre>/* Destroy old key handle only if a new key is provided for re-initialising */
+if ((ctx-&gt;keySource == GCM_KEY_SRC_RAW) || (key != NULL &amp;&amp; keyLen &gt; 0)) {
+    if (ctx-&gt;hKeyHandle != NULL) {
+        (void)SDF_DL_DestroyKey(ctx-&gt;hSessionHandle, ctx-&gt;hKeyHandle);
+        ctx-&gt;hKeyHandle = NULL;
+    }
+}
+
+int ret = SDR_OK;
+if (ctx-&gt;keySource == GCM_KEY_SRC_RAW) {
+    ret = SDF_DL_ImportKey(ctx-&gt;hSessionHandle, (unsigned char *)key, keyLen, &amp;ctx-&gt;hKeyHandle);
+    if (ret != SDR_OK) { BSL_ERR_PUSH_ERROR(ret); return SDFP_ERR_ENCRYPT; }
+} else if (key != NULL &amp;&amp; keyLen &gt; 0) {
+    ret = SDF_DL_ImportKeyWithKEK(ctx-&gt;hSessionHandle, ctx-&gt;sdfAlgId, ctx-&gt;kekIndex,
+        (unsigned char *)key, keyLen, &amp;ctx-&gt;hKeyHandle);
+    if (ret != SDR_OK) { BSL_ERR_PUSH_ERROR(ret); return SDFP_ERR_ENCRYPT; }
+}</pre>
+            </div>
+</div>
+<div class="section"><div class="section-title high">High</div>
+<div class="issue">
+                <div class="issue-title">Stack buffer with wrapped key not cleansed before return</div>
+                <div class="issue-location">src/sm4_cipher.c:249-264</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CLAUDE</span>
+                    <span class="confidence-badge trusted">置信度: 可信</span>
+                </div>
+                <pre>unsigned char tmpBuf[64];
+if (wrapBuf == NULL || wrapLen == 0) {
+    wrapBuf = tmpBuf;
+    wrapLen = sizeof(tmpBuf);
+}
+...
+int ret = SDF_DL_GenerateKeyWithKEK(ctx-&gt;hSessionHandle, 128, SGD_SM4_ECB,
+    ctx-&gt;kekIndex, wrapBuf, &amp;wrapLen, &amp;ctx-&gt;hKeyHandle);
+/* tmpBuf now contains wrapped key but is not cleansed */
+return CRYPT_SUCCESS;</pre>
+                <div class="problem"><strong>Issue:</strong> When val==NULL, tmpBuf[64] on the stack holds the wrapped key material after SDF_DL_GenerateKeyWithKEK. This sensitive data is not cleared with BSL_SAL_CleanseData before the function returns, potentially leaking wrapped key material on the stack.</div>
+                <div class="fix-label">Fix:</div><pre>unsigned char tmpBuf[64];
+if (wrapBuf == NULL || wrapLen == 0) {
+    wrapBuf = tmpBuf;
+    wrapLen = sizeof(tmpBuf);
+}
+...
+int ret = SDF_DL_GenerateKeyWithKEK(ctx-&gt;hSessionHandle, 128, ctx-&gt;sdfAlgId,
+    ctx-&gt;kekIndex, wrapBuf, &amp;wrapLen, &amp;ctx-&gt;hKeyHandle);
+if (ret == SDR_OK &amp;&amp; wrapBuf == tmpBuf) {
+    BSL_SAL_CleanseData(tmpBuf, sizeof(tmpBuf));
+}
+return CRYPT_SUCCESS;</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">Stack buffer with wrapped key not cleansed before return in GCM</div>
+                <div class="issue-location">src/sm4_gcm.c:327-336</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CLAUDE</span>
+                    <span class="confidence-badge trusted">置信度: 可信</span>
+                </div>
+                <pre>unsigned char tmpBuf[64];
+unsigned int  wrapLen = (val != NULL &amp;&amp; valLen &gt; 0) ? valLen : sizeof(tmpBuf);
+unsigned char *wrapBuf = (val != NULL &amp;&amp; valLen &gt; 0) ? (unsigned char *)val : tmpBuf;
+int ret = SDF_DL_GenerateKeyWithKEK(ctx-&gt;hSessionHandle, 128, SGD_SM4_GCM,
+    ctx-&gt;kekIndex, wrapBuf, &amp;wrapLen, &amp;ctx-&gt;hKeyHandle);
+/* tmpBuf contains wrapped key material but is not cleansed */</pre>
+                <div class="problem"><strong>Issue:</strong> Same issue as sm4_cipher.c. When val==NULL, tmpBuf[64] holds wrapped key material but is not cleared with BSL_SAL_CleanseData before returning.</div>
+                <div class="fix-label">Fix:</div><pre>unsigned char tmpBuf[64];
+unsigned int  wrapLen = (val != NULL &amp;&amp; valLen &gt; 0) ? valLen : sizeof(tmpBuf);
+unsigned char *wrapBuf = (val != NULL &amp;&amp; valLen &gt; 0) ? (unsigned char *)val : tmpBuf;
+int ret = SDF_DL_GenerateKeyWithKEK(ctx-&gt;hSessionHandle, 128, SGD_SM4_GCM,
+    ctx-&gt;kekIndex, wrapBuf, &amp;wrapLen, &amp;ctx-&gt;hKeyHandle);
+if (ret == SDR_OK &amp;&amp; wrapBuf == tmpBuf) {
+    BSL_SAL_CleanseData(tmpBuf, sizeof(tmpBuf));
+}
+return CRYPT_SUCCESS;</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">SM3 context becomes unusable after DeInit</div>
+                <div class="issue-location">src/sm3_md.c:104-109</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: GEMINI</span>
+                    <span class="confidence-badge likely">置信度: 较可信</span>
+                </div>
+                <pre>static int32_t CRYPT_SM3_DeInit(void *c)
+{
+    SDFP_SM3_Ctx *ctx = (SDFP_SM3_Ctx *)c;
+    SDFP_SM3_CleanCtx(ctx);
+    return CRYPT_SUCCESS;
+}</pre>
+                <div class="problem"><strong>Issue:</strong> CRYPT_SM3_DeInit calls SDFP_SM3_CleanCtx(ctx) which closes hSessionHandle. If the provider attempts to reuse the context after DeInit (which is standard behavior for openHiTLS hash contexts), CRYPT_SM3_InitCtx will reject it with CRYPT_NULL_INPUT because ctx->hSessionHandle is NULL.</div>
+                <div class="fix-label">Fix:</div><pre>static int32_t CRYPT_SM3_DeInit(void *c)
+{
+    (void)c;
+    return CRYPT_SUCCESS;
+}</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">SM4 context becomes unusable after DeinitCtx</div>
+                <div class="issue-location">src/sm4_cipher.c:216-221</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: GEMINI</span>
+                    <span class="confidence-badge likely">置信度: 较可信</span>
+                </div>
+                <pre>static int32_t CRYPT_SM4_DeinitCtx(void *c)
+{
+    SDFP_SM4_Ctx *ctx = (SDFP_SM4_Ctx *)c;
+    SDFP_SM4_Clean(ctx);
+    return CRYPT_SUCCESS;
+}</pre>
+                <div class="problem"><strong>Issue:</strong> CRYPT_SM4_DeinitCtx calls SDFP_SM4_Clean(ctx), which completely closes hSessionHandle. Because InitCtx checks ctx->hSessionHandle == NULL, any attempt to reuse the context after DeinitCtx (e.g., to re-init with new parameters) will fail with CRYPT_NULL_INPUT.</div>
+                <div class="fix-label">Fix:</div><pre>static int32_t CRYPT_SM4_DeinitCtx(void *c)
+{
+    SDFP_SM4_Ctx *ctx = (SDFP_SM4_Ctx *)c;
+    if (ctx == NULL) {
+        return CRYPT_SUCCESS;
+    }
+    if (ctx-&gt;hKeyHandle != NULL &amp;&amp; ctx-&gt;hSessionHandle != NULL) {
+        (void)SDF_DL_DestroyKey(ctx-&gt;hSessionHandle, ctx-&gt;hKeyHandle);
+        ctx-&gt;hKeyHandle = NULL;
+    }
+    BSL_SAL_CleanseData(ctx-&gt;iv, sizeof(ctx-&gt;iv));
+    ctx-&gt;ivLen = 0;
+    ctx-&gt;keySource = KEY_SRC_RAW;
+    ctx-&gt;kekIndex = 0;
+    return CRYPT_SUCCESS;
+}</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">SM4/GCM symbol loading failures cause provider load to fail</div>
+                <div class="issue-location">src/sdf_dl.c:202-209</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CODEX</span>
+                    <span class="confidence-badge evaluate">置信度: 需评估</span>
+                </div>
+                <pre>LOAD_SYM(genKeyWithKek,           SDF_GenerateKeyWithKEK);
+LOAD_SYM(importKeyWithKek,        SDF_ImportKeyWithKEK);
+LOAD_SYM(authEncInit,             SDF_AuthEncInit);
+LOAD_SYM(authEncUpdate,           SDF_AuthEncUpdate);
+LOAD_SYM(authEncFinal,            SDF_AuthEncFinal);
+LOAD_SYM(authDecInit,             SDF_AuthDecInit);
+LOAD_SYM(authDecUpdate,           SDF_AuthDecUpdate);
+LOAD_SYM(authDecFinal,            SDF_AuthDecFinal);</pre>
+                <div class="problem"><strong>Issue:</strong> New SM4/AEAD symbols (SDF_GenerateKeyWithKEK, SDF_ImportKeyWithKEK, SDF_AuthEncInit/Update/Final, SDF_AuthDecInit/Update/Final) are loaded with LOAD_SYM (required). If a device SDK lacks one of these APIs, SDF_DL_Load fails and the whole provider cannot load, regressing existing SM2/RSA functionality.</div>
+                <div class="fix-label">Fix:</div><pre>#define LOAD_SYM_OPTIONAL(field, sdfName) \
+    do { g_sdfFunc.field = (typeof(g_sdfFunc.field))dlsym(g_sdfLibHandle, #sdfName); } while (0)
+
+/* Keep provider load compatible when optional SM4/GCM APIs are absent */
+LOAD_SYM_OPTIONAL(genKeyWithKek,    SDF_GenerateKeyWithKEK);
+LOAD_SYM_OPTIONAL(importKeyWithKek, SDF_ImportKeyWithKEK);
+LOAD_SYM_OPTIONAL(authEncInit,      SDF_AuthEncInit);
+LOAD_SYM_OPTIONAL(authEncUpdate,    SDF_AuthEncUpdate);
+LOAD_SYM_OPTIONAL(authEncFinal,     SDF_AuthEncFinal);
+LOAD_SYM_OPTIONAL(authDecInit,      SDF_AuthDecInit);
+LOAD_SYM_OPTIONAL(authDecUpdate,    SDF_AuthDecUpdate);
+LOAD_SYM_OPTIONAL(authDecFinal,     SDF_AuthDecFinal);</pre>
+            </div>
+</div>
+<div class="section"><div class="section-title medium">Medium</div>
+<div class="issue">
+                <div class="issue-title">Hardcoded ECB algorithm ID for KEK import</div>
+                <div class="issue-location">src/sm4_cipher.c:145</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: GEMINI</span>
+                    <span class="confidence-badge trusted">置信度: 可信</span>
+                </div>
+                <pre>ret = SDF_DL_ImportKeyWithKEK(ctx-&gt;hSessionHandle, SGD_SM4_ECB, ctx-&gt;kekIndex,
+            (unsigned char *)key, keyLen, &amp;ctx-&gt;hKeyHandle);</pre>
+                <div class="problem"><strong>Issue:</strong> The imported key's intended algorithm is ctx->sdfAlgId (which might be SGD_SM4_CBC), but SGD_SM4_ECB is hardcoded. Strict SDF hardware implementations will reject using an ECB key for CBC operations.</div>
+                <div class="fix-label">Fix:</div><pre>ret = SDF_DL_ImportKeyWithKEK(ctx-&gt;hSessionHandle, ctx-&gt;sdfAlgId, ctx-&gt;kekIndex,
+            (unsigned char *)key, keyLen, &amp;ctx-&gt;hKeyHandle);</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">Hardcoded ECB algorithm ID for KEK generation</div>
+                <div class="issue-location">src/sm4_cipher.c:258</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: GEMINI</span>
+                    <span class="confidence-badge trusted">置信度: 可信</span>
+                </div>
+                <pre>int ret = SDF_DL_GenerateKeyWithKEK(ctx-&gt;hSessionHandle, 128, SGD_SM4_ECB,
+                ctx-&gt;kekIndex, wrapBuf, &amp;wrapLen, &amp;ctx-&gt;hKeyHandle);</pre>
+                <div class="problem"><strong>Issue:</strong> When generating a key wrapped with KEK, its intended usage algorithm is hardcoded to SGD_SM4_ECB instead of the actual ctx->sdfAlgId (e.g., SGD_SM4_CBC). This limits the generated key from being used with CBC on strict devices.</div>
+                <div class="fix-label">Fix:</div><pre>int ret = SDF_DL_GenerateKeyWithKEK(ctx-&gt;hSessionHandle, 128, ctx-&gt;sdfAlgId,
+                ctx-&gt;kekIndex, wrapBuf, &amp;wrapLen, &amp;ctx-&gt;hKeyHandle);</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">CRYPT_CTRL_SET_TAGLEN is ignored during encryption final</div>
+                <div class="issue-location">src/sm4_gcm.c:215-219</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CODEX</span>
+                    <span class="confidence-badge trusted">置信度: 可信</span>
+                </div>
+                <pre>unsigned int tagOutLen = SM4_GCM_TAG_MAX;
+ret = SDF_DL_AuthEncFinal(ctx-&gt;hSessionHandle, out, &amp;tmpLen, ctx-&gt;tag, &amp;tagOutLen);
+if (ret == SDR_OK) {
+    ctx-&gt;tagLen = tagOutLen;
+}</pre>
+                <div class="problem"><strong>Issue:</strong> The ctrl handler stores requested tag length in ctx->tagLen, but GCM_Final always passes SM4_GCM_TAG_MAX to SDF_DL_AuthEncFinal, so caller-requested tag length is not honored.</div>
+                <div class="fix-label">Fix:</div><pre>unsigned int tagOutLen = ctx-&gt;tagLen;
+ret = SDF_DL_AuthEncFinal(ctx-&gt;hSessionHandle, out, &amp;tmpLen, ctx-&gt;tag, &amp;tagOutLen);
+if (ret == SDR_OK) {
+    if (tagOutLen == 0 || tagOutLen &gt; SM4_GCM_TAG_MAX) {
+        return CRYPT_INVALID_ARG;
+    }
+    ctx-&gt;tagLen = tagOutLen;
+}</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">Demo can return success even when encryption/decryption fails</div>
+                <div class="issue-location">demo/sm4_gcm.c:91-93</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CODEX</span>
+                    <span class="confidence-badge trusted">置信度: 可信</span>
+                </div>
+                <pre>if (encCtx == NULL) {
+    fprintf(stderr, "CipherNewCtx (enc) failed\n");
+    goto cleanup;
+}
+...
+if (decLen == ptLen &amp;&amp; memcmp(decrypted, plaintext, ptLen) == 0) {
+    printf("\n[PASS] Plaintext matches!\n");
+} else {
+    printf("\n[FAIL] Plaintext mismatch!\n");
+}
+...
+return ret;</pre>
+                <div class="problem"><strong>Issue:</strong> Several failure branches jump to cleanup without setting ret, and plaintext mismatch only prints [FAIL] but keeps ret==0. The final return ret can report success to CTest even on failure.</div>
+                <div class="fix-label">Fix:</div><pre>if (encCtx == NULL) {
+    fprintf(stderr, "CipherNewCtx (enc) failed\n");
+    ret = 1;
+    goto cleanup;
+}
+...
+if (decCtx == NULL) {
+    fprintf(stderr, "CipherNewCtx (dec) failed\n");
+    ret = 1;
+    goto cleanup;
+}
+...
+if (decLen == ptLen &amp;&amp; memcmp(decrypted, plaintext, ptLen) == 0) {
+    printf("\n[PASS] Plaintext matches!\n");
+} else {
+    printf("\n[FAIL] Plaintext mismatch!\n");
+    ret = 1;
+}
+...
+return (ret == 0) ? 0 : 1;</pre>
+            </div>
+</div>
+<div class="section"><div class="section-title low">Low</div>
+<div class="issue">
+                <div class="issue-title">Duplicate stdio.h include</div>
+                <div class="issue-location">demo/sm4_cbc.c:1-2</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CLAUDE, GEMINI</span>
+                    <span class="confidence-badge trusted">置信度: 可信</span>
+                </div>
+                <pre>#include &lt;stdio.h&gt;
+#include &lt;stdio.h&gt;</pre>
+                <div class="problem"><strong>Issue:</strong> Lines 1 and 2 both include <stdio.h>, which is redundant and creates a duplicate include.</div>
+                <div class="fix-label">Fix:</div><pre>#include &lt;stdio.h&gt;</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">Inconsistent library format macro usage</div>
+                <div class="issue-location">demo/sm4_gcm.c:56</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CLAUDE</span>
+                    <span class="confidence-badge trusted">置信度: 可信</span>
+                </div>
+                <pre>int ret = CRYPT_EAL_ProviderLoad(libCtx, BSL_SAL_LIB_FMT_SO, "SDFProv", provParams, NULL);</pre>
+                <div class="problem"><strong>Issue:</strong> sm4_gcm.c uses BSL_SAL_LIB_FMT_SO while all other demo files (sm3_hash.c, sm4_cbc.c, sm4_ecb.c, sm2_sign.c, etc.) use BSL_SAL_LIB_FMT_LIBSO. Inconsistency may cause compilation issues if only one macro is defined.</div>
+                <div class="fix-label">Fix:</div><pre>int ret = CRYPT_EAL_ProviderLoad(libCtx, BSL_SAL_LIB_FMT_LIBSO, "SDFProv", provParams, NULL);</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">Dead code - unused CRYPT_SM3_DupCtx function</div>
+                <div class="issue-location">src/sm3_md.c:111-130</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: GEMINI</span>
+                    <span class="confidence-badge trusted">置信度: 可信</span>
+                </div>
+                <pre>static void *CRYPT_SM3_DupCtx(const void *c)
+{
+    const SDFP_SM3_Ctx *src = (const SDFP_SM3_Ctx *)c;
+    if (src == NULL || src-&gt;hSessionHandle == NULL) {
+        return NULL;
+    }
+    /* Duplicate by opening a fresh session; hash state is not cloned */
+    SDFP_SM3_Ctx *dst = (SDFP_SM3_Ctx *)BSL_SAL_Calloc(1u, sizeof(SDFP_SM3_Ctx));
+    if (dst == NULL) {
+        return NULL;
+    }
+    int ret = SDF_DL_OpenSession(src-&gt;hDeviceHandle, &amp;dst-&gt;hSessionHandle);
+    if (ret != SDR_OK) {
+        BSL_ERR_PUSH_ERROR(ret);
+        BSL_SAL_Free(dst);
+        return NULL;
+    }
+    dst-&gt;hDeviceHandle = src-&gt;hDeviceHandle;
+    return dst;
+}</pre>
+                <div class="problem"><strong>Issue:</strong> CRYPT_SM3_DupCtx is defined as a static function but is never added to the g_EalMdSm3 function array, resulting in a compiler warning for unused static function. The implementation returns a fresh, uninitialized session state instead of a true clone, which is misleading.</div>
+                <div class="fix-label">Fix:</div><pre>/* Removed CRYPT_SM3_DupCtx as SDF hash state cannot be cloned and it's unused */</pre>
+            </div>
+</div>
+</div></body></html>

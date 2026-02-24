@@ -1,0 +1,92 @@
+[
+  {
+    "source": "claude",
+    "file": "demo/sm4_cbc.c",
+    "line": "131",
+    "severity": "critical",
+    "title": "Undefined control command macros causing compilation failure",
+    "problem": "The demo uses CRYPT_CTRL_SM4_SET_KEK_ID and CRYPT_CTRL_SM4_GEN_DEK_WITH_KEK which are not defined in provider.h. The actual macros are CRYPT_CTRL_SET_KEK_ID (110) and CRYPT_CTRL_GEN_DEK_WITH_KEK (111) without the SM4_ prefix.",
+    "code": "if (CRYPT_EAL_CipherCtrl(ctx, CRYPT_CTRL_SM4_SET_KEK_ID, &kekIndex, sizeof(kekIndex)) != CRYPT_SUCCESS) {",
+    "fix": "if (CRYPT_EAL_CipherCtrl(ctx, CRYPT_CTRL_SET_KEK_ID, &kekIndex, sizeof(kekIndex)) != CRYPT_SUCCESS) {"
+  },
+  {
+    "source": "claude",
+    "file": "src/sm4_cipher.c",
+    "line": "128-151",
+    "severity": "critical",
+    "title": "KEK handle destroyed before use causing NULL key handle",
+    "problem": "When using KEK mode with a pre-generated key handle (via CRYPT_CTRL_GEN_DEK_WITH_KEK), calling InitCtx with NULL/0 key parameters destroys the existing hKeyHandle at lines 128-131, but then doesn't recreate it because key==NULL. This causes hKeyHandle to be NULL when EncryptInit/DecryptInit is called at lines 154-160. The test_kek_handle() function in demo/sm4_cbc.c relies on reusing the key handle after GEN_DEK_WITH_KEK.",
+    "code": "if (ctx->hKeyHandle != NULL) {\n    (void)SDF_DL_DestroyKey(ctx->hSessionHandle, ctx->hKeyHandle);\n    ctx->hKeyHandle = NULL;\n}\n\nint ret = SDR_OK;\nif (ctx->keySource == KEY_SRC_RAW) {\n    ret = SDF_DL_ImportKey(...);\n} else if (key != NULL && keyLen > 0) {\n    ret = SDF_DL_ImportKeyWithKEK(...);\n}\n/* If keySource==KEY_SRC_KEK, key==NULL, hKeyHandle was just destroyed, but not recreated */",
+    "fix": "if (ctx->keySource == KEY_SRC_KEK && key == NULL && ctx->hKeyHandle == NULL) {\n    return CRYPT_NULL_INPUT;  /* No key handle available */\n}\n/* Only destroy if we're going to create a new one */\nif ((ctx->keySource == KEY_SRC_RAW) || (key != NULL && keyLen > 0)) {\n    if (ctx->hKeyHandle != NULL) {\n        (void)SDF_DL_DestroyKey(ctx->hSessionHandle, ctx->hKeyHandle);\n        ctx->hKeyHandle = NULL;\n    }\n}"
+  },
+  {
+    "source": "claude",
+    "file": "src/sm4_gcm.c",
+    "line": "136-149",
+    "severity": "critical",
+    "title": "KEK handle destroyed before use causing NULL key handle",
+    "problem": "Same issue as sm4_cipher.c. When using KEK mode with a pre-generated key handle, calling InitCtx with NULL/0 key destroys the existing hKeyHandle at lines 136-139, but doesn't recreate it for the KEY_SRC_KEK + key==NULL case.",
+    "code": "if (ctx->hKeyHandle != NULL) {\n    (void)SDF_DL_DestroyKey(ctx->hSessionHandle, ctx->hKeyHandle);\n    ctx->hKeyHandle = NULL;\n}\n...\n} else if (key != NULL && keyLen > 0) {\n    ret = SDF_DL_ImportKeyWithKEK(...);\n}\n/* else: hKeyHandle is already set by GEN_KEY ctrl, use it directly */\n/* But it was just destroyed above! */",
+    "fix": "/* Only destroy if we're going to create a new one */\nif ((ctx->keySource == GCM_KEY_SRC_RAW) || (key != NULL && keyLen > 0)) {\n    if (ctx->hKeyHandle != NULL) {\n        (void)SDF_DL_DestroyKey(ctx->hSessionHandle, ctx->hKeyHandle);\n        ctx->hKeyHandle = NULL;\n    }\n}"
+  },
+  {
+    "source": "claude",
+    "file": "src/sm4_cipher.c",
+    "line": "247-264",
+    "severity": "high",
+    "title": "Stack buffer with wrapped key not cleansed before return",
+    "problem": "When val==NULL, tmpBuf[64] on the stack holds the wrapped key material after SDF_DL_GenerateKeyWithKEK. This sensitive data is not cleared with BSL_SAL_CleanseData before the function returns, potentially leaking wrapped key material on the stack.",
+    "code": "unsigned char tmpBuf[64];\nif (wrapBuf == NULL || wrapLen == 0) {\n    wrapBuf = tmpBuf;\n    wrapLen = sizeof(tmpBuf);\n}\n...\nint ret = SDF_DL_GenerateKeyWithKEK(ctx->hSessionHandle, 128, SGD_SM4_ECB,\n    ctx->kekIndex, wrapBuf, &wrapLen, &ctx->hKeyHandle);\n/* tmpBuf now contains wrapped key but is not cleansed */\nreturn CRYPT_SUCCESS;",
+    "fix": "unsigned char tmpBuf[64];\nif (wrapBuf == NULL || wrapLen == 0) {\n    wrapBuf = tmpBuf;\n    wrapLen = sizeof(tmpBuf);\n}\n...\nint ret = SDF_DL_GenerateKeyWithKEK(ctx->hSessionHandle, 128, SGD_SM4_ECB,\n    ctx->kekIndex, wrapBuf, &wrapLen, &ctx->hKeyHandle);\nif (ret == SDR_OK && wrapBuf == tmpBuf) {\n    BSL_SAL_CleanseData(tmpBuf, sizeof(tmpBuf));\n}\nreturn CRYPT_SUCCESS;"
+  },
+  {
+    "source": "claude",
+    "file": "src/sm4_gcm.c",
+    "line": "327-336",
+    "severity": "high",
+    "title": "Stack buffer with wrapped key not cleansed before return",
+    "problem": "Same issue as sm4_cipher.c. When val==NULL, tmpBuf[64] holds wrapped key material but is not cleared with BSL_SAL_CleanseData before returning.",
+    "code": "unsigned char tmpBuf[64];\nunsigned int  wrapLen = (val != NULL && valLen > 0) ? valLen : sizeof(tmpBuf);\nunsigned char *wrapBuf = (val != NULL && valLen > 0) ? (unsigned char *)val : tmpBuf;\nint ret = SDF_DL_GenerateKeyWithKEK(ctx->hSessionHandle, 128, SGD_SM4_GCM,\n    ctx->kekIndex, wrapBuf, &wrapLen, &ctx->hKeyHandle);\n/* tmpBuf contains wrapped key material but is not cleansed */",
+    "fix": "unsigned char tmpBuf[64];\nunsigned int  wrapLen = (val != NULL && valLen > 0) ? valLen : sizeof(tmpBuf);\nunsigned char *wrapBuf = (val != NULL && valLen > 0) ? (unsigned char *)val : tmpBuf;\nint ret = SDF_DL_GenerateKeyWithKEK(ctx->hSessionHandle, 128, SGD_SM4_GCM,\n    ctx->kekIndex, wrapBuf, &wrapLen, &ctx->hKeyHandle);\nif (ret == SDR_OK && wrapBuf == tmpBuf) {\n    BSL_SAL_CleanseData(tmpBuf, sizeof(tmpBuf));\n}\nreturn CRYPT_SUCCESS;"
+  },
+  {
+    "source": "claude",
+    "file": "demo/sm4_gcm.c",
+    "line": "56",
+    "severity": "medium",
+    "title": "Inconsistent library format macro usage",
+    "problem": "sm4_gcm.c uses BSL_SAL_LIB_FMT_SO while all other demo files (sm3_hash.c, sm4_cbc.c, sm4_ecb.c, sm2_sign.c, etc.) use BSL_SAL_LIB_FMT_LIBSO. Inconsistency may cause compilation issues if only one macro is defined.",
+    "code": "int ret = CRYPT_EAL_ProviderLoad(libCtx, BSL_SAL_LIB_FMT_SO, \"SDFProv\", provParams, NULL);",
+    "fix": "int ret = CRYPT_EAL_ProviderLoad(libCtx, BSL_SAL_LIB_FMT_LIBSO, \"SDFProv\", provParams, NULL);"
+  },
+  {
+    "source": "claude",
+    "file": "src/sm4_cipher.c",
+    "line": "247-264",
+    "severity": "medium",
+    "title": "Wrapped key output not retrievable when val is NULL",
+    "problem": "When val==NULL, the wrapped key is written to tmpBuf but there's no way for the caller to retrieve it. The wrappedLen (actual wrapped key size) is not returned to the caller via valLen or any output parameter. This makes the function unusable for getting wrapped key output when passing NULL val.",
+    "code": "unsigned int wrapLen = valLen;  /* Input: size of caller's buffer */\nunsigned char *wrapBuf = (unsigned char *)val;\nunsigned char tmpBuf[64];\nif (wrapBuf == NULL || wrapLen == 0) {\n    wrapBuf = tmpBuf;\n    wrapLen = sizeof(tmpBuf);\n}\n/* After GenerateKeyWithKEK, wrapLen contains actual size but caller can't access it */\nreturn CRYPT_SUCCESS;  /* Caller has no way to get the wrapped key data or its size */",
+    "fix": "/* Document that val must not be NULL when output is needed */\n/* OR: Add output mechanism for wrapped key size */"
+  },
+  {
+    "source": "claude",
+    "file": "demo/sm4_cbc.c",
+    "line": "1-2",
+    "severity": "low",
+    "title": "Duplicate stdio.h include",
+    "problem": "Line 1 and line 2 both include <stdio.h>, which is redundant.",
+    "code": "#include <stdio.h>\n#include <stdio.h>",
+    "fix": "#include <stdio.h>"
+  },
+  {
+    "source": "claude",
+    "file": "src/sm4_gcm.c",
+    "line": "267-279",
+    "severity": "low",
+    "title": "Missing validation in CRYPT_CTRL_SET_AAD for NULL val with zero valLen",
+    "problem": "The check `if (val == NULL && valLen != 0)` returns error only when val is NULL AND valLen is non-zero. This allows val=NULL with valLen=0 to proceed, which would cause memcpy(NULL, ...) to be called. The condition at line 275 `if (val != NULL && valLen > 0)` prevents the memcpy, but the logic is confusing.",
+    "code": "if (val == NULL && valLen != 0) {\n    return CRYPT_INVALID_ARG;\n}\nif (valLen > SM4_GCM_AAD_MAX) {\n    return CRYPT_INVALID_ARG;\n}\nif (val != NULL && valLen > 0) {\n    memcpy(ctx->aad, val, valLen);\n}\nctx->aadLen = valLen;  /* Sets aadLen to 0, clearing AAD - this is intentional */",
+    "fix": "/* The current logic is actually correct - it allows clearing AAD by passing val=NULL, valLen=0 */\n/* But the condition could be clearer: */\nif (valLen > SM4_GCM_AAD_MAX) {\n    return CRYPT_INVALID_ARG;\n}\nif (val != NULL) {\n    if (valLen == 0) {\n        return CRYPT_INVALID_ARG;  /* val non-NULL but valLen is 0 */\n    }\n    memcpy(ctx->aad, val, valLen);\n}\nctx->aadLen = valLen;"
+  }
+]
