@@ -1,0 +1,77 @@
+{
+  "context": {
+    "owner": "openHiTLS",
+    "repo": "openhitls",
+    "pr_id": "1085",
+    "title": "",
+    "reviewers": [
+      "claude",
+      "gemini",
+      "codex"
+    ]
+  },
+  "statistics": {
+    "total": 5,
+    "critical": 0,
+    "high": 1,
+    "medium": 0,
+    "low": 4
+  },
+  "issues": [
+    {
+      "file": "tls/handshake/recv/src/recv_server_hello.c",
+      "line": "164",
+      "severity": "high",
+      "title": "EMS force check ignores legacy compatibility field, allowing silent downgrade",
+      "reviewers": "CODEX",
+      "confidence": "likely",
+      "problem": "The new EMS FORCE check only validates `emsMode` without considering the legacy `isSupportExtendedMasterSecret` flag. If existing code sets `isSupportExtendedMasterSecret = true` directly using the old API (HITLS_CFG_SetSupportExtendedMasterSecret), the `emsMode` remains `HITLS_EMS_MODE_PREFER`. Consequently, the client will not enforce EMS and may unexpectedly accept a non-EMS ServerHello, creating a backward compatibility gap that weakens security guarantees.",
+      "code": "if (ctx->config.tlsConfig.emsMode == HITLS_EMS_MODE_FORCE && !serverHello->haveExtendedMasterSecret) {\n    BSL_LOG_BINLOG_FIXLEN(BINLOG_ID17084, BSL_LOG_LEVEL_ERR, BSL_LOG_BINLOG_TYPE_RUN,\n        \"ExtendedMasterSecret err\", 0, 0, 0, 0);\n    ctx->method.sendAlert(ctx, ALERT_LEVEL_FATAL, ALERT_HANDSHAKE_FAILURE);\n    return HITLS_MSG_HANDLE_INVALID_EXTENDED_MASTER_SECRET;\n}",
+      "fix": "int32_t emsMode = ctx->config.tlsConfig.emsMode;\n/* Backward compatibility: legacy flag true implies FORCE mode. */\nif (ctx->config.tlsConfig.isSupportExtendedMasterSecret) {\n    emsMode = HITLS_EMS_MODE_FORCE;\n}\nif (emsMode == HITLS_EMS_MODE_FORCE && !serverHello->haveExtendedMasterSecret) {\n    BSL_LOG_BINLOG_FIXLEN(BINLOG_ID17084, BSL_LOG_LEVEL_ERR, BSL_LOG_BINLOG_TYPE_RUN,\n        \"ExtendedMasterSecret err\", 0, 0, 0, 0);\n    ctx->method.sendAlert(ctx, ALERT_LEVEL_FATAL, ALERT_HANDSHAKE_FAILURE);\n    return HITLS_MSG_HANDLE_INVALID_EXTENDED_MASTER_SECRET;\n}"
+    },
+    {
+      "file": "include/tls/hitls.h",
+      "line": "1804-1806",
+      "severity": "low",
+      "title": "New API documentation omits invalid-mode error return",
+      "reviewers": "CODEX",
+      "confidence": "trusted",
+      "problem": "The public API documentation for `HITLS_SetExtendedMasterSecretMode` does not document `HITLS_INVALID_INPUT` as a possible return value. However, the underlying implementation (`HITLS_CFG_SetExtendedMasterSecretMode` at config.c:1347-1348) returns this error code when an invalid mode value (other than FORBID, PREFER, or FORCE) is passed. Users calling this API with invalid mode values will receive an undocumented error code.",
+      "code": "/**\n * @brief   Set extended master secret mode.\n *\n * @param   ctx  [IN] TLS connection handle\n * @param   mode [IN] EMS mode. See HITLS_EMS_MODE_*.\n * @retval  HITLS_SUCCESS, if successful.\n * @retval  HITLS_NULL_INPUT, if ctx is NULL.\n */\nint32_t HITLS_SetExtendedMasterSecretMode(HITLS_Ctx *ctx, int32_t mode);",
+      "fix": "/**\n * @brief   Set extended master secret mode.\n *\n * @param   ctx  [IN] TLS connection handle\n * @param   mode [IN] EMS mode. See HITLS_EMS_MODE_*.\n * @retval  HITLS_SUCCESS, if successful.\n * @retval  HITLS_NULL_INPUT, if ctx is NULL.\n * @retval  HITLS_INVALID_INPUT, if mode is invalid.\n */\nint32_t HITLS_SetExtendedMasterSecretMode(HITLS_Ctx *ctx, int32_t mode);"
+    },
+    {
+      "file": "tls/handshake/recv/src/recv_client_hello.c",
+      "line": "1216-1217",
+      "severity": "low",
+      "title": "Unnecessary (void) casts for used parameters",
+      "reviewers": "CLAUDE",
+      "confidence": "trusted",
+      "problem": "The function `ServerProcessClientHelloExt` casts `ctx` and `clientHello` parameters to (void) at the beginning to suppress unused parameter warnings. However, both parameters are actually used later in the function at lines 1219-1220. The (void) casts are misleading and should be removed for the parameters that are used.",
+      "code": "static int32_t ServerProcessClientHelloExt(TLS_Ctx *ctx, const ClientHelloMsg *clientHello)\n{\n#ifdef HITLS_TLS_FEATURE_EXTENDED_MASTER_SECRET\n    int32_t ret = HITLS_SUCCESS;\n    (void)ret;\n    (void)clientHello;  // Parameter IS used below\n    (void)ctx;          // Parameter IS used below\n    /* Sets the extended master key flag */\n    if (ctx->config.tlsConfig.emsMode == HITLS_EMS_MODE_FORCE &&\n        !clientHello->extension.flag.haveExtendedMasterSecret) {",
+      "fix": "static int32_t ServerProcessClientHelloExt(TLS_Ctx *ctx, const ClientHelloMsg *clientHello)\n{\n#ifdef HITLS_TLS_FEATURE_EXTENDED_MASTER_SECRET\n    (void)ret;  /* Keep this, ret is intentionally unused */\n    /* Sets the extended master key flag */\n    if (ctx->config.tlsConfig.emsMode == HITLS_EMS_MODE_FORCE &&\n        !clientHello->extension.flag.haveExtendedMasterSecret) {"
+    },
+    {
+      "file": "tls/handshake/recv/src/recv_client_hello.c",
+      "line": "966",
+      "severity": "low",
+      "title": "Unnecessary (void) cast for used parameter",
+      "reviewers": "CLAUDE",
+      "confidence": "trusted",
+      "problem": "In function `ResumeCheckExtendedMasterScret`, the parameter `clientHello` is cast to (void) at line 966, but is actually used at line 970 to check the `haveExtendedMasterSecret` flag. The (void) cast is misleading and should be removed.",
+      "code": "static int32_t ResumeCheckExtendedMasterScret(TLS_Ctx *ctx, const ClientHelloMsg *clientHello, HITLS_Session **sess)\n{\n    if (*sess == NULL) {\n        return HITLS_SUCCESS;\n    }\n    (void)clientHello;\n    bool haveExtMasterSecret = false;\n    HITLS_SESS_GetHaveExtMasterSecret(*sess, &haveExtMasterSecret);\n    if (haveExtMasterSecret) {\n        if (!clientHello->extension.flag.haveExtendedMasterSecret) {",
+      "fix": "static int32_t ResumeCheckExtendedMasterScret(TLS_Ctx *ctx, const ClientHelloMsg *clientHello, HITLS_Session **sess)\n{\n    if (*sess == NULL) {\n        return HITLS_SUCCESS;\n    }\n    bool haveExtMasterSecret = false;\n    HITLS_SESS_GetHaveExtMasterSecret(*sess, &haveExtMasterSecret);\n    if (haveExtMasterSecret) {\n        if (!clientHello->extension.flag.haveExtendedMasterSecret) {"
+    },
+    {
+      "file": "tls/config/src/config_default.c",
+      "line": "307-308",
+      "severity": "low",
+      "title": "Default EMS mode changes behavior vs legacy API",
+      "reviewers": "CLAUDE",
+      "confidence": "evaluate",
+      "problem": "The default initialization sets `emsMode` to `HITLS_EMS_MODE_PREFER` (0), which means clients will send the EMS extension by default (per pack_extensions.c:951: `haveExtendedMasterSecret = (tlsConfig->emsMode != HITLS_EMS_MODE_FORBID)`). The legacy field `isSupportExtendedMasterSecret` is set to false. With PREFER mode, clients WILL send the EMS extension, unlike the previous default behavior. This behavioral change could affect compatibility with servers that do not handle the EMS extension correctly. This needs human evaluation to determine if this is an intentional design change or an unintended side effect.",
+      "code": "static void BasicInitConfig(HITLS_Config *config)\n{\n    config->isSupportExtendedMasterSecret = false;\n    config->emsMode = HITLS_EMS_MODE_PREFER;",
+      "fix": "static void BasicInitConfig(HITLS_Config *config)\n{\n    config->isSupportExtendedMasterSecret = false;\n    config->emsMode = HITLS_EMS_MODE_FORBID;  /* Don't send EMS extension by default for backward compatibility */"
+    }
+  ]
+}

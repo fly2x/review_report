@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Final Report: openHiTLS/openhitls#1085</title>
+    <style>
+        :root { --critical: #dc2626; --high: #ea580c; --medium: #ca8a04; --low: #65a30d;
+                 --trusted: #059669; --likely: #0284c7; --evaluate: #7c3aed; }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: system-ui, sans-serif; background: #f8fafc; color: #1e293b; padding: 2rem; line-height: 1.6; }
+        .container { max-width: 900px; margin: 0 auto; }
+        h1 { font-size: 1.75rem; margin-bottom: 0.5rem; }
+        .subtitle { color: #64748b; margin-bottom: 1rem; }
+        .stats { display: flex; gap: 1rem; margin-bottom: 2rem; flex-wrap: wrap; }
+        .stat { background: white; border: 1px solid #e2e8f0; border-radius: 0.5rem; padding: 1rem; min-width: 100px; text-align: center; }
+        .stat-value { font-size: 1.5rem; font-weight: 700; }
+        .stat-label { font-size: 0.875rem; color: #64748b; }
+        .stat.critical .stat-value { color: var(--critical); }
+        .stat.high .stat-value { color: var(--high); }
+        .stat.medium .stat-value { color: var(--medium); }
+        .stat.low .stat-value { color: var(--low); }
+        .reviewers { background: #e0e7ff; color: #3730a3; padding: 0.5rem 1rem; border-radius: 0.5rem; margin-bottom: 2rem; }
+        .section { margin-bottom: 2rem; }
+        .section-title { font-size: 1.1rem; font-weight: 600; padding: 0.5rem 1rem; border-radius: 0.5rem 0.5rem 0 0; color: white; }
+        .section-title.critical { background: var(--critical); }
+        .section-title.high { background: var(--high); }
+        .section-title.medium { background: var(--medium); }
+        .section-title.low { background: var(--low); }
+        .issue { background: white; border: 1px solid #e2e8f0; border-top: none; padding: 1rem; }
+        .issue:last-child { border-radius: 0 0 0.5rem 0.5rem; }
+        .issue-title { font-weight: 600; margin-bottom: 0.25rem; }
+        .issue-location { font-family: monospace; font-size: 0.875rem; color: #64748b; margin-bottom: 0.5rem; }
+        .issue-meta { font-size: 0.75rem; margin-bottom: 0.75rem; display: flex; gap: 0.75rem; align-items: center; }
+        .issue-meta .reviewers { background: #f1f5f9; color: #475569; padding: 0.25rem 0.5rem; border-radius: 0.25rem; margin: 0; }
+        .confidence-badge { padding: 0.25rem 0.5rem; border-radius: 0.25rem; font-weight: 500; }
+        .confidence-badge.trusted { background: #d1fae5; color: #065f46; }
+        .confidence-badge.likely { background: #dbeafe; color: #1e40af; }
+        .confidence-badge.evaluate { background: #ede9fe; color: #5b21b6; }
+        pre { background: #1e293b; color: #e2e8f0; padding: 0.75rem; border-radius: 0.375rem; overflow-x: auto; font-size: 0.875rem; margin: 0.5rem 0; }
+        .problem { margin: 0.75rem 0; }
+        .fix-label { font-weight: 600; margin-top: 0.75rem; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Final Code Review Report</h1>
+        <div class="subtitle">openHiTLS/openhitls - PR #1085</div>
+        <p style="margin-bottom: 1rem;"></p>
+
+        <div class="stats">
+            <div class="stat"><div class="stat-value">5</div><div class="stat-label">Total</div></div>
+            <div class="stat critical"><div class="stat-value">0</div><div class="stat-label">Critical</div></div>
+            <div class="stat high"><div class="stat-value">1</div><div class="stat-label">High</div></div>
+            <div class="stat medium"><div class="stat-value">0</div><div class="stat-label">Medium</div></div>
+            <div class="stat low"><div class="stat-value">4</div><div class="stat-label">Low</div></div>
+        </div>
+
+        <div class="reviewers">Reviewers: claude, gemini, codex</div>
+<div class="section"><div class="section-title high">High</div>
+<div class="issue">
+                <div class="issue-title">EMS force check ignores legacy compatibility field, allowing silent downgrade</div>
+                <div class="issue-location">tls/handshake/recv/src/recv_server_hello.c:164</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CODEX</span>
+                    <span class="confidence-badge likely">置信度: 较可信</span>
+                </div>
+                <pre>if (ctx-&gt;config.tlsConfig.emsMode == HITLS_EMS_MODE_FORCE &amp;&amp; !serverHello-&gt;haveExtendedMasterSecret) {
+    BSL_LOG_BINLOG_FIXLEN(BINLOG_ID17084, BSL_LOG_LEVEL_ERR, BSL_LOG_BINLOG_TYPE_RUN,
+        "ExtendedMasterSecret err", 0, 0, 0, 0);
+    ctx-&gt;method.sendAlert(ctx, ALERT_LEVEL_FATAL, ALERT_HANDSHAKE_FAILURE);
+    return HITLS_MSG_HANDLE_INVALID_EXTENDED_MASTER_SECRET;
+}</pre>
+                <div class="problem"><strong>Issue:</strong> The new EMS FORCE check only validates `emsMode` without considering the legacy `isSupportExtendedMasterSecret` flag. If existing code sets `isSupportExtendedMasterSecret = true` directly using the old API (HITLS_CFG_SetSupportExtendedMasterSecret), the `emsMode` remains `HITLS_EMS_MODE_PREFER`. Consequently, the client will not enforce EMS and may unexpectedly accept a non-EMS ServerHello, creating a backward compatibility gap that weakens security guarantees.</div>
+                <div class="fix-label">Fix:</div><pre>int32_t emsMode = ctx-&gt;config.tlsConfig.emsMode;
+/* Backward compatibility: legacy flag true implies FORCE mode. */
+if (ctx-&gt;config.tlsConfig.isSupportExtendedMasterSecret) {
+    emsMode = HITLS_EMS_MODE_FORCE;
+}
+if (emsMode == HITLS_EMS_MODE_FORCE &amp;&amp; !serverHello-&gt;haveExtendedMasterSecret) {
+    BSL_LOG_BINLOG_FIXLEN(BINLOG_ID17084, BSL_LOG_LEVEL_ERR, BSL_LOG_BINLOG_TYPE_RUN,
+        "ExtendedMasterSecret err", 0, 0, 0, 0);
+    ctx-&gt;method.sendAlert(ctx, ALERT_LEVEL_FATAL, ALERT_HANDSHAKE_FAILURE);
+    return HITLS_MSG_HANDLE_INVALID_EXTENDED_MASTER_SECRET;
+}</pre>
+            </div>
+</div>
+<div class="section"><div class="section-title low">Low</div>
+<div class="issue">
+                <div class="issue-title">New API documentation omits invalid-mode error return</div>
+                <div class="issue-location">include/tls/hitls.h:1804-1806</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CODEX</span>
+                    <span class="confidence-badge trusted">置信度: 可信</span>
+                </div>
+                <pre>/**
+ * @brief   Set extended master secret mode.
+ *
+ * @param   ctx  [IN] TLS connection handle
+ * @param   mode [IN] EMS mode. See HITLS_EMS_MODE_*.
+ * @retval  HITLS_SUCCESS, if successful.
+ * @retval  HITLS_NULL_INPUT, if ctx is NULL.
+ */
+int32_t HITLS_SetExtendedMasterSecretMode(HITLS_Ctx *ctx, int32_t mode);</pre>
+                <div class="problem"><strong>Issue:</strong> The public API documentation for `HITLS_SetExtendedMasterSecretMode` does not document `HITLS_INVALID_INPUT` as a possible return value. However, the underlying implementation (`HITLS_CFG_SetExtendedMasterSecretMode` at config.c:1347-1348) returns this error code when an invalid mode value (other than FORBID, PREFER, or FORCE) is passed. Users calling this API with invalid mode values will receive an undocumented error code.</div>
+                <div class="fix-label">Fix:</div><pre>/**
+ * @brief   Set extended master secret mode.
+ *
+ * @param   ctx  [IN] TLS connection handle
+ * @param   mode [IN] EMS mode. See HITLS_EMS_MODE_*.
+ * @retval  HITLS_SUCCESS, if successful.
+ * @retval  HITLS_NULL_INPUT, if ctx is NULL.
+ * @retval  HITLS_INVALID_INPUT, if mode is invalid.
+ */
+int32_t HITLS_SetExtendedMasterSecretMode(HITLS_Ctx *ctx, int32_t mode);</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">Unnecessary (void) casts for used parameters</div>
+                <div class="issue-location">tls/handshake/recv/src/recv_client_hello.c:1216-1217</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CLAUDE</span>
+                    <span class="confidence-badge trusted">置信度: 可信</span>
+                </div>
+                <pre>static int32_t ServerProcessClientHelloExt(TLS_Ctx *ctx, const ClientHelloMsg *clientHello)
+{
+#ifdef HITLS_TLS_FEATURE_EXTENDED_MASTER_SECRET
+    int32_t ret = HITLS_SUCCESS;
+    (void)ret;
+    (void)clientHello;  // Parameter IS used below
+    (void)ctx;          // Parameter IS used below
+    /* Sets the extended master key flag */
+    if (ctx-&gt;config.tlsConfig.emsMode == HITLS_EMS_MODE_FORCE &amp;&amp;
+        !clientHello-&gt;extension.flag.haveExtendedMasterSecret) {</pre>
+                <div class="problem"><strong>Issue:</strong> The function `ServerProcessClientHelloExt` casts `ctx` and `clientHello` parameters to (void) at the beginning to suppress unused parameter warnings. However, both parameters are actually used later in the function at lines 1219-1220. The (void) casts are misleading and should be removed for the parameters that are used.</div>
+                <div class="fix-label">Fix:</div><pre>static int32_t ServerProcessClientHelloExt(TLS_Ctx *ctx, const ClientHelloMsg *clientHello)
+{
+#ifdef HITLS_TLS_FEATURE_EXTENDED_MASTER_SECRET
+    (void)ret;  /* Keep this, ret is intentionally unused */
+    /* Sets the extended master key flag */
+    if (ctx-&gt;config.tlsConfig.emsMode == HITLS_EMS_MODE_FORCE &amp;&amp;
+        !clientHello-&gt;extension.flag.haveExtendedMasterSecret) {</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">Unnecessary (void) cast for used parameter</div>
+                <div class="issue-location">tls/handshake/recv/src/recv_client_hello.c:966</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CLAUDE</span>
+                    <span class="confidence-badge trusted">置信度: 可信</span>
+                </div>
+                <pre>static int32_t ResumeCheckExtendedMasterScret(TLS_Ctx *ctx, const ClientHelloMsg *clientHello, HITLS_Session **sess)
+{
+    if (*sess == NULL) {
+        return HITLS_SUCCESS;
+    }
+    (void)clientHello;
+    bool haveExtMasterSecret = false;
+    HITLS_SESS_GetHaveExtMasterSecret(*sess, &amp;haveExtMasterSecret);
+    if (haveExtMasterSecret) {
+        if (!clientHello-&gt;extension.flag.haveExtendedMasterSecret) {</pre>
+                <div class="problem"><strong>Issue:</strong> In function `ResumeCheckExtendedMasterScret`, the parameter `clientHello` is cast to (void) at line 966, but is actually used at line 970 to check the `haveExtendedMasterSecret` flag. The (void) cast is misleading and should be removed.</div>
+                <div class="fix-label">Fix:</div><pre>static int32_t ResumeCheckExtendedMasterScret(TLS_Ctx *ctx, const ClientHelloMsg *clientHello, HITLS_Session **sess)
+{
+    if (*sess == NULL) {
+        return HITLS_SUCCESS;
+    }
+    bool haveExtMasterSecret = false;
+    HITLS_SESS_GetHaveExtMasterSecret(*sess, &amp;haveExtMasterSecret);
+    if (haveExtMasterSecret) {
+        if (!clientHello-&gt;extension.flag.haveExtendedMasterSecret) {</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">Default EMS mode changes behavior vs legacy API</div>
+                <div class="issue-location">tls/config/src/config_default.c:307-308</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CLAUDE</span>
+                    <span class="confidence-badge evaluate">置信度: 需评估</span>
+                </div>
+                <pre>static void BasicInitConfig(HITLS_Config *config)
+{
+    config-&gt;isSupportExtendedMasterSecret = false;
+    config-&gt;emsMode = HITLS_EMS_MODE_PREFER;</pre>
+                <div class="problem"><strong>Issue:</strong> The default initialization sets `emsMode` to `HITLS_EMS_MODE_PREFER` (0), which means clients will send the EMS extension by default (per pack_extensions.c:951: `haveExtendedMasterSecret = (tlsConfig->emsMode != HITLS_EMS_MODE_FORBID)`). The legacy field `isSupportExtendedMasterSecret` is set to false. With PREFER mode, clients WILL send the EMS extension, unlike the previous default behavior. This behavioral change could affect compatibility with servers that do not handle the EMS extension correctly. This needs human evaluation to determine if this is an intentional design change or an unintended side effect.</div>
+                <div class="fix-label">Fix:</div><pre>static void BasicInitConfig(HITLS_Config *config)
+{
+    config-&gt;isSupportExtendedMasterSecret = false;
+    config-&gt;emsMode = HITLS_EMS_MODE_FORBID;  /* Don't send EMS extension by default for backward compatibility */</pre>
+            </div>
+</div>
+</div></body></html>

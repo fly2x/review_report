@@ -1,0 +1,22 @@
+[
+  {
+    "source": "codex",
+    "file": "tls/handshake/recv/src/recv_server_hello.c",
+    "line": "164",
+    "severity": "high",
+    "title": "EMS force check ignores legacy compatibility field, allowing silent downgrade",
+    "problem": "The new check uses only `emsMode`. If existing callers set `config->isSupportExtendedMasterSecret = true` directly (legacy/internal usage still present), `emsMode` can remain `HITLS_EMS_MODE_PREFER`, so the client no longer enforces EMS and may accept a non-EMS ServerHello unexpectedly.",
+    "code": "if (ctx->config.tlsConfig.emsMode == HITLS_EMS_MODE_FORCE && !serverHello->haveExtendedMasterSecret) {\n    BSL_LOG_BINLOG_FIXLEN(BINLOG_ID17084, BSL_LOG_LEVEL_ERR, BSL_LOG_BINLOG_TYPE_RUN,\n        \"ExtendedMasterSecret err\", 0, 0, 0, 0);\n    ctx->method.sendAlert(ctx, ALERT_LEVEL_FATAL, ALERT_HANDSHAKE_FAILURE);\n    return HITLS_MSG_HANDLE_INVALID_EXTENDED_MASTER_SECRET;\n}",
+    "fix": "int32_t emsMode = ctx->config.tlsConfig.emsMode;\n/* Backward compatibility: legacy flag true implies FORCE. */\nif (ctx->config.tlsConfig.isSupportExtendedMasterSecret) {\n    emsMode = HITLS_EMS_MODE_FORCE;\n}\nif (emsMode == HITLS_EMS_MODE_FORCE && !serverHello->haveExtendedMasterSecret) {\n    BSL_LOG_BINLOG_FIXLEN(BINLOG_ID17084, BSL_LOG_LEVEL_ERR, BSL_LOG_BINLOG_TYPE_RUN,\n        \"ExtendedMasterSecret err\", 0, 0, 0, 0);\n    ctx->method.sendAlert(ctx, ALERT_LEVEL_FATAL, ALERT_HANDSHAKE_FAILURE);\n    return HITLS_MSG_HANDLE_INVALID_EXTENDED_MASTER_SECRET;\n}"
+  },
+  {
+    "source": "codex",
+    "file": "include/tls/hitls.h",
+    "line": "1804-1806",
+    "severity": "low",
+    "title": "New API documentation omits invalid-mode error return",
+    "problem": "`HITLS_SetExtendedMasterSecretMode` can return `HITLS_INVALID_INPUT` (via `HITLS_CFG_SetExtendedMasterSecretMode`) for unsupported mode values, but this is not documented in the public API comment.",
+    "code": "* @retval  HITLS_SUCCESS, if successful.\n * @retval  HITLS_NULL_INPUT, if ctx is NULL.\n */\nint32_t HITLS_SetExtendedMasterSecretMode(HITLS_Ctx *ctx, int32_t mode);",
+    "fix": "* @retval  HITLS_SUCCESS, if successful.\n * @retval  HITLS_NULL_INPUT, if ctx is NULL.\n * @retval  HITLS_INVALID_INPUT, if mode is invalid.\n */\nint32_t HITLS_SetExtendedMasterSecretMode(HITLS_Ctx *ctx, int32_t mode);"
+  }
+]

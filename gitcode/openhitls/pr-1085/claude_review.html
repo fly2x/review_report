@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Code Review: openHiTLS/openhitls#1085 - CLAUDE</title>
+    <style>
+        :root { --critical: #dc2626; --high: #ea580c; --medium: #ca8a04; --low: #65a30d; }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: system-ui, sans-serif; background: #f8fafc; color: #1e293b; padding: 2rem; line-height: 1.6; }
+        .container { max-width: 900px; margin: 0 auto; }
+        h1 { font-size: 1.5rem; margin-bottom: 0.5rem; }
+        .subtitle { color: #64748b; margin-bottom: 2rem; }
+        .section { margin-bottom: 2rem; }
+        .section-title { font-size: 1.1rem; font-weight: 600; padding: 0.5rem 1rem; border-radius: 0.5rem 0.5rem 0 0; color: white; }
+        .section-title.critical { background: var(--critical); }
+        .section-title.high { background: var(--high); }
+        .section-title.medium { background: var(--medium); }
+        .section-title.low { background: var(--low); }
+        .issue { background: white; border: 1px solid #e2e8f0; border-top: none; padding: 1rem; }
+        .issue:last-child { border-radius: 0 0 0.5rem 0.5rem; }
+        .issue-title { font-weight: 600; margin-bottom: 0.25rem; }
+        .issue-location { font-family: monospace; font-size: 0.875rem; color: #64748b; margin-bottom: 0.75rem; }
+        .issue-source { font-size: 0.75rem; color: #94a3b8; margin-top: 0.5rem; }
+        pre { background: #1e293b; color: #e2e8f0; padding: 0.75rem; border-radius: 0.375rem; overflow-x: auto; font-size: 0.875rem; margin: 0.5rem 0; }
+        .problem { margin: 0.75rem 0; }
+        .fix-label { font-weight: 600; margin-top: 0.75rem; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Code Review: openHiTLS/openhitls#1085 - CLAUDE</h1>
+        <div class="subtitle"></div>
+<div class="section"><div class="section-title low">Low</div>
+<div class="issue">
+                <div class="issue-title">Unnecessary (void) casts for used parameters</div>
+                <div class="issue-location">tls/handshake/recv/src/recv_client_hello.c:1216-1217</div>
+                <pre>static int32_t ServerProcessClientHelloExt(TLS_Ctx *ctx, const ClientHelloMsg *clientHello)
+{
+#ifdef HITLS_TLS_FEATURE_EXTENDED_MASTER_SECRET
+    int32_t ret = HITLS_SUCCESS;
+    (void)ret;
+    (void)clientHello;  // Parameter IS used below
+    (void)ctx;          // Parameter IS used below
+    /* Sets the extended master key flag */
+    if (ctx-&gt;config.tlsConfig.emsMode == HITLS_EMS_MODE_FORCE &amp;&amp;
+        !clientHello-&gt;extension.flag.haveExtendedMasterSecret) {</pre>
+                <div class="problem"><strong>Issue:</strong> The function ServerProcessClientHelloExt casts ctx and clientHello to (void) at the beginning, but these parameters are actually used later in the function (lines 1219-1232). The (void) casts are typically used to suppress unused parameter warnings, but here they are unnecessary.</div>
+                <div class="fix-label">Fix:</div><pre>static int32_t ServerProcessClientHelloExt(TLS_Ctx *ctx, const ClientHelloMsg *clientHello)
+{
+#ifdef HITLS_TLS_FEATURE_EXTENDED_MASTER_SECRET
+    (void)ret;  // Keep this, ret is unused
+    /* Sets the extended master key flag */
+    if (ctx-&gt;config.tlsConfig.emsMode == HITLS_EMS_MODE_FORCE &amp;&amp;
+        !clientHello-&gt;extension.flag.haveExtendedMasterSecret) {</pre>
+                <div class="issue-source">Reviewer: claude</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">Default EMS mode changes behavior vs legacy API</div>
+                <div class="issue-location">tls/config/src/config_default.c:307-308</div>
+                <pre>static void BasicInitConfig(HITLS_Config *config)
+{
+    config-&gt;isSupportExtendedMasterSecret = false;
+    config-&gt;emsMode = HITLS_EMS_MODE_PREFER;</pre>
+                <div class="problem"><strong>Issue:</strong> The default initialization sets emsMode to HITLS_EMS_MODE_PREFER (0), which means clients will send the EMS extension by default. The legacy field isSupportExtendedMasterSecret is set to false. With PREFER mode, clients WILL send the EMS extension (unlike the previous default behavior). This could be a behavioral change that affects compatibility with servers that don't handle EMS extension correctly.</div>
+                <div class="fix-label">Fix:</div><pre>static void BasicInitConfig(HITLS_Config *config)
+{
+    config-&gt;isSupportExtendedMasterSecret = false;
+    config-&gt;emsMode = HITLS_EMS_MODE_FORBID;  /* Don't send EMS extension by default */</pre>
+                <div class="issue-source">Reviewer: claude</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">Unnecessary (void) cast for used parameter</div>
+                <div class="issue-location">tls/handshake/recv/src/recv_client_hello.c:966</div>
+                <pre>static int32_t ResumeCheckExtendedMasterScret(TLS_Ctx *ctx, const ClientHelloMsg *clientHello, HITLS_Session **sess)
+{
+    if (*sess == NULL) {
+        return HITLS_SUCCESS;
+    }
+    (void)clientHello;
+    bool haveExtMasterSecret = false;
+    HITLS_SESS_GetHaveExtMasterSecret(*sess, &amp;haveExtMasterSecret);
+    if (haveExtMasterSecret) {
+        if (!clientHello-&gt;extension.flag.haveExtendedMasterSecret) {</pre>
+                <div class="problem"><strong>Issue:</strong> In ResumeCheckExtendedMasterScret, clientHello is cast to (void) but is actually used on line 970 to check haveExtendedMasterSecret flag.</div>
+                <div class="fix-label">Fix:</div><pre>static int32_t ResumeCheckExtendedMasterScret(TLS_Ctx *ctx, const ClientHelloMsg *clientHello, HITLS_Session **sess)
+{
+    if (*sess == NULL) {
+        return HITLS_SUCCESS;
+    }
+    bool haveExtMasterSecret = false;
+    HITLS_SESS_GetHaveExtMasterSecret(*sess, &amp;haveExtMasterSecret);
+    if (haveExtMasterSecret) {
+        if (!clientHello-&gt;extension.flag.haveExtendedMasterSecret) {</pre>
+                <div class="issue-source">Reviewer: claude</div>
+            </div>
+</div>
+</div></body></html>

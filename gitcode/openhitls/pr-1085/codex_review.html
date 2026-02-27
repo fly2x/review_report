@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Code Review: openHiTLS/openhitls#1085 - CODEX</title>
+    <style>
+        :root { --critical: #dc2626; --high: #ea580c; --medium: #ca8a04; --low: #65a30d; }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: system-ui, sans-serif; background: #f8fafc; color: #1e293b; padding: 2rem; line-height: 1.6; }
+        .container { max-width: 900px; margin: 0 auto; }
+        h1 { font-size: 1.5rem; margin-bottom: 0.5rem; }
+        .subtitle { color: #64748b; margin-bottom: 2rem; }
+        .section { margin-bottom: 2rem; }
+        .section-title { font-size: 1.1rem; font-weight: 600; padding: 0.5rem 1rem; border-radius: 0.5rem 0.5rem 0 0; color: white; }
+        .section-title.critical { background: var(--critical); }
+        .section-title.high { background: var(--high); }
+        .section-title.medium { background: var(--medium); }
+        .section-title.low { background: var(--low); }
+        .issue { background: white; border: 1px solid #e2e8f0; border-top: none; padding: 1rem; }
+        .issue:last-child { border-radius: 0 0 0.5rem 0.5rem; }
+        .issue-title { font-weight: 600; margin-bottom: 0.25rem; }
+        .issue-location { font-family: monospace; font-size: 0.875rem; color: #64748b; margin-bottom: 0.75rem; }
+        .issue-source { font-size: 0.75rem; color: #94a3b8; margin-top: 0.5rem; }
+        pre { background: #1e293b; color: #e2e8f0; padding: 0.75rem; border-radius: 0.375rem; overflow-x: auto; font-size: 0.875rem; margin: 0.5rem 0; }
+        .problem { margin: 0.75rem 0; }
+        .fix-label { font-weight: 600; margin-top: 0.75rem; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Code Review: openHiTLS/openhitls#1085 - CODEX</h1>
+        <div class="subtitle"></div>
+<div class="section"><div class="section-title high">High</div>
+<div class="issue">
+                <div class="issue-title">EMS force check ignores legacy compatibility field, allowing silent downgrade</div>
+                <div class="issue-location">tls/handshake/recv/src/recv_server_hello.c:164</div>
+                <pre>if (ctx-&gt;config.tlsConfig.emsMode == HITLS_EMS_MODE_FORCE &amp;&amp; !serverHello-&gt;haveExtendedMasterSecret) {
+    BSL_LOG_BINLOG_FIXLEN(BINLOG_ID17084, BSL_LOG_LEVEL_ERR, BSL_LOG_BINLOG_TYPE_RUN,
+        "ExtendedMasterSecret err", 0, 0, 0, 0);
+    ctx-&gt;method.sendAlert(ctx, ALERT_LEVEL_FATAL, ALERT_HANDSHAKE_FAILURE);
+    return HITLS_MSG_HANDLE_INVALID_EXTENDED_MASTER_SECRET;
+}</pre>
+                <div class="problem"><strong>Issue:</strong> The new check uses only `emsMode`. If existing callers set `config->isSupportExtendedMasterSecret = true` directly (legacy/internal usage still present), `emsMode` can remain `HITLS_EMS_MODE_PREFER`, so the client no longer enforces EMS and may accept a non-EMS ServerHello unexpectedly.</div>
+                <div class="fix-label">Fix:</div><pre>int32_t emsMode = ctx-&gt;config.tlsConfig.emsMode;
+/* Backward compatibility: legacy flag true implies FORCE. */
+if (ctx-&gt;config.tlsConfig.isSupportExtendedMasterSecret) {
+    emsMode = HITLS_EMS_MODE_FORCE;
+}
+if (emsMode == HITLS_EMS_MODE_FORCE &amp;&amp; !serverHello-&gt;haveExtendedMasterSecret) {
+    BSL_LOG_BINLOG_FIXLEN(BINLOG_ID17084, BSL_LOG_LEVEL_ERR, BSL_LOG_BINLOG_TYPE_RUN,
+        "ExtendedMasterSecret err", 0, 0, 0, 0);
+    ctx-&gt;method.sendAlert(ctx, ALERT_LEVEL_FATAL, ALERT_HANDSHAKE_FAILURE);
+    return HITLS_MSG_HANDLE_INVALID_EXTENDED_MASTER_SECRET;
+}</pre>
+                <div class="issue-source">Reviewer: codex</div>
+            </div>
+</div>
+<div class="section"><div class="section-title low">Low</div>
+<div class="issue">
+                <div class="issue-title">New API documentation omits invalid-mode error return</div>
+                <div class="issue-location">include/tls/hitls.h:1804-1806</div>
+                <pre>* @retval  HITLS_SUCCESS, if successful.
+ * @retval  HITLS_NULL_INPUT, if ctx is NULL.
+ */
+int32_t HITLS_SetExtendedMasterSecretMode(HITLS_Ctx *ctx, int32_t mode);</pre>
+                <div class="problem"><strong>Issue:</strong> `HITLS_SetExtendedMasterSecretMode` can return `HITLS_INVALID_INPUT` (via `HITLS_CFG_SetExtendedMasterSecretMode`) for unsupported mode values, but this is not documented in the public API comment.</div>
+                <div class="fix-label">Fix:</div><pre>* @retval  HITLS_SUCCESS, if successful.
+ * @retval  HITLS_NULL_INPUT, if ctx is NULL.
+ * @retval  HITLS_INVALID_INPUT, if mode is invalid.
+ */
+int32_t HITLS_SetExtendedMasterSecretMode(HITLS_Ctx *ctx, int32_t mode);</pre>
+                <div class="issue-source">Reviewer: codex</div>
+            </div>
+</div>
+</div></body></html>
