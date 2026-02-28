@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Final Report: openHiTLS/sdf4j#19</title>
+    <style>
+        :root { --critical: #dc2626; --high: #ea580c; --medium: #ca8a04; --low: #65a30d;
+                 --trusted: #059669; --likely: #0284c7; --evaluate: #7c3aed; }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: system-ui, sans-serif; background: #f8fafc; color: #1e293b; padding: 2rem; line-height: 1.6; }
+        .container { max-width: 900px; margin: 0 auto; }
+        h1 { font-size: 1.75rem; margin-bottom: 0.5rem; }
+        .subtitle { color: #64748b; margin-bottom: 1rem; }
+        .stats { display: flex; gap: 1rem; margin-bottom: 2rem; flex-wrap: wrap; }
+        .stat { background: white; border: 1px solid #e2e8f0; border-radius: 0.5rem; padding: 1rem; min-width: 100px; text-align: center; }
+        .stat-value { font-size: 1.5rem; font-weight: 700; }
+        .stat-label { font-size: 0.875rem; color: #64748b; }
+        .stat.critical .stat-value { color: var(--critical); }
+        .stat.high .stat-value { color: var(--high); }
+        .stat.medium .stat-value { color: var(--medium); }
+        .stat.low .stat-value { color: var(--low); }
+        .reviewers { background: #e0e7ff; color: #3730a3; padding: 0.5rem 1rem; border-radius: 0.5rem; margin-bottom: 2rem; }
+        .section { margin-bottom: 2rem; }
+        .section-title { font-size: 1.1rem; font-weight: 600; padding: 0.5rem 1rem; border-radius: 0.5rem 0.5rem 0 0; color: white; }
+        .section-title.critical { background: var(--critical); }
+        .section-title.high { background: var(--high); }
+        .section-title.medium { background: var(--medium); }
+        .section-title.low { background: var(--low); }
+        .issue { background: white; border: 1px solid #e2e8f0; border-top: none; padding: 1rem; }
+        .issue:last-child { border-radius: 0 0 0.5rem 0.5rem; }
+        .issue-title { font-weight: 600; margin-bottom: 0.25rem; }
+        .issue-location { font-family: monospace; font-size: 0.875rem; color: #64748b; margin-bottom: 0.5rem; }
+        .issue-meta { font-size: 0.75rem; margin-bottom: 0.75rem; display: flex; gap: 0.75rem; align-items: center; }
+        .issue-meta .reviewers { background: #f1f5f9; color: #475569; padding: 0.25rem 0.5rem; border-radius: 0.25rem; margin: 0; }
+        .confidence-badge { padding: 0.25rem 0.5rem; border-radius: 0.25rem; font-weight: 500; }
+        .confidence-badge.trusted { background: #d1fae5; color: #065f46; }
+        .confidence-badge.likely { background: #dbeafe; color: #1e40af; }
+        .confidence-badge.evaluate { background: #ede9fe; color: #5b21b6; }
+        pre { background: #1e293b; color: #e2e8f0; padding: 0.75rem; border-radius: 0.375rem; overflow-x: auto; font-size: 0.875rem; margin: 0.5rem 0; }
+        .problem { margin: 0.75rem 0; }
+        .fix-label { font-weight: 600; margin-top: 0.75rem; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Final Code Review Report</h1>
+        <div class="subtitle">openHiTLS/sdf4j - PR #19</div>
+        <p style="margin-bottom: 1rem;"></p>
+
+        <div class="stats">
+            <div class="stat"><div class="stat-value">7</div><div class="stat-label">Total</div></div>
+            <div class="stat critical"><div class="stat-value">0</div><div class="stat-label">Critical</div></div>
+            <div class="stat high"><div class="stat-value">4</div><div class="stat-label">High</div></div>
+            <div class="stat medium"><div class="stat-value">2</div><div class="stat-label">Medium</div></div>
+            <div class="stat low"><div class="stat-value">1</div><div class="stat-label">Low</div></div>
+        </div>
+
+        <div class="reviewers">Reviewers: claude, gemini, codex</div>
+<div class="section"><div class="section-title high">High</div>
+<div class="issue">
+                <div class="issue-title">HSM resource leak on KeyAgreementResult object creation failure</div>
+                <div class="issue-location">sdf4j/src/main/native/src/sdf_jni_keygen.c:363-369</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: GEMINI</span>
+                    <span class="confidence-badge trusted">置信度: 可信</span>
+                </div>
+                <pre>/* 创建 KeyAgreementResult 对象 */
+jobject result = native_to_java_KeyAgreementResult (env, agreement_handle,
+                                             &amp;sponsor_pub_key, &amp;sponsor_tmp_pub_key);
+if (result == NULL) {
+    THROW_SDF_EXCEPTION(env, 0x0100001C, "Failed to create KeyAgreementResult");
+    return NULL;
+}</pre>
+                <div class="problem"><strong>Issue:</strong> In `JNI_SDF_GenerateAgreementDataWithECC`, if `native_to_java_KeyAgreementResult` fails (returns NULL due to memory/JNI errors), the `agreement_handle` created by `SDF_GenerateAgreementDataWithECC` is never destroyed. This leaks handles directly on the hardware device. The agreement handle must be cleaned up using `SDF_DestroyKey` before throwing the exception, similar to how `key_handle` is cleaned up in `JNI_SDF_GenerateAgreementDataAndKeyWithECC` at line 519.</div>
+                <div class="fix-label">Fix:</div><pre>/* 创建 KeyAgreementResult 对象 */
+jobject result = native_to_java_KeyAgreementResult (env, agreement_handle,
+                                             &amp;sponsor_pub_key, &amp;sponsor_tmp_pub_key);
+if (result == NULL) {
+    if (g_sdf_functions.SDF_DestroyKey != NULL) {
+        (void)g_sdf_functions.SDF_DestroyKey((HANDLE)sessionHandle, (HANDLE)agreement_handle);
+    }
+    THROW_SDF_EXCEPTION(env, 0x0100001C, "Failed to create KeyAgreementResult");
+    return NULL;
+}</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">Missing Java wrapper for SDF_GenerateAgreementDataWithECC leads to untracked agreement handle</div>
+                <div class="issue-location">sdf4j/src/main/java/org/openhitls/sdf4j/SDF.java:507-508</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: GEMINI</span>
+                    <span class="confidence-badge trusted">置信度: 可信</span>
+                </div>
+                <pre>public native KeyAgreementResult SDF_GenerateAgreementDataWithECC(long sessionHandle, int keyIndex, int keyBits,
+        byte[] sponsorID) throws SDFException;</pre>
+                <div class="problem"><strong>Issue:</strong> Unlike `SDF_GenerateKeyWithECC` and `SDF_GenerateAgreementDataAndKeyWithECC`, which are correctly wrapped to register their resulting handles with `SessionResource`, `SDF_GenerateAgreementDataWithECC` is declared as a `native` method without a wrapper. As a result, its returned `agreementHandle` is not tracked and will not be automatically destroyed when the session is closed, potentially leading to a resource leak on the HSM.</div>
+                <div class="fix-label">Fix:</div><pre>public KeyAgreementResult SDF_GenerateAgreementDataWithECC(long sessionHandle, int keyIndex, int keyBits,
+        byte[] sponsorID) throws SDFException {
+    KeyAgreementResult result = SDF_GenerateAgreementDataWithECC_Native(sessionHandle, keyIndex, keyBits, sponsorID);
+    SessionResource sessionResource = gSessResource.get(sessionHandle);
+    if (sessionResource != null) {
+        sessionResource.addKey(result.getAgreementHandle());
+    }
+    return result;
+}
+
+private native KeyAgreementResult SDF_GenerateAgreementDataWithECC_Native(long sessionHandle, int keyIndex, int keyBits,
+        byte[] sponsorID) throws SDFException;</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">Incorrect native method name registration for SDF_GenerateAgreementDataWithECC</div>
+                <div class="issue-location">sdf4j/src/main/native/src/sdf_jni_register.c:45</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: GEMINI</span>
+                    <span class="confidence-badge trusted">置信度: 可信</span>
+                </div>
+                <pre>{"SDF_GenerateAgreementDataWithECC", "(JII[B)Lorg/openhitls/sdf4j/types/KeyAgreementResult;", (void*)JNI_SDF_GenerateAgreementDataWithECC},</pre>
+                <div class="problem"><strong>Issue:</strong> Due to the missing Java wrapper (the method is `native` instead of wrapped), the JNI method registration for `SDF_GenerateAgreementDataWithECC` does not follow the `_Native` suffix pattern used by other wrapped methods. If the Java wrapper is added as described in the previous issue, this registration must be updated to match the required `_Native` suffix.</div>
+                <div class="fix-label">Fix:</div><pre>{"SDF_GenerateAgreementDataWithECC_Native", "(JII[B)Lorg/openhitls/sdf4j/types/KeyAgreementResult;", (void*)JNI_SDF_GenerateAgreementDataWithECC},</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">Error-path cleanup can dereference a null function pointer</div>
+                <div class="issue-location">sdf4j/src/main/native/src/sdf_jni_keygen.c:518-521</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CODEX</span>
+                    <span class="confidence-badge likely">置信度: 较可信</span>
+                </div>
+                <pre>if (result == NULL) {
+    g_sdf_functions.SDF_DestroyKey((HANDLE)sessionHandle, (HANDLE)key_handle);
+    THROW_SDF_EXCEPTION(env, 0x0100001C, "Failed to create KeyAgreementResult");
+    return NULL;
+}</pre>
+                <div class="problem"><strong>Issue:</strong> On `KeyAgreementResult` creation failure in `JNI_SDF_GenerateAgreementDataAndKeyWithECC`, cleanup unconditionally calls `g_sdf_functions.SDF_DestroyKey` without checking if the function pointer is NULL. If the SDF library failed to load properly or doesn't export this symbol, this becomes a null pointer crash while handling an error.</div>
+                <div class="fix-label">Fix:</div><pre>if (result == NULL) {
+    if (key_handle != 0 &amp;&amp; g_sdf_functions.SDF_DestroyKey != NULL) {
+        (void)g_sdf_functions.SDF_DestroyKey((HANDLE)sessionHandle, (HANDLE)key_handle);
+    }
+    THROW_SDF_EXCEPTION(env, 0x0100001C, "Failed to create KeyAgreementResult");
+    return NULL;
+}</pre>
+            </div>
+</div>
+<div class="section"><div class="section-title medium">Medium</div>
+<div class="issue">
+                <div class="issue-title">JNI local reference leak in native_to_java_KeyAgreementResult</div>
+                <div class="issue-location">sdf4j/src/main/native/src/type_conversion.c:643-646</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CLAUDE</span>
+                    <span class="confidence-badge trusted">置信度: 可信</span>
+                </div>
+                <pre>jobject java_tmp_pub_key = native_to_java_ECCPublicKey(env, tmp_pub_key);
+if (java_tmp_pub_key == NULL) {
+    return NULL;  // LEAK: java_pub_key not deleted
+}</pre>
+                <div class="problem"><strong>Issue:</strong> When `java_tmp_pub_key` conversion fails (returns NULL), the function returns NULL without deleting the local reference to `java_pub_key`. While local references are automatically freed when the native method returns, this is bad practice and could cause issues in long-running native methods with many conversions or if this function is refactored.</div>
+                <div class="fix-label">Fix:</div><pre>jobject java_tmp_pub_key = native_to_java_ECCPublicKey(env, tmp_pub_key);
+if (java_tmp_pub_key == NULL) {
+    (*env)-&gt;DeleteLocalRef(env, java_pub_key);
+    return NULL;
+}</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">Public ECC key-agreement APIs changed incompatibly without migration path</div>
+                <div class="issue-location">sdf4j/src/main/java/org/openhitls/sdf4j/SDF.java:507-568</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CODEX</span>
+                    <span class="confidence-badge trusted">置信度: 可信</span>
+                </div>
+                <pre>// Old API (before this PR):
+public native long SDF_GenerateAgreementDataWithECC(
+        long sessionHandle, int keyIndex, int keyBits,
+        byte[] sponsorID, ECCPublicKey sponsorPublicKey,
+        ECCPublicKey sponsorTmpPublicKey) throws SDFException;
+
+// New API (this PR):
+public native KeyAgreementResult SDF_GenerateAgreementDataWithECC(long sessionHandle, int keyIndex, int keyBits,
+        byte[] sponsorID) throws SDFException;</pre>
+                <div class="problem"><strong>Issue:</strong> The PR replaces existing public method signatures for `SDF_GenerateAgreementDataWithECC` (6.3.12) and `SDF_GenerateAgreementDataAndKeyWithECC` (6.3.14). The old signatures took output parameters for public keys and returned a `long` handle. The new signatures return `KeyAgreementResult` objects. Existing downstream code compiled against the old API will break at both source and binary level.</div>
+                <div class="fix-label">Fix:</div><pre>@Deprecated
+public long SDF_GenerateAgreementDataWithECC(
+        long sessionHandle, int keyIndex, int keyBits,
+        byte[] sponsorID, ECCPublicKey sponsorPublicKey,
+        ECCPublicKey sponsorTmpPublicKey) throws SDFException {
+    KeyAgreementResult result = SDF_GenerateAgreementDataWithECC(sessionHandle, keyIndex, keyBits, sponsorID);
+    if (sponsorPublicKey != null) {
+        copyEccPublicKey(result.getPublicKey(), sponsorPublicKey);
+    }
+    if (sponsorTmpPublicKey != null) {
+        copyEccPublicKey(result.getTmpPublicKey(), sponsorTmpPublicKey);
+    }
+    return result.getAgreementHandle();
+}
+
+@Deprecated
+public long SDF_GenerateAgreementDataAndKeyWithECC(
+        long sessionHandle, int keyIndex, int keyBits,
+        byte[] responseID, byte[] sponsorID,
+        ECCPublicKey sponsorPublicKey, ECCPublicKey sponsorTmpPublicKey,
+        ECCPublicKey responsePublicKey, ECCPublicKey responseTmpPublicKey) throws SDFException {
+    KeyAgreementResult result = SDF_GenerateAgreementDataAndKeyWithECC(
+            sessionHandle, keyIndex, keyBits, responseID, sponsorID, sponsorPublicKey, sponsorTmpPublicKey);
+    if (responsePublicKey != null) {
+        copyEccPublicKey(result.getPublicKey(), responsePublicKey);
+    }
+    if (responseTmpPublicKey != null) {
+        copyEccPublicKey(result.getTmpPublicKey(), responseTmpPublicKey);
+    }
+    return result.getAgreementHandle();
+}
+
+private static void copyEccPublicKey(ECCPublicKey src, ECCPublicKey dst) {
+    if (src != null &amp;&amp; dst != null) {
+        dst.setBits(src.getBits());
+        dst.setX(src.getX());
+        dst.setY(src.getY());
+    }
+}</pre>
+            </div>
+</div>
+<div class="section"><div class="section-title low">Low</div>
+<div class="issue">
+                <div class="issue-title">Misleading use of Assume.assumeTrue with contradictory message</div>
+                <div class="issue-location">sdf4j/src/test/java/org/openhitls/sdf4j/KeyManagementTest.java:707-710</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CLAUDE</span>
+                    <span class="confidence-badge trusted">置信度: 可信</span>
+                </div>
+                <pre>} catch (SDFException e) {
+    if (e.getErrorCode() == ErrorCode.SDR_NOTSUPPORT) {
+        System.out.println("[跳过] 获取私钥权限不支持");
+        Assume.assumeTrue("获取私钥权限不需要或不支持，继续测试...", false);</pre>
+                <div class="problem"><strong>Issue:</strong> The code uses `Assume.assumeTrue("获取私钥权限不需要或不支持，继续测试...", false)` which always causes the test to be skipped. The message says "continue testing" but passing `false` as the condition means "don't continue - skip the test". This creates confusion for anyone reading the test code. The intent is clear (skip when not supported), but the message is misleading.</div>
+                <div class="fix-label">Fix:</div><pre>} catch (SDFException e) {
+    if (e.getErrorCode() == ErrorCode.SDR_NOTSUPPORT) {
+        System.out.println("[跳过] 获取私钥权限不支持");
+        Assume.assumeTrue("获取私钥权限不支持，跳过测试", false);</pre>
+            </div>
+</div>
+</div></body></html>

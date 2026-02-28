@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Code Review: openHiTLS/sdf4j#19 - CLAUDE</title>
+    <style>
+        :root { --critical: #dc2626; --high: #ea580c; --medium: #ca8a04; --low: #65a30d; }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: system-ui, sans-serif; background: #f8fafc; color: #1e293b; padding: 2rem; line-height: 1.6; }
+        .container { max-width: 900px; margin: 0 auto; }
+        h1 { font-size: 1.5rem; margin-bottom: 0.5rem; }
+        .subtitle { color: #64748b; margin-bottom: 2rem; }
+        .section { margin-bottom: 2rem; }
+        .section-title { font-size: 1.1rem; font-weight: 600; padding: 0.5rem 1rem; border-radius: 0.5rem 0.5rem 0 0; color: white; }
+        .section-title.critical { background: var(--critical); }
+        .section-title.high { background: var(--high); }
+        .section-title.medium { background: var(--medium); }
+        .section-title.low { background: var(--low); }
+        .issue { background: white; border: 1px solid #e2e8f0; border-top: none; padding: 1rem; }
+        .issue:last-child { border-radius: 0 0 0.5rem 0.5rem; }
+        .issue-title { font-weight: 600; margin-bottom: 0.25rem; }
+        .issue-location { font-family: monospace; font-size: 0.875rem; color: #64748b; margin-bottom: 0.75rem; }
+        .issue-source { font-size: 0.75rem; color: #94a3b8; margin-top: 0.5rem; }
+        pre { background: #1e293b; color: #e2e8f0; padding: 0.75rem; border-radius: 0.375rem; overflow-x: auto; font-size: 0.875rem; margin: 0.5rem 0; }
+        .problem { margin: 0.75rem 0; }
+        .fix-label { font-weight: 600; margin-top: 0.75rem; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Code Review: openHiTLS/sdf4j#19 - CLAUDE</h1>
+        <div class="subtitle"></div>
+<div class="section"><div class="section-title medium">Medium</div>
+<div class="issue">
+                <div class="issue-title">JNI local reference leak in native_to_java_KeyAgreementResult</div>
+                <div class="issue-location">sdf4j/src/main/native/src/type_conversion.c:633-653</div>
+                <pre>jobject native_to_java_KeyAgreementResult (JNIEnv *env, HANDLE agreement_handle,
+                                    const ECCrefPublicKey *pub_key,
+                                    const ECCrefPublicKey *tmp_pub_key)
+{
+    /* Convert ECCrefPublicKey to Java ECCPublicKey objects */
+    jobject java_pub_key = native_to_java_ECCPublicKey(env, pub_key);
+    if (java_pub_key == NULL) {
+        return NULL;
+    }
+
+    jobject java_tmp_pub_key = native_to_java_ECCPublicKey(env, tmp_pub_key);
+    if (java_tmp_pub_key == NULL) {
+        return NULL;  // LEAK: java_pub_key not deleted
+    }</pre>
+                <div class="problem"><strong>Issue:</strong> When java_tmp_pub_key conversion fails (returns NULL), the function returns NULL without deleting the local reference to java_pub_key. While local references are automatically freed when the native method returns, this is bad practice and could cause issues in long-running native methods with many conversions.</div>
+                <div class="fix-label">Fix:</div><pre>jobject native_to_java_KeyAgreementResult (JNIEnv *env, HANDLE agreement_handle,
+                                    const ECCrefPublicKey *pub_key,
+                                    const ECCrefPublicKey *tmp_pub_key)
+{
+    /* Convert ECCrefPublicKey to Java ECCPublicKey objects */
+    jobject java_pub_key = native_to_java_ECCPublicKey(env, pub_key);
+    if (java_pub_key == NULL) {
+        return NULL;
+    }
+
+    jobject java_tmp_pub_key = native_to_java_ECCPublicKey(env, tmp_pub_key);
+    if (java_tmp_pub_key == NULL) {
+        (*env)-&gt;DeleteLocalRef(env, java_pub_key);
+        return NULL;
+    }</pre>
+                <div class="issue-source">Reviewer: claude</div>
+            </div>
+</div>
+<div class="section"><div class="section-title low">Low</div>
+<div class="issue">
+                <div class="issue-title">Misleading use of Assume.assumeTrue with false condition</div>
+                <div class="issue-location">sdf4j/src/test/java/org/openhitls/sdf4j/KeyManagementTest.java:719-723</div>
+                <pre>try {
+                sdf.SDF_GetPrivateKeyAccessRight(sessionHandle, keyIndex, keyPassword);
+                accessRightObtained = true;
+            } catch (SDFException e) {
+                if (e.getErrorCode() == ErrorCode.SDR_NOTSUPPORT) {
+                    System.out.println("[跳过] 获取私钥权限不支持");
+                    Assume.assumeTrue("获取私钥权限不需要或不支持，继续测试...", false);
+                } else {
+                    System.out.println(e.getMessage());
+                    throw e;
+                }
+            }</pre>
+                <div class="problem"><strong>Issue:</strong> The code uses `Assume.assumeTrue("获取私钥权限不需要或不支持，继续测试...", false)` which always causes the test to be skipped. The message says "continue testing" but passing false means "don't continue - skip the test". This is confusing and should use the actual condition.</div>
+                <div class="fix-label">Fix:</div><pre>try {
+                sdf.SDF_GetPrivateKeyAccessRight(sessionHandle, keyIndex, keyPassword);
+                accessRightObtained = true;
+            } catch (SDFException e) {
+                if (e.getErrorCode() == ErrorCode.SDR_NOTSUPPORT) {
+                    System.out.println("[跳过] 获取私钥权限不支持");
+                    Assume.assumeTrue("获取私钥权限不支持，跳过测试", false);
+                } else {
+                    System.out.println(e.getMessage());
+                    throw e;
+                }
+            }</pre>
+                <div class="issue-source">Reviewer: claude</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">Inconsistent struct initialization style</div>
+                <div class="issue-location">sdf4j/src/main/native/src/sdf_jni_keygen.c:355-357</div>
+                <pre>/* 公钥和临时公钥由设备生成 */
+    ECCrefPublicKey sponsor_pub_key = {0};
+    ECCrefPublicKey sponsor_tmp_pub_key = {0};</pre>
+                <div class="problem"><strong>Issue:</strong> The code uses `= {0}` for initializing ECCrefPublicKey structures, which is correct but inconsistent with the earlier pattern using `memset(&sponsor_tmp_pub_key, 0, sizeof(ECCrefPublicKey))`. While both work, consistency is preferred for maintainability.</div>
+                <div class="fix-label">Fix:</div><pre>/* 公钥和临时公钥由设备生成 */
+    ECCrefPublicKey sponsor_pub_key;
+    ECCrefPublicKey sponsor_tmp_pub_key;
+    memset(&amp;sponsor_pub_key, 0, sizeof(ECCrefPublicKey));
+    memset(&amp;sponsor_tmp_pub_key, 0, sizeof(ECCrefPublicKey));</pre>
+                <div class="issue-source">Reviewer: claude</div>
+            </div>
+</div>
+</div></body></html>

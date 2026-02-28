@@ -1,0 +1,32 @@
+[
+  {
+    "source": "gemini",
+    "file": "sdf4j/src/main/native/src/sdf_jni_keygen.c",
+    "line": "360-365",
+    "severity": "high",
+    "title": "HSM Resource Leak on KeyAgreementResult object creation failure",
+    "problem": "In `JNI_SDF_GenerateAgreementDataWithECC`, if the `native_to_java_KeyAgreementResult` function fails (returns NULL due to memory/JNI errors), the `agreement_handle` created in the HSM via `SDF_GenerateAgreementDataWithECC` is never destroyed. This leaks handles directly on the hardware device. It must be explicitly destroyed before throwing the exception, similar to how `key_handle` is cleaned up in `JNI_SDF_GenerateAgreementDataAndKeyWithECC`.",
+    "code": "/* 创建 KeyAgreementResult 对象 */\n    jobject result = native_to_java_KeyAgreementResult (env, agreement_handle,\n                                                 &sponsor_pub_key, &sponsor_tmp_pub_key);\n    if (result == NULL) {\n        THROW_SDF_EXCEPTION(env, 0x0100001C, \"Failed to create KeyAgreementResult\");\n        return NULL;\n    }",
+    "fix": "/* 创建 KeyAgreementResult 对象 */\n    jobject result = native_to_java_KeyAgreementResult (env, agreement_handle,\n                                                 &sponsor_pub_key, &sponsor_tmp_pub_key);\n    if (result == NULL) {\n        g_sdf_functions.SDF_DestroyKey((HANDLE)sessionHandle, (HANDLE)agreement_handle);\n        THROW_SDF_EXCEPTION(env, 0x0100001C, \"Failed to create KeyAgreementResult\");\n        return NULL;\n    }"
+  },
+  {
+    "source": "gemini",
+    "file": "sdf4j/src/main/java/org/openhitls/sdf4j/SDF.java",
+    "line": "504-508",
+    "severity": "medium",
+    "title": "Missing Java wrapper for SDF_GenerateAgreementDataWithECC leads to untracked agreement handle",
+    "problem": "Unlike `SDF_GenerateKeyWithECC` and `SDF_GenerateAgreementDataAndKeyWithECC`, which were correctly wrapped in this PR to register their resulting keys with `SessionResource`, `SDF_GenerateAgreementDataWithECC` was left as a `native` method. As a result, its returned `agreementHandle` is not tracked and will not be automatically destroyed when the session is closed, potentially leading to a resource leak on the HSM.",
+    "code": "public native KeyAgreementResult SDF_GenerateAgreementDataWithECC(long sessionHandle, int keyIndex, int keyBits,\n            byte[] sponsorID) throws SDFException;",
+    "fix": "public KeyAgreementResult SDF_GenerateAgreementDataWithECC(long sessionHandle, int keyIndex, int keyBits,\n            byte[] sponsorID) throws SDFException {\n        KeyAgreementResult result = SDF_GenerateAgreementDataWithECC_Native(sessionHandle, keyIndex, keyBits, sponsorID);\n        SessionResource sessionResource = gSessResource.get(sessionHandle);\n        if (sessionResource != null) {\n            sessionResource.addKey(result.getAgreementHandle());\n        }\n        return result;\n    }\n\n    private native KeyAgreementResult SDF_GenerateAgreementDataWithECC_Native(long sessionHandle, int keyIndex, int keyBits,\n            byte[] sponsorID) throws SDFException;"
+  },
+  {
+    "source": "gemini",
+    "file": "sdf4j/src/main/native/src/sdf_jni_register.c",
+    "line": "45",
+    "severity": "medium",
+    "title": "Incorrect native method name registration for SDF_GenerateAgreementDataWithECC",
+    "problem": "Due to the missing Java wrapper in `SDF.java` (described in the previous issue), the JNI method registration for `SDF_GenerateAgreementDataWithECC` was not updated to `_Native`. It must be updated to match the required `_Native` suffix to enable the correct wrapping and tracking of the agreement handle.",
+    "code": "{\"SDF_GenerateAgreementDataWithECC\", \"(JII[B)Lorg/openhitls/sdf4j/types/KeyAgreementResult;\", (void*)JNI_SDF_GenerateAgreementDataWithECC},",
+    "fix": "{\"SDF_GenerateAgreementDataWithECC_Native\", \"(JII[B)Lorg/openhitls/sdf4j/types/KeyAgreementResult;\", (void*)JNI_SDF_GenerateAgreementDataWithECC},"
+  }
+]

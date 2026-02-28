@@ -1,0 +1,32 @@
+[
+  {
+    "source": "codex",
+    "file": "sdf4j/src/main/native/src/sdf_jni_keygen.c",
+    "line": "518-520",
+    "severity": "high",
+    "title": "Error-path cleanup can dereference a null function pointer",
+    "problem": "On `KeyAgreementResult` creation failure, cleanup unconditionally calls `g_sdf_functions.SDF_DestroyKey`. If that symbol is not loaded, this becomes a native null-call crash while handling an error.",
+    "code": "if (result == NULL) {\n    g_sdf_functions.SDF_DestroyKey((HANDLE)sessionHandle, (HANDLE)key_handle);\n    THROW_SDF_EXCEPTION(env, 0x0100001C, \"Failed to create KeyAgreementResult\");\n    return NULL;\n}",
+    "fix": "if (result == NULL) {\n    if (key_handle != 0 && g_sdf_functions.SDF_DestroyKey != NULL) {\n        (void)g_sdf_functions.SDF_DestroyKey((HANDLE)sessionHandle, (HANDLE)key_handle);\n    }\n    THROW_SDF_EXCEPTION(env, 0x0100001C, \"Failed to create KeyAgreementResult\");\n    return NULL;\n}"
+  },
+  {
+    "source": "codex",
+    "file": "sdf4j/src/main/java/org/openhitls/sdf4j/SDF.java",
+    "line": "507-508",
+    "severity": "medium",
+    "title": "Public ECC key-agreement APIs were changed incompatibly without compatibility overloads",
+    "problem": "The PR replaces existing public method signatures/return types for `SDF_GenerateAgreementDataWithECC` and `SDF_GenerateAgreementDataAndKeyWithECC`. Existing downstream code compiled against the old API will break (source and binary compatibility).",
+    "code": "public native KeyAgreementResult SDF_GenerateAgreementDataWithECC(long sessionHandle, int keyIndex, int keyBits,\n        byte[] sponsorID) throws SDFException;\n\npublic KeyAgreementResult SDF_GenerateAgreementDataAndKeyWithECC(\n        long sessionHandle, int keyIndex, int keyBits,\n        byte[] responseID, byte[] sponsorID,\n        ECCPublicKey sponsorPublicKey, ECCPublicKey sponsorTmpPublicKey) throws SDFException {\n    KeyAgreementResult result = SDF_GenerateAgreementDataAndKeyWithECC_Native(sessionHandle, keyIndex, keyBits,\n                responseID, sponsorID, sponsorPublicKey, sponsorTmpPublicKey);\n    ...\n    return result;\n}",
+    "fix": "@Deprecated\npublic long SDF_GenerateAgreementDataWithECC(\n        long sessionHandle, int keyIndex, int keyBits,\n        byte[] sponsorID, ECCPublicKey sponsorPublicKey,\n        ECCPublicKey sponsorTmpPublicKey) throws SDFException {\n    KeyAgreementResult result = SDF_GenerateAgreementDataWithECC(sessionHandle, keyIndex, keyBits, sponsorID);\n    copyEccPublicKey(result.getPublicKey(), sponsorPublicKey);\n    copyEccPublicKey(result.getTmpPublicKey(), sponsorTmpPublicKey);\n    return result.getAgreementHandle();\n}\n\n@Deprecated\npublic long SDF_GenerateAgreementDataAndKeyWithECC(\n        long sessionHandle, int keyIndex, int keyBits,\n        byte[] responseID, byte[] sponsorID,\n        ECCPublicKey sponsorPublicKey, ECCPublicKey sponsorTmpPublicKey,\n        ECCPublicKey responsePublicKey, ECCPublicKey responseTmpPublicKey) throws SDFException {\n    KeyAgreementResult result = SDF_GenerateAgreementDataAndKeyWithECC(\n            sessionHandle, keyIndex, keyBits, responseID, sponsorID, sponsorPublicKey, sponsorTmpPublicKey);\n    copyEccPublicKey(result.getPublicKey(), responsePublicKey);\n    copyEccPublicKey(result.getTmpPublicKey(), responseTmpPublicKey);\n    return result.getAgreementHandle();\n}\n\nprivate static void copyEccPublicKey(ECCPublicKey src, ECCPublicKey dst) {\n    if (src != null && dst != null) {\n        dst.setBits(src.getBits());\n        dst.setX(src.getX());\n        dst.setY(src.getY());\n    }\n}"
+  },
+  {
+    "source": "codex",
+    "file": "sdf4j/src/main/java/org/openhitls/sdf4j/types/KeyAgreementResult.java",
+    "line": "24-39",
+    "severity": "low",
+    "title": "Handle naming is ambiguous and mismatches actual semantics in 6.3.14 flow",
+    "problem": "The class exposes only `agreementHandle`, but in `SDF_GenerateAgreementDataAndKeyWithECC` this value is actually a key handle. This naming mismatch causes API misuse risk and contradicts method intent.",
+    "code": "private long agreementHandle;\n\npublic long getAgreementHandle() {\n    return agreementHandle;\n}",
+    "fix": "private long handle;\n\npublic KeyAgreementResult(long handle, ECCPublicKey publicKey, ECCPublicKey tmpPublicKey) {\n    this.handle = handle;\n    this.publicKey = publicKey;\n    this.tmpPublicKey = tmpPublicKey;\n}\n\n/** 6.3.12 usage */\npublic long getAgreementHandle() {\n    return handle;\n}\n\n/** 6.3.14 usage */\npublic long getKeyHandle() {\n    return handle;\n}"
+  }
+]
