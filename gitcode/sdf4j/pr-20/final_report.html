@@ -1,0 +1,284 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Final Report: openHiTLS/sdf4j#20</title>
+    <style>
+        :root { --critical: #dc2626; --high: #ea580c; --medium: #ca8a04; --low: #65a30d;
+                 --trusted: #059669; --likely: #0284c7; --evaluate: #7c3aed; }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: system-ui, sans-serif; background: #f8fafc; color: #1e293b; padding: 2rem; line-height: 1.6; }
+        .container { max-width: 900px; margin: 0 auto; }
+        h1 { font-size: 1.75rem; margin-bottom: 0.5rem; }
+        .subtitle { color: #64748b; margin-bottom: 1rem; }
+        .stats { display: flex; gap: 1rem; margin-bottom: 2rem; flex-wrap: wrap; }
+        .stat { background: white; border: 1px solid #e2e8f0; border-radius: 0.5rem; padding: 1rem; min-width: 100px; text-align: center; }
+        .stat-value { font-size: 1.5rem; font-weight: 700; }
+        .stat-label { font-size: 0.875rem; color: #64748b; }
+        .stat.critical .stat-value { color: var(--critical); }
+        .stat.high .stat-value { color: var(--high); }
+        .stat.medium .stat-value { color: var(--medium); }
+        .stat.low .stat-value { color: var(--low); }
+        .reviewers { background: #e0e7ff; color: #3730a3; padding: 0.5rem 1rem; border-radius: 0.5rem; margin-bottom: 2rem; }
+        .section { margin-bottom: 2rem; }
+        .section-title { font-size: 1.1rem; font-weight: 600; padding: 0.5rem 1rem; border-radius: 0.5rem 0.5rem 0 0; color: white; }
+        .section-title.critical { background: var(--critical); }
+        .section-title.high { background: var(--high); }
+        .section-title.medium { background: var(--medium); }
+        .section-title.low { background: var(--low); }
+        .issue { background: white; border: 1px solid #e2e8f0; border-top: none; padding: 1rem; }
+        .issue:last-child { border-radius: 0 0 0.5rem 0.5rem; }
+        .issue-title { font-weight: 600; margin-bottom: 0.25rem; }
+        .issue-location { font-family: monospace; font-size: 0.875rem; color: #64748b; margin-bottom: 0.5rem; }
+        .issue-meta { font-size: 0.75rem; margin-bottom: 0.75rem; display: flex; gap: 0.75rem; align-items: center; }
+        .issue-meta .reviewers { background: #f1f5f9; color: #475569; padding: 0.25rem 0.5rem; border-radius: 0.25rem; margin: 0; }
+        .confidence-badge { padding: 0.25rem 0.5rem; border-radius: 0.25rem; font-weight: 500; }
+        .confidence-badge.trusted { background: #d1fae5; color: #065f46; }
+        .confidence-badge.likely { background: #dbeafe; color: #1e40af; }
+        .confidence-badge.evaluate { background: #ede9fe; color: #5b21b6; }
+        pre { background: #1e293b; color: #e2e8f0; padding: 0.75rem; border-radius: 0.375rem; overflow-x: auto; font-size: 0.875rem; margin: 0.5rem 0; }
+        .problem { margin: 0.75rem 0; }
+        .fix-label { font-weight: 600; margin-top: 0.75rem; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Final Code Review Report</h1>
+        <div class="subtitle">openHiTLS/sdf4j - PR #20</div>
+        <p style="margin-bottom: 1rem;"></p>
+
+        <div class="stats">
+            <div class="stat"><div class="stat-value">10</div><div class="stat-label">Total</div></div>
+            <div class="stat critical"><div class="stat-value">2</div><div class="stat-label">Critical</div></div>
+            <div class="stat high"><div class="stat-value">5</div><div class="stat-label">High</div></div>
+            <div class="stat medium"><div class="stat-value">2</div><div class="stat-label">Medium</div></div>
+            <div class="stat low"><div class="stat-value">1</div><div class="stat-label">Low</div></div>
+        </div>
+
+        <div class="reviewers">Reviewers: claude, gemini, codex</div>
+<div class="section"><div class="section-title critical">Critical</div>
+<div class="issue">
+                <div class="issue-title">Buffer overflow - insufficient allocation for post-quantum KEM ciphertext</div>
+                <div class="issue-location">sdf4j/src/main/native/src/sdf_jni_hybrid.c:15</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CLAUDE, CODEX</span>
+                    <span class="confidence-badge trusted">置信度: 可信</span>
+                </div>
+                <pre>#define HYBRIDENCref_ECC_MAX_LEN 141
+...
+HybridCipher *cipher = (HybridCipher*)malloc(sizeof(HybridCipher) + HYBRIDENCref_ECC_MAX_LEN);</pre>
+                <div class="problem"><strong>Issue:</strong> HYBRIDENCref_ECC_MAX_LEN is defined as 141 bytes, which is insufficient for post-quantum KEM algorithms like MLKEM-1024 that produce ciphertexts up to 1568 bytes. When SDF_GenerateKeyWithEPK_Hybrid is called with hybrid algorithms (e.g., SGD_HYBRID_ENV_SM2_MLKEM_1024), the SDF library will write beyond the allocated buffer, causing memory corruption.</div>
+                <div class="fix-label">Fix:</div><pre>#define HYBRIDENC_MAX_ECC_CIPHER_LEN 2048  /* Large enough for MLKEM-1024 (1568) + overhead */
+...
+HybridCipher *cipher = (HybridCipher*)malloc(sizeof(HybridCipher) + HYBRIDENC_MAX_ECC_CIPHER_LEN);
+if (cipher == NULL) {
+    (*env)-&gt;ReleasePrimitiveArrayCritical(env, publicKey, pub_key_buf, JNI_ABORT);
+    THROW_SDF_EXCEPTION(env, SDR_NOBUFFER, "Memory allocation failed for cipher");
+    return NULL;
+}
+memset(cipher, 0, sizeof(HybridCipher) + HYBRIDENC_MAX_ECC_CIPHER_LEN);</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">Out-of-bounds read when copying nested ECCCipher</div>
+                <div class="issue-location">sdf4j/src/main/native/src/type_conversion.c:696-704</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CODEX</span>
+                    <span class="confidence-badge trusted">置信度: 可信</span>
+                </div>
+                <pre>temp_cts = java_to_native_ECCCipher_alloc(env, cts_obj);
+if (temp_cts != NULL) {
+    c_len = (jsize)temp_cts-&gt;L;
+}
+...
+size_t alloc_size = sizeof(HybridCipher) + c_len;
+...
+memcpy(&amp;native_cipher-&gt;ct_s, temp_cts, sizeof(ECCCipher) + c_len);</pre>
+                <div class="problem"><strong>Issue:</strong> c_len is taken from temp_cts->L (user-controlled Java field), not from the actual allocated buffer size. If Java's ECCCipher.L field is larger than the actual c[] array length, memcpy at line 727 reads beyond temp_cts buffer, causing memory corruption.</div>
+                <div class="fix-label">Fix:</div><pre>jbyteArray c_array = (jbyteArray)(*env)-&gt;GetObjectField(env, cts_obj, g_jni_cache.eccCipher.c);
+jsize actual_c_len = (c_array != NULL) ? (*env)-&gt;GetArrayLength(env, c_array) : 0;
+temp_cts = java_to_native_ECCCipher_alloc(env, cts_obj);
+if (temp_cts == NULL) {
+    return NULL;
+}
+/* Use the actual array length, not the L field from Java */
+c_len = actual_c_len;
+/* Also ensure L field reflects actual buffer size */
+if (temp_cts-&gt;L &gt; (ULONG)c_len) {
+    temp_cts-&gt;L = (ULONG)c_len;
+}</pre>
+            </div>
+</div>
+<div class="section"><div class="section-title high">High</div>
+<div class="issue">
+                <div class="issue-title">Unbounded ct_s length can trigger buffer over-read</div>
+                <div class="issue-location">sdf4j/src/main/native/src/sdf_jni_hybrid.c:125</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CODEX</span>
+                    <span class="confidence-badge trusted">置信度: 可信</span>
+                </div>
+                <pre>jobject result = native_to_java_HybridCipher(env, cipher, cipher-&gt;ct_s.L, key_handle);</pre>
+                <div class="problem"><strong>Issue:</strong> cipher->ct_s.L from SDF library is trusted directly without bounds checking. If the device returns an L value larger than the allocated HYBRIDENCref_ECC_MAX_LEN, native_to_java_HybridCipher will read beyond the cipher buffer.</div>
+                <div class="fix-label">Fix:</div><pre>ULONG ct_s_len = cipher-&gt;ct_s.L;
+if (ct_s_len &gt; HYBRIDENCref_ECC_MAX_LEN) {
+    ct_s_len = HYBRIDENCref_ECC_MAX_LEN;
+}
+jobject result = native_to_java_HybridCipher(env, cipher, ct_s_len, key_handle);</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">ArrayIndexOutOfBoundsException - sig_m array access without length validation</div>
+                <div class="issue-location">sdf4j/src/main/native/src/type_conversion.c:784-790</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CLAUDE, CODEX</span>
+                    <span class="confidence-badge trusted">置信度: 可信</span>
+                </div>
+                <pre>if (l_value &gt; HYBRIDSIGref_MAX_LEN) l_value = HYBRIDSIGref_MAX_LEN;
+native_sig-&gt;L = (ULONG)l_value;
+
+if (sig_m_array != NULL) {
+    (*env)-&gt;GetByteArrayRegion(env, sig_m_array, 0, l_value, (jbyte*)native_sig-&gt;sig_m);
+}</pre>
+                <div class="problem"><strong>Issue:</strong> l_value from Java object's L field is used to read from sig_m_array without verifying the actual array length. If L > sig_m_array.length, GetByteArrayRegion will throw a Java exception. Also, l_value is not validated for negative values.</div>
+                <div class="fix-label">Fix:</div><pre>jsize actual_array_len = (sig_m_array != NULL) ? (*env)-&gt;GetArrayLength(env, sig_m_array) : 0;
+if (l_value &lt; 0) {
+    free(native_sig);
+    return NULL;
+}
+if (l_value &gt; HYBRIDSIGref_MAX_LEN || l_value &gt; actual_array_len) {
+    l_value = (l_value &gt; actual_array_len) ? actual_array_len : HYBRIDSIGref_MAX_LEN;
+}
+native_sig-&gt;L = (ULONG)l_value;
+
+if (sig_m_array != NULL &amp;&amp; l_value &gt; 0) {
+    (*env)-&gt;GetByteArrayRegion(env, sig_m_array, 0, l_value, (jbyte*)native_sig-&gt;sig_m);
+}</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">No upper bound on sig_m_len before copying from fixed buffer</div>
+                <div class="issue-location">sdf4j/src/main/native/src/type_conversion.c:749-752</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CODEX</span>
+                    <span class="confidence-badge trusted">置信度: 可信</span>
+                </div>
+                <pre>if (sig_m_len &gt; 0) {
+    jbyteArray sig_m_array = (*env)-&gt;NewByteArray(env, sig_m_len);
+    if (sig_m_array != NULL) {
+        (*env)-&gt;SetByteArrayRegion(env, sig_m_array, 0, sig_m_len, (jbyte*)native_sig-&gt;sig_m);</pre>
+                <div class="problem"><strong>Issue:</strong> sig_m_len parameter is used directly to allocate/copy from native_sig->sig_m (fixed-size array of HYBRIDSIGref_MAX_LEN). If caller passes oversized length, SetByteArrayRegion reads beyond the native buffer.</div>
+                <div class="fix-label">Fix:</div><pre>if (sig_m_len &gt; HYBRIDSIGref_MAX_LEN) {
+    sig_m_len = HYBRIDSIGref_MAX_LEN;
+}
+if (sig_m_len &gt; 0) {
+    jbyteArray sig_m_array = (*env)-&gt;NewByteArray(env, (jsize)sig_m_len);
+    if (sig_m_array != NULL) {
+        (*env)-&gt;SetByteArrayRegion(env, sig_m_array, 0, (jsize)sig_m_len, (jbyte*)native_sig-&gt;sig_m);
+        (*env)-&gt;SetObjectField(env, obj, g_jni_cache.hybridSignature.sigM, sig_m_array);
+    }
+}</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">Unvalidated L1 length can desynchronize payload size</div>
+                <div class="issue-location">sdf4j/src/main/native/src/type_conversion.c:711</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CODEX</span>
+                    <span class="confidence-badge likely">置信度: 较可信</span>
+                </div>
+                <pre>native_cipher-&gt;L1 = (ULONG)(*env)-&gt;GetLongField(env, java_cipher, g_jni_cache.hybridCipher.l1);
+
+/* ct_m */
+jbyteArray ctm_array = (jbyteArray)(*env)-&gt;GetObjectField(env, java_cipher,
+                                                          g_jni_cache.hybridCipher.ctM);
+if (ctm_array != NULL) {
+    jsize len = (*env)-&gt;GetArrayLength(env, ctm_array);
+    if (len &gt; HYBRIDENCref_MAX_LEN) len = HYBRIDENCref_MAX_LEN;
+    (*env)-&gt;GetByteArrayRegion(env, ctm_array, 0, len, (jbyte*)native_cipher-&gt;ct_m);
+}</pre>
+                <div class="problem"><strong>Issue:</strong> L1 is copied directly from Java GetLongField without validation. If L1 is negative or inconsistent with ct_m array length, invalid size may be passed to SDF library. The ct_m array uses GetArrayLength but L1 is not synchronized.</div>
+                <div class="fix-label">Fix:</div><pre>jbyteArray ctm_array = (jbyteArray)(*env)-&gt;GetObjectField(env, java_cipher,
+                                                          g_jni_cache.hybridCipher.ctM);
+ULONG l1 = 0;
+if (ctm_array != NULL) {
+    jsize len = (*env)-&gt;GetArrayLength(env, ctm_array);
+    if (len &gt; HYBRIDENCref_MAX_LEN) len = HYBRIDENCref_MAX_LEN;
+    (*env)-&gt;GetByteArrayRegion(env, ctm_array, 0, len, (jbyte*)native_cipher-&gt;ct_m);
+    l1 = (ULONG)len;
+}
+native_cipher-&gt;L1 = l1;</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">Wrong package declaration - test will not compile</div>
+                <div class="issue-location">sdf4j/src/test/java/org/openhitls/sdf4j/HybridAlgorithmTest.java:13</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CLAUDE</span>
+                    <span class="confidence-badge trusted">置信度: 可信</span>
+                </div>
+                <pre>package org.openhitls.sdf4j.examples;</pre>
+                <div class="problem"><strong>Issue:</strong> File is at org/openhitls/sdf4j/HybridAlgorithmTest.java but declares package org.openhitls.sdf4j.examples. This mismatch causes compilation failure.</div>
+                <div class="fix-label">Fix:</div><pre>package org.openhitls.sdf4j;</pre>
+            </div>
+</div>
+<div class="section"><div class="section-title medium">Medium</div>
+<div class="issue">
+                <div class="issue-title">Duplicate function call - redundant cache initialization</div>
+                <div class="issue-location">sdf4j/src/main/native/src/jni_cache.c:325-333</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CLAUDE, CODEX</span>
+                    <span class="confidence-badge trusted">置信度: 可信</span>
+                </div>
+                <pre>if (init_common_class_cache(env) != JNI_TRUE) {
+    jni_cache_cleanup(env);
+    return JNI_FALSE;
+}
+
+if (init_common_class_cache(env) != JNI_TRUE) {
+    jni_cache_cleanup(env);
+    return JNI_FALSE;
+}
+g_jni_cache.initialized = true;</pre>
+                <div class="problem"><strong>Issue:</strong> init_common_class_cache(env) is called twice consecutively. The second call overwrites global references from the first call, leaking memory until cleanup.</div>
+                <div class="fix-label">Fix:</div><pre>if (init_common_class_cache(env) != JNI_TRUE) {
+    jni_cache_cleanup(env);
+    return JNI_FALSE;
+}
+g_jni_cache.initialized = true;</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">setCtM does not keep L1 in sync and stores mutable external buffer</div>
+                <div class="issue-location">sdf4j/src/main/java/org/openhitls/sdf4j/types/HybridCipher.java:45-50</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CODEX</span>
+                    <span class="confidence-badge likely">置信度: 较可信</span>
+                </div>
+                <pre>public void setCtM(byte[] ctM) {
+    if (ctM == null) {
+        throw new IllegalArgumentException("cipher value cannot be null");
+    }
+    this.ctM = ctM;
+}</pre>
+                <div class="problem"><strong>Issue:</strong> setCtM assigns caller array directly without copying and does not update l1. This allows external mutation and stale/invalid length values to propagate into JNI.</div>
+                <div class="fix-label">Fix:</div><pre>public void setCtM(byte[] ctM) {
+    if (ctM == null) {
+        throw new IllegalArgumentException("cipher value cannot be null");
+    }
+    int len = Math.min(ctM.length, HYBRIDENCref_MAX_LEN);
+    this.ctM = Arrays.copyOf(ctM, len);
+    this.l1 = len;
+}</pre>
+            </div>
+</div>
+<div class="section"><div class="section-title low">Low</div>
+<div class="issue">
+                <div class="issue-title">Misleading comment - sigM is not a MAC value</div>
+                <div class="issue-location">sdf4j/src/test/java/org/openhitls/sdf4j/HybridAlgorithmTest.java:204</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CLAUDE</span>
+                    <span class="confidence-badge likely">置信度: 较可信</span>
+                </div>
+                <pre>assertNotNull("MAC值不应为null", signature.getSigM());</pre>
+                <div class="problem"><strong>Issue:</strong> Comment says "MAC值不应为null" (MAC value should not be null) but sigM is the post-quantum signature component (e.g., ML-DSA signature), not a MAC.</div>
+                <div class="fix-label">Fix:</div><pre>assertNotNull("后量子签名值不应为null", signature.getSigM());
+// or
+assertNotNull("Post-quantum signature should not be null", signature.getSigM());</pre>
+            </div>
+</div>
+</div></body></html>

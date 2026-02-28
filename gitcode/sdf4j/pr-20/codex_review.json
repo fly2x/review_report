@@ -1,0 +1,72 @@
+[
+  {
+    "source": "codex",
+    "file": "sdf4j/src/main/native/src/type_conversion.c",
+    "line": "698-704",
+    "severity": "critical",
+    "title": "Out-of-bounds read when copying nested ECCCipher",
+    "problem": "`c_len` is taken from `temp_cts->L` (user-controlled Java field), not from the actual allocated `temp_cts` buffer size. If `L` is larger than `c[]` length, `memcpy` reads past `temp_cts`, causing native memory corruption/crash.",
+    "code": "if (temp_cts != NULL) {\n    c_len = (jsize)temp_cts->L;\n}\n...\nsize_t alloc_size = sizeof(HybridCipher) + c_len;\n...\nmemcpy(&native_cipher->ct_s, temp_cts, sizeof(ECCCipher) + c_len);",
+    "fix": "jsize c_len = 0;\nif (cts_obj != NULL) {\n    jbyteArray c_array = (jbyteArray)(*env)->GetObjectField(env, cts_obj, g_jni_cache.eccCipher.c);\n    if (c_array != NULL) {\n        c_len = (*env)->GetArrayLength(env, c_array);\n    }\n\n    temp_cts = java_to_native_ECCCipher_alloc(env, cts_obj);\n    if (temp_cts == NULL) {\n        return NULL;\n    }\n\n    /* Keep length consistent with actual copied buffer size */\n    if (temp_cts->L > (ULONG)c_len) {\n        temp_cts->L = (ULONG)c_len;\n    }\n}\n\nsize_t alloc_size = sizeof(HybridCipher) + (size_t)c_len;\n...\nif (temp_cts != NULL) {\n    memcpy(&native_cipher->ct_s, temp_cts, sizeof(ECCCipher) + (size_t)c_len);\n    free(temp_cts);\n}"
+  },
+  {
+    "source": "codex",
+    "file": "sdf4j/src/main/native/src/type_conversion.c",
+    "line": "711",
+    "severity": "high",
+    "title": "Unvalidated L1 length can desynchronize payload size",
+    "problem": "`L1` is copied directly from Java (`GetLongField`) and can be negative/oversized relative to `ct_m`. This can make native code pass an invalid length to the SDF library and trigger out-of-bounds reads on `ct_m`.",
+    "code": "native_cipher->L1 = (ULONG)(*env)->GetLongField(env, java_cipher, g_jni_cache.hybridCipher.l1);\n...\nif (ctm_array != NULL) {\n    jsize len = (*env)->GetArrayLength(env, ctm_array);\n    if (len > HYBRIDENCref_MAX_LEN) len = HYBRIDENCref_MAX_LEN;\n    (*env)->GetByteArrayRegion(env, ctm_array, 0, len, (jbyte*)native_cipher->ct_m);\n}",
+    "fix": "ULONG l1 = 0;\nif (ctm_array != NULL) {\n    jsize len = (*env)->GetArrayLength(env, ctm_array);\n    if (len > HYBRIDENCref_MAX_LEN) len = HYBRIDENCref_MAX_LEN;\n    (*env)->GetByteArrayRegion(env, ctm_array, 0, len, (jbyte*)native_cipher->ct_m);\n    l1 = (ULONG)len;\n}\nnative_cipher->L1 = l1;"
+  },
+  {
+    "source": "codex",
+    "file": "sdf4j/src/main/native/src/type_conversion.c",
+    "line": "784-790",
+    "severity": "high",
+    "title": "Signature length accepts negative/oversized values",
+    "problem": "`l_value` is not validated for `< 0` and not bounded by `sigM` array length. Casting negative values to `ULONG` produces huge lengths; `GetByteArrayRegion` can throw, and `native_sig->L` can carry unsafe size into native verify API.",
+    "code": "if (l_value > HYBRIDSIGref_MAX_LEN) l_value = HYBRIDSIGref_MAX_LEN;\nnative_sig->L = (ULONG)l_value;\n\nif (sig_m_array != NULL) {\n    (*env)->GetByteArrayRegion(env, sig_m_array, 0, l_value, (jbyte*)native_sig->sig_m);\n}",
+    "fix": "jsize sig_len = 0;\nif (sig_m_array != NULL) {\n    sig_len = (*env)->GetArrayLength(env, sig_m_array);\n}\n\nif (l_value < 0) {\n    free(native_sig);\n    return NULL;\n}\nif (l_value > sig_len) l_value = sig_len;\nif (l_value > HYBRIDSIGref_MAX_LEN) l_value = HYBRIDSIGref_MAX_LEN;\n\nnative_sig->L = (ULONG)l_value;\nif (sig_m_array != NULL && l_value > 0) {\n    (*env)->GetByteArrayRegion(env, sig_m_array, 0, l_value, (jbyte*)native_sig->sig_m);\n}"
+  },
+  {
+    "source": "codex",
+    "file": "sdf4j/src/main/native/src/sdf_jni_hybrid.c",
+    "line": "125",
+    "severity": "high",
+    "title": "Unbounded ct_s length can trigger over-read during Java conversion",
+    "problem": "`cipher->ct_s.L` is trusted directly. If device/library returns a larger value than allocated `HYBRIDENCref_ECC_MAX_LEN`, conversion code reads beyond `cipher` buffer.",
+    "code": "jobject result = native_to_java_HybridCipher(env, cipher, cipher->ct_s.L, key_handle);",
+    "fix": "ULONG ct_s_len = cipher->ct_s.L;\nif (ct_s_len > HYBRIDENCref_ECC_MAX_LEN) {\n    ct_s_len = HYBRIDENCref_ECC_MAX_LEN;\n}\njobject result = native_to_java_HybridCipher(env, cipher, ct_s_len, key_handle);"
+  },
+  {
+    "source": "codex",
+    "file": "sdf4j/src/main/native/src/type_conversion.c",
+    "line": "749-753",
+    "severity": "high",
+    "title": "No upper bound on sig_m_len before copying fixed buffer",
+    "problem": "`sig_m_len` is used directly to allocate/copy from `native_sig->sig_m` (fixed-size array). Oversized length causes out-of-bounds read of native memory.",
+    "code": "if (sig_m_len > 0) {\n    jbyteArray sig_m_array = (*env)->NewByteArray(env, sig_m_len);\n    if (sig_m_array != NULL) {\n        (*env)->SetByteArrayRegion(env, sig_m_array, 0, sig_m_len, (jbyte*)native_sig->sig_m);\n        (*env)->SetObjectField(env, obj, g_jni_cache.hybridSignature.sigM, sig_m_array);\n    }\n}",
+    "fix": "if (sig_m_len > HYBRIDSIGref_MAX_LEN) {\n    sig_m_len = HYBRIDSIGref_MAX_LEN;\n}\nif (sig_m_len > 0) {\n    jbyteArray sig_m_array = (*env)->NewByteArray(env, (jsize)sig_m_len);\n    if (sig_m_array != NULL) {\n        (*env)->SetByteArrayRegion(env, sig_m_array, 0, (jsize)sig_m_len, (jbyte*)native_sig->sig_m);\n        (*env)->SetObjectField(env, obj, g_jni_cache.hybridSignature.sigM, sig_m_array);\n    }\n}"
+  },
+  {
+    "source": "codex",
+    "file": "sdf4j/src/main/java/org/openhitls/sdf4j/types/HybridCipher.java",
+    "line": "45-50",
+    "severity": "medium",
+    "title": "setCtM does not keep L1 in sync and stores mutable external buffer",
+    "problem": "`setCtM` assigns caller array directly and does not update `l1`. This allows stale/invalid length values to propagate into JNI and also lets external mutation change internal state unexpectedly.",
+    "code": "public void setCtM(byte[] ctM) {\n    if (ctM == null) {\n        throw new IllegalArgumentException(\"cipher value cannot be null\");\n    }\n    this.ctM = ctM;\n}",
+    "fix": "public void setCtM(byte[] ctM) {\n    if (ctM == null) {\n        throw new IllegalArgumentException(\"cipher value cannot be null\");\n    }\n    int len = Math.min(ctM.length, HYBRIDENCref_MAX_LEN);\n    this.ctM = Arrays.copyOf(ctM, len);\n    this.l1 = len;\n}"
+  },
+  {
+    "source": "codex",
+    "file": "sdf4j/src/main/native/src/jni_cache.c",
+    "line": "325-333",
+    "severity": "low",
+    "title": "Duplicate cache initialization leaks global references",
+    "problem": "`init_common_class_cache(env)` is called twice consecutively. The second call overwrites already-created global refs and leaks the first set until cleanup.",
+    "code": "if (init_common_class_cache(env) != JNI_TRUE) {\n    jni_cache_cleanup(env);\n    return JNI_FALSE;\n}\n\nif (init_common_class_cache(env) != JNI_TRUE) {\n    jni_cache_cleanup(env);\n    return JNI_FALSE;\n}",
+    "fix": "if (init_common_class_cache(env) != JNI_TRUE) {\n    jni_cache_cleanup(env);\n    return JNI_FALSE;\n}"
+  }
+]

@@ -1,0 +1,132 @@
+{
+  "context": {
+    "owner": "openHiTLS",
+    "repo": "sdf4j",
+    "pr_id": "20",
+    "title": "",
+    "reviewers": [
+      "claude",
+      "gemini",
+      "codex"
+    ]
+  },
+  "statistics": {
+    "total": 10,
+    "critical": 2,
+    "high": 5,
+    "medium": 2,
+    "low": 1
+  },
+  "issues": [
+    {
+      "file": "sdf4j/src/main/native/src/sdf_jni_hybrid.c",
+      "line": "15",
+      "severity": "critical",
+      "title": "Buffer overflow - insufficient allocation for post-quantum KEM ciphertext",
+      "reviewers": "CLAUDE, CODEX",
+      "confidence": "trusted",
+      "problem": "HYBRIDENCref_ECC_MAX_LEN is defined as 141 bytes, which is insufficient for post-quantum KEM algorithms like MLKEM-1024 that produce ciphertexts up to 1568 bytes. When SDF_GenerateKeyWithEPK_Hybrid is called with hybrid algorithms (e.g., SGD_HYBRID_ENV_SM2_MLKEM_1024), the SDF library will write beyond the allocated buffer, causing memory corruption.",
+      "code": "#define HYBRIDENCref_ECC_MAX_LEN 141\n...\nHybridCipher *cipher = (HybridCipher*)malloc(sizeof(HybridCipher) + HYBRIDENCref_ECC_MAX_LEN);",
+      "fix": "#define HYBRIDENC_MAX_ECC_CIPHER_LEN 2048  /* Large enough for MLKEM-1024 (1568) + overhead */\n...\nHybridCipher *cipher = (HybridCipher*)malloc(sizeof(HybridCipher) + HYBRIDENC_MAX_ECC_CIPHER_LEN);\nif (cipher == NULL) {\n    (*env)->ReleasePrimitiveArrayCritical(env, publicKey, pub_key_buf, JNI_ABORT);\n    THROW_SDF_EXCEPTION(env, SDR_NOBUFFER, \"Memory allocation failed for cipher\");\n    return NULL;\n}\nmemset(cipher, 0, sizeof(HybridCipher) + HYBRIDENC_MAX_ECC_CIPHER_LEN);"
+    },
+    {
+      "file": "sdf4j/src/main/native/src/type_conversion.c",
+      "line": "696-704",
+      "severity": "critical",
+      "title": "Out-of-bounds read when copying nested ECCCipher",
+      "reviewers": "CODEX",
+      "confidence": "trusted",
+      "problem": "c_len is taken from temp_cts->L (user-controlled Java field), not from the actual allocated buffer size. If Java's ECCCipher.L field is larger than the actual c[] array length, memcpy at line 727 reads beyond temp_cts buffer, causing memory corruption.",
+      "code": "temp_cts = java_to_native_ECCCipher_alloc(env, cts_obj);\nif (temp_cts != NULL) {\n    c_len = (jsize)temp_cts->L;\n}\n...\nsize_t alloc_size = sizeof(HybridCipher) + c_len;\n...\nmemcpy(&native_cipher->ct_s, temp_cts, sizeof(ECCCipher) + c_len);",
+      "fix": "jbyteArray c_array = (jbyteArray)(*env)->GetObjectField(env, cts_obj, g_jni_cache.eccCipher.c);\njsize actual_c_len = (c_array != NULL) ? (*env)->GetArrayLength(env, c_array) : 0;\ntemp_cts = java_to_native_ECCCipher_alloc(env, cts_obj);\nif (temp_cts == NULL) {\n    return NULL;\n}\n/* Use the actual array length, not the L field from Java */\nc_len = actual_c_len;\n/* Also ensure L field reflects actual buffer size */\nif (temp_cts->L > (ULONG)c_len) {\n    temp_cts->L = (ULONG)c_len;\n}"
+    },
+    {
+      "file": "sdf4j/src/main/native/src/sdf_jni_hybrid.c",
+      "line": "125",
+      "severity": "high",
+      "title": "Unbounded ct_s length can trigger buffer over-read",
+      "reviewers": "CODEX",
+      "confidence": "trusted",
+      "problem": "cipher->ct_s.L from SDF library is trusted directly without bounds checking. If the device returns an L value larger than the allocated HYBRIDENCref_ECC_MAX_LEN, native_to_java_HybridCipher will read beyond the cipher buffer.",
+      "code": "jobject result = native_to_java_HybridCipher(env, cipher, cipher->ct_s.L, key_handle);",
+      "fix": "ULONG ct_s_len = cipher->ct_s.L;\nif (ct_s_len > HYBRIDENCref_ECC_MAX_LEN) {\n    ct_s_len = HYBRIDENCref_ECC_MAX_LEN;\n}\njobject result = native_to_java_HybridCipher(env, cipher, ct_s_len, key_handle);"
+    },
+    {
+      "file": "sdf4j/src/main/native/src/type_conversion.c",
+      "line": "784-790",
+      "severity": "high",
+      "title": "ArrayIndexOutOfBoundsException - sig_m array access without length validation",
+      "reviewers": "CLAUDE, CODEX",
+      "confidence": "trusted",
+      "problem": "l_value from Java object's L field is used to read from sig_m_array without verifying the actual array length. If L > sig_m_array.length, GetByteArrayRegion will throw a Java exception. Also, l_value is not validated for negative values.",
+      "code": "if (l_value > HYBRIDSIGref_MAX_LEN) l_value = HYBRIDSIGref_MAX_LEN;\nnative_sig->L = (ULONG)l_value;\n\nif (sig_m_array != NULL) {\n    (*env)->GetByteArrayRegion(env, sig_m_array, 0, l_value, (jbyte*)native_sig->sig_m);\n}",
+      "fix": "jsize actual_array_len = (sig_m_array != NULL) ? (*env)->GetArrayLength(env, sig_m_array) : 0;\nif (l_value < 0) {\n    free(native_sig);\n    return NULL;\n}\nif (l_value > HYBRIDSIGref_MAX_LEN || l_value > actual_array_len) {\n    l_value = (l_value > actual_array_len) ? actual_array_len : HYBRIDSIGref_MAX_LEN;\n}\nnative_sig->L = (ULONG)l_value;\n\nif (sig_m_array != NULL && l_value > 0) {\n    (*env)->GetByteArrayRegion(env, sig_m_array, 0, l_value, (jbyte*)native_sig->sig_m);\n}"
+    },
+    {
+      "file": "sdf4j/src/main/native/src/type_conversion.c",
+      "line": "749-752",
+      "severity": "high",
+      "title": "No upper bound on sig_m_len before copying from fixed buffer",
+      "reviewers": "CODEX",
+      "confidence": "trusted",
+      "problem": "sig_m_len parameter is used directly to allocate/copy from native_sig->sig_m (fixed-size array of HYBRIDSIGref_MAX_LEN). If caller passes oversized length, SetByteArrayRegion reads beyond the native buffer.",
+      "code": "if (sig_m_len > 0) {\n    jbyteArray sig_m_array = (*env)->NewByteArray(env, sig_m_len);\n    if (sig_m_array != NULL) {\n        (*env)->SetByteArrayRegion(env, sig_m_array, 0, sig_m_len, (jbyte*)native_sig->sig_m);",
+      "fix": "if (sig_m_len > HYBRIDSIGref_MAX_LEN) {\n    sig_m_len = HYBRIDSIGref_MAX_LEN;\n}\nif (sig_m_len > 0) {\n    jbyteArray sig_m_array = (*env)->NewByteArray(env, (jsize)sig_m_len);\n    if (sig_m_array != NULL) {\n        (*env)->SetByteArrayRegion(env, sig_m_array, 0, (jsize)sig_m_len, (jbyte*)native_sig->sig_m);\n        (*env)->SetObjectField(env, obj, g_jni_cache.hybridSignature.sigM, sig_m_array);\n    }\n}"
+    },
+    {
+      "file": "sdf4j/src/main/native/src/type_conversion.c",
+      "line": "711",
+      "severity": "high",
+      "title": "Unvalidated L1 length can desynchronize payload size",
+      "reviewers": "CODEX",
+      "confidence": "likely",
+      "problem": "L1 is copied directly from Java GetLongField without validation. If L1 is negative or inconsistent with ct_m array length, invalid size may be passed to SDF library. The ct_m array uses GetArrayLength but L1 is not synchronized.",
+      "code": "native_cipher->L1 = (ULONG)(*env)->GetLongField(env, java_cipher, g_jni_cache.hybridCipher.l1);\n\n/* ct_m */\njbyteArray ctm_array = (jbyteArray)(*env)->GetObjectField(env, java_cipher,\n                                                          g_jni_cache.hybridCipher.ctM);\nif (ctm_array != NULL) {\n    jsize len = (*env)->GetArrayLength(env, ctm_array);\n    if (len > HYBRIDENCref_MAX_LEN) len = HYBRIDENCref_MAX_LEN;\n    (*env)->GetByteArrayRegion(env, ctm_array, 0, len, (jbyte*)native_cipher->ct_m);\n}",
+      "fix": "jbyteArray ctm_array = (jbyteArray)(*env)->GetObjectField(env, java_cipher,\n                                                          g_jni_cache.hybridCipher.ctM);\nULONG l1 = 0;\nif (ctm_array != NULL) {\n    jsize len = (*env)->GetArrayLength(env, ctm_array);\n    if (len > HYBRIDENCref_MAX_LEN) len = HYBRIDENCref_MAX_LEN;\n    (*env)->GetByteArrayRegion(env, ctm_array, 0, len, (jbyte*)native_cipher->ct_m);\n    l1 = (ULONG)len;\n}\nnative_cipher->L1 = l1;"
+    },
+    {
+      "file": "sdf4j/src/test/java/org/openhitls/sdf4j/HybridAlgorithmTest.java",
+      "line": "13",
+      "severity": "high",
+      "title": "Wrong package declaration - test will not compile",
+      "reviewers": "CLAUDE",
+      "confidence": "trusted",
+      "problem": "File is at org/openhitls/sdf4j/HybridAlgorithmTest.java but declares package org.openhitls.sdf4j.examples. This mismatch causes compilation failure.",
+      "code": "package org.openhitls.sdf4j.examples;",
+      "fix": "package org.openhitls.sdf4j;"
+    },
+    {
+      "file": "sdf4j/src/main/native/src/jni_cache.c",
+      "line": "325-333",
+      "severity": "medium",
+      "title": "Duplicate function call - redundant cache initialization",
+      "reviewers": "CLAUDE, CODEX",
+      "confidence": "trusted",
+      "problem": "init_common_class_cache(env) is called twice consecutively. The second call overwrites global references from the first call, leaking memory until cleanup.",
+      "code": "if (init_common_class_cache(env) != JNI_TRUE) {\n    jni_cache_cleanup(env);\n    return JNI_FALSE;\n}\n\nif (init_common_class_cache(env) != JNI_TRUE) {\n    jni_cache_cleanup(env);\n    return JNI_FALSE;\n}\ng_jni_cache.initialized = true;",
+      "fix": "if (init_common_class_cache(env) != JNI_TRUE) {\n    jni_cache_cleanup(env);\n    return JNI_FALSE;\n}\ng_jni_cache.initialized = true;"
+    },
+    {
+      "file": "sdf4j/src/main/java/org/openhitls/sdf4j/types/HybridCipher.java",
+      "line": "45-50",
+      "severity": "medium",
+      "title": "setCtM does not keep L1 in sync and stores mutable external buffer",
+      "reviewers": "CODEX",
+      "confidence": "likely",
+      "problem": "setCtM assigns caller array directly without copying and does not update l1. This allows external mutation and stale/invalid length values to propagate into JNI.",
+      "code": "public void setCtM(byte[] ctM) {\n    if (ctM == null) {\n        throw new IllegalArgumentException(\"cipher value cannot be null\");\n    }\n    this.ctM = ctM;\n}",
+      "fix": "public void setCtM(byte[] ctM) {\n    if (ctM == null) {\n        throw new IllegalArgumentException(\"cipher value cannot be null\");\n    }\n    int len = Math.min(ctM.length, HYBRIDENCref_MAX_LEN);\n    this.ctM = Arrays.copyOf(ctM, len);\n    this.l1 = len;\n}"
+    },
+    {
+      "file": "sdf4j/src/test/java/org/openhitls/sdf4j/HybridAlgorithmTest.java",
+      "line": "204",
+      "severity": "low",
+      "title": "Misleading comment - sigM is not a MAC value",
+      "reviewers": "CLAUDE",
+      "confidence": "likely",
+      "problem": "Comment says \"MAC值不应为null\" (MAC value should not be null) but sigM is the post-quantum signature component (e.g., ML-DSA signature), not a MAC.",
+      "code": "assertNotNull(\"MAC值不应为null\", signature.getSigM());",
+      "fix": "assertNotNull(\"后量子签名值不应为null\", signature.getSigM());\n// or\nassertNotNull(\"Post-quantum signature should not be null\", signature.getSigM());"
+    }
+  ]
+}

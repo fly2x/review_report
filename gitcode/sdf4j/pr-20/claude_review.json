@@ -1,0 +1,52 @@
+[
+  {
+    "source": "claude",
+    "file": "sdf4j/src/main/native/src/sdf_jni_hybrid.c",
+    "line": "104",
+    "severity": "critical",
+    "title": "Buffer overflow - insufficient allocation for post-quantum KEM ciphertext",
+    "problem": "The allocation `sizeof(HybridCipher) + HYBRIDENCref_ECC_MAX_LEN` uses only 141 bytes for the ECCCipher flexible array (ct_s.C[]). Post-quantum algorithms like MLKEM-1024 produce ciphertexts up to 1568 bytes. When SDF_GenerateKeyWithEPK_Hybrid is called with algorithms like SGD_HYBRID_ENV_SM2_MLKEM_1024, it will write beyond the allocated buffer, causing memory corruption.",
+    "code": "#define HYBRIDENCref_ECC_MAX_LEN 141\n...\nHybridCipher *cipher = (HybridCipher*)malloc(sizeof(HybridCipher) + HYBRIDENCref_ECC_MAX_LEN);",
+    "fix": "#define HYBRIDENC_MAX_ECC_CIPHER_LEN 2048  /* Large enough for MLKEM-1024 (1568) + overhead */\n...\nHybridCipher *cipher = (HybridCipher*)malloc(sizeof(HybridCipher) + HYBRIDENC_MAX_ECC_CIPHER_LEN);\nif (cipher == NULL) {\n    (*env)->ReleasePrimitiveArrayCritical(env, publicKey, pub_key_buf, JNI_ABORT);\n    THROW_SDF_EXCEPTION(env, SDR_NOBUFFER, \"Memory allocation failed for cipher\");\n    return NULL;\n}\nmemset(cipher, 0, sizeof(HybridCipher) + HYBRIDENC_MAX_ECC_CIPHER_LEN);"
+  },
+  {
+    "source": "claude",
+    "file": "sdf4j/src/main/native/src/type_conversion.c",
+    "line": "787-790",
+    "severity": "high",
+    "title": "ArrayIndexOutOfBoundsException - unchecked array access",
+    "problem": "The code uses `l_value` (from Java object's l field) to read from `sig_m_array` without verifying the actual array length. If the Java object has l > sig_m_array.length, GetByteArrayRegion will throw a Java exception, causing unexpected JNI behavior.",
+    "code": "/* L - sig value length */\nif (l_value > HYBRIDSIGref_MAX_LEN) l_value = HYBRIDSIGref_MAX_LEN;\nnative_sig->L = (ULONG)l_value;\n\n/* sig_m  */\nif (sig_m_array != NULL) {\n    (*env)->GetByteArrayRegion(env, sig_m_array, 0, l_value, (jbyte*)native_sig->sig_m);\n}",
+    "fix": "/* L - sig value length */\njsize actual_array_len = (sig_m_array != NULL) ? (*env)->GetArrayLength(env, sig_m_array) : 0;\nif (l_value > HYBRIDSIGref_MAX_LEN || l_value > actual_array_len) {\n    l_value = (l_value > actual_array_len) ? actual_array_len : HYBRIDSIGref_MAX_LEN;\n}\nnative_sig->L = (ULONG)l_value;\n\n/* sig_m  */\nif (sig_m_array != NULL && l_value > 0) {\n    (*env)->GetByteArrayRegion(env, sig_m_array, 0, l_value, (jbyte*)native_sig->sig_m);\n}"
+  },
+  {
+    "source": "claude",
+    "file": "sdf4j/src/test/java/org/openhitls/sdf4j/HybridAlgorithmTest.java",
+    "line": "13",
+    "severity": "high",
+    "title": "Wrong package declaration - test will not compile",
+    "problem": "The file is located at `sdf4j/src/test/java/org/openhitls/sdf4j/HybridAlgorithmTest.java` but declares `package org.openhitls.sdf4j.examples;`. This mismatch will cause compilation failure.",
+    "code": "package org.openhitls.sdf4j.examples;",
+    "fix": "package org.openhitls.sdf4j;"
+  },
+  {
+    "source": "claude",
+    "file": "sdf4j/src/main/native/src/jni_cache.c",
+    "line": "325-333",
+    "severity": "medium",
+    "title": "Duplicate function call - code redundancy",
+    "problem": "The `init_common_class_cache(env)` function is called twice consecutively (lines 325 and 330). This is redundant code - the second call serves no purpose since the first call already initialized the cache.",
+    "code": "if (init_common_class_cache(env) != JNI_TRUE) {\n        jni_cache_cleanup(env);\n        return JNI_FALSE;\n    }\n\n    if (init_common_class_cache(env) != JNI_TRUE) {\n        jni_cache_cleanup(env);\n        return JNI_FALSE;\n    }\n    g_jni_cache.initialized = true;",
+    "fix": "if (init_common_class_cache(env) != JNI_TRUE) {\n        jni_cache_cleanup(env);\n        return JNI_FALSE;\n    }\n    g_jni_cache.initialized = true;"
+  },
+  {
+    "source": "claude",
+    "file": "sdf4j/src/test/java/org/openhitls/sdf4j/HybridAlgorithmTest.java",
+    "line": "204",
+    "severity": "low",
+    "title": "Misleading comment - sigM is not a MAC value",
+    "problem": "The comment says \"MAC值不应为null\" (MAC value should not be null) but `sigM` is actually the post-quantum signature component (e.g., ML-DSA signature), not a MAC.",
+    "code": "assertNotNull(\"MAC值不应为null\", signature.getSigM());",
+    "fix": "assertNotNull(\"后量子签名值不应为null\", signature.getSigM());\n// or\nassertNotNull(\"Post-quantum signature should not be null\", signature.getSigM());"
+  }
+]

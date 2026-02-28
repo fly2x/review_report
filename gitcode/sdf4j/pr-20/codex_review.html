@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Code Review: openHiTLS/sdf4j#20 - CODEX</title>
+    <style>
+        :root { --critical: #dc2626; --high: #ea580c; --medium: #ca8a04; --low: #65a30d; }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: system-ui, sans-serif; background: #f8fafc; color: #1e293b; padding: 2rem; line-height: 1.6; }
+        .container { max-width: 900px; margin: 0 auto; }
+        h1 { font-size: 1.5rem; margin-bottom: 0.5rem; }
+        .subtitle { color: #64748b; margin-bottom: 2rem; }
+        .section { margin-bottom: 2rem; }
+        .section-title { font-size: 1.1rem; font-weight: 600; padding: 0.5rem 1rem; border-radius: 0.5rem 0.5rem 0 0; color: white; }
+        .section-title.critical { background: var(--critical); }
+        .section-title.high { background: var(--high); }
+        .section-title.medium { background: var(--medium); }
+        .section-title.low { background: var(--low); }
+        .issue { background: white; border: 1px solid #e2e8f0; border-top: none; padding: 1rem; }
+        .issue:last-child { border-radius: 0 0 0.5rem 0.5rem; }
+        .issue-title { font-weight: 600; margin-bottom: 0.25rem; }
+        .issue-location { font-family: monospace; font-size: 0.875rem; color: #64748b; margin-bottom: 0.75rem; }
+        .issue-source { font-size: 0.75rem; color: #94a3b8; margin-top: 0.5rem; }
+        pre { background: #1e293b; color: #e2e8f0; padding: 0.75rem; border-radius: 0.375rem; overflow-x: auto; font-size: 0.875rem; margin: 0.5rem 0; }
+        .problem { margin: 0.75rem 0; }
+        .fix-label { font-weight: 600; margin-top: 0.75rem; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Code Review: openHiTLS/sdf4j#20 - CODEX</h1>
+        <div class="subtitle"></div>
+<div class="section"><div class="section-title critical">Critical</div>
+<div class="issue">
+                <div class="issue-title">Out-of-bounds read when copying nested ECCCipher</div>
+                <div class="issue-location">sdf4j/src/main/native/src/type_conversion.c:698-704</div>
+                <pre>if (temp_cts != NULL) {
+    c_len = (jsize)temp_cts-&gt;L;
+}
+...
+size_t alloc_size = sizeof(HybridCipher) + c_len;
+...
+memcpy(&amp;native_cipher-&gt;ct_s, temp_cts, sizeof(ECCCipher) + c_len);</pre>
+                <div class="problem"><strong>Issue:</strong> `c_len` is taken from `temp_cts->L` (user-controlled Java field), not from the actual allocated `temp_cts` buffer size. If `L` is larger than `c[]` length, `memcpy` reads past `temp_cts`, causing native memory corruption/crash.</div>
+                <div class="fix-label">Fix:</div><pre>jsize c_len = 0;
+if (cts_obj != NULL) {
+    jbyteArray c_array = (jbyteArray)(*env)-&gt;GetObjectField(env, cts_obj, g_jni_cache.eccCipher.c);
+    if (c_array != NULL) {
+        c_len = (*env)-&gt;GetArrayLength(env, c_array);
+    }
+
+    temp_cts = java_to_native_ECCCipher_alloc(env, cts_obj);
+    if (temp_cts == NULL) {
+        return NULL;
+    }
+
+    /* Keep length consistent with actual copied buffer size */
+    if (temp_cts-&gt;L &gt; (ULONG)c_len) {
+        temp_cts-&gt;L = (ULONG)c_len;
+    }
+}
+
+size_t alloc_size = sizeof(HybridCipher) + (size_t)c_len;
+...
+if (temp_cts != NULL) {
+    memcpy(&amp;native_cipher-&gt;ct_s, temp_cts, sizeof(ECCCipher) + (size_t)c_len);
+    free(temp_cts);
+}</pre>
+                <div class="issue-source">Reviewer: codex</div>
+            </div>
+</div>
+<div class="section"><div class="section-title high">High</div>
+<div class="issue">
+                <div class="issue-title">Unvalidated L1 length can desynchronize payload size</div>
+                <div class="issue-location">sdf4j/src/main/native/src/type_conversion.c:711</div>
+                <pre>native_cipher-&gt;L1 = (ULONG)(*env)-&gt;GetLongField(env, java_cipher, g_jni_cache.hybridCipher.l1);
+...
+if (ctm_array != NULL) {
+    jsize len = (*env)-&gt;GetArrayLength(env, ctm_array);
+    if (len &gt; HYBRIDENCref_MAX_LEN) len = HYBRIDENCref_MAX_LEN;
+    (*env)-&gt;GetByteArrayRegion(env, ctm_array, 0, len, (jbyte*)native_cipher-&gt;ct_m);
+}</pre>
+                <div class="problem"><strong>Issue:</strong> `L1` is copied directly from Java (`GetLongField`) and can be negative/oversized relative to `ct_m`. This can make native code pass an invalid length to the SDF library and trigger out-of-bounds reads on `ct_m`.</div>
+                <div class="fix-label">Fix:</div><pre>ULONG l1 = 0;
+if (ctm_array != NULL) {
+    jsize len = (*env)-&gt;GetArrayLength(env, ctm_array);
+    if (len &gt; HYBRIDENCref_MAX_LEN) len = HYBRIDENCref_MAX_LEN;
+    (*env)-&gt;GetByteArrayRegion(env, ctm_array, 0, len, (jbyte*)native_cipher-&gt;ct_m);
+    l1 = (ULONG)len;
+}
+native_cipher-&gt;L1 = l1;</pre>
+                <div class="issue-source">Reviewer: codex</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">Signature length accepts negative/oversized values</div>
+                <div class="issue-location">sdf4j/src/main/native/src/type_conversion.c:784-790</div>
+                <pre>if (l_value &gt; HYBRIDSIGref_MAX_LEN) l_value = HYBRIDSIGref_MAX_LEN;
+native_sig-&gt;L = (ULONG)l_value;
+
+if (sig_m_array != NULL) {
+    (*env)-&gt;GetByteArrayRegion(env, sig_m_array, 0, l_value, (jbyte*)native_sig-&gt;sig_m);
+}</pre>
+                <div class="problem"><strong>Issue:</strong> `l_value` is not validated for `< 0` and not bounded by `sigM` array length. Casting negative values to `ULONG` produces huge lengths; `GetByteArrayRegion` can throw, and `native_sig->L` can carry unsafe size into native verify API.</div>
+                <div class="fix-label">Fix:</div><pre>jsize sig_len = 0;
+if (sig_m_array != NULL) {
+    sig_len = (*env)-&gt;GetArrayLength(env, sig_m_array);
+}
+
+if (l_value &lt; 0) {
+    free(native_sig);
+    return NULL;
+}
+if (l_value &gt; sig_len) l_value = sig_len;
+if (l_value &gt; HYBRIDSIGref_MAX_LEN) l_value = HYBRIDSIGref_MAX_LEN;
+
+native_sig-&gt;L = (ULONG)l_value;
+if (sig_m_array != NULL &amp;&amp; l_value &gt; 0) {
+    (*env)-&gt;GetByteArrayRegion(env, sig_m_array, 0, l_value, (jbyte*)native_sig-&gt;sig_m);
+}</pre>
+                <div class="issue-source">Reviewer: codex</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">Unbounded ct_s length can trigger over-read during Java conversion</div>
+                <div class="issue-location">sdf4j/src/main/native/src/sdf_jni_hybrid.c:125</div>
+                <pre>jobject result = native_to_java_HybridCipher(env, cipher, cipher-&gt;ct_s.L, key_handle);</pre>
+                <div class="problem"><strong>Issue:</strong> `cipher->ct_s.L` is trusted directly. If device/library returns a larger value than allocated `HYBRIDENCref_ECC_MAX_LEN`, conversion code reads beyond `cipher` buffer.</div>
+                <div class="fix-label">Fix:</div><pre>ULONG ct_s_len = cipher-&gt;ct_s.L;
+if (ct_s_len &gt; HYBRIDENCref_ECC_MAX_LEN) {
+    ct_s_len = HYBRIDENCref_ECC_MAX_LEN;
+}
+jobject result = native_to_java_HybridCipher(env, cipher, ct_s_len, key_handle);</pre>
+                <div class="issue-source">Reviewer: codex</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">No upper bound on sig_m_len before copying fixed buffer</div>
+                <div class="issue-location">sdf4j/src/main/native/src/type_conversion.c:749-753</div>
+                <pre>if (sig_m_len &gt; 0) {
+    jbyteArray sig_m_array = (*env)-&gt;NewByteArray(env, sig_m_len);
+    if (sig_m_array != NULL) {
+        (*env)-&gt;SetByteArrayRegion(env, sig_m_array, 0, sig_m_len, (jbyte*)native_sig-&gt;sig_m);
+        (*env)-&gt;SetObjectField(env, obj, g_jni_cache.hybridSignature.sigM, sig_m_array);
+    }
+}</pre>
+                <div class="problem"><strong>Issue:</strong> `sig_m_len` is used directly to allocate/copy from `native_sig->sig_m` (fixed-size array). Oversized length causes out-of-bounds read of native memory.</div>
+                <div class="fix-label">Fix:</div><pre>if (sig_m_len &gt; HYBRIDSIGref_MAX_LEN) {
+    sig_m_len = HYBRIDSIGref_MAX_LEN;
+}
+if (sig_m_len &gt; 0) {
+    jbyteArray sig_m_array = (*env)-&gt;NewByteArray(env, (jsize)sig_m_len);
+    if (sig_m_array != NULL) {
+        (*env)-&gt;SetByteArrayRegion(env, sig_m_array, 0, (jsize)sig_m_len, (jbyte*)native_sig-&gt;sig_m);
+        (*env)-&gt;SetObjectField(env, obj, g_jni_cache.hybridSignature.sigM, sig_m_array);
+    }
+}</pre>
+                <div class="issue-source">Reviewer: codex</div>
+            </div>
+</div>
+<div class="section"><div class="section-title medium">Medium</div>
+<div class="issue">
+                <div class="issue-title">setCtM does not keep L1 in sync and stores mutable external buffer</div>
+                <div class="issue-location">sdf4j/src/main/java/org/openhitls/sdf4j/types/HybridCipher.java:45-50</div>
+                <pre>public void setCtM(byte[] ctM) {
+    if (ctM == null) {
+        throw new IllegalArgumentException("cipher value cannot be null");
+    }
+    this.ctM = ctM;
+}</pre>
+                <div class="problem"><strong>Issue:</strong> `setCtM` assigns caller array directly and does not update `l1`. This allows stale/invalid length values to propagate into JNI and also lets external mutation change internal state unexpectedly.</div>
+                <div class="fix-label">Fix:</div><pre>public void setCtM(byte[] ctM) {
+    if (ctM == null) {
+        throw new IllegalArgumentException("cipher value cannot be null");
+    }
+    int len = Math.min(ctM.length, HYBRIDENCref_MAX_LEN);
+    this.ctM = Arrays.copyOf(ctM, len);
+    this.l1 = len;
+}</pre>
+                <div class="issue-source">Reviewer: codex</div>
+            </div>
+</div>
+<div class="section"><div class="section-title low">Low</div>
+<div class="issue">
+                <div class="issue-title">Duplicate cache initialization leaks global references</div>
+                <div class="issue-location">sdf4j/src/main/native/src/jni_cache.c:325-333</div>
+                <pre>if (init_common_class_cache(env) != JNI_TRUE) {
+    jni_cache_cleanup(env);
+    return JNI_FALSE;
+}
+
+if (init_common_class_cache(env) != JNI_TRUE) {
+    jni_cache_cleanup(env);
+    return JNI_FALSE;
+}</pre>
+                <div class="problem"><strong>Issue:</strong> `init_common_class_cache(env)` is called twice consecutively. The second call overwrites already-created global refs and leaks the first set until cleanup.</div>
+                <div class="fix-label">Fix:</div><pre>if (init_common_class_cache(env) != JNI_TRUE) {
+    jni_cache_cleanup(env);
+    return JNI_FALSE;
+}</pre>
+                <div class="issue-source">Reviewer: codex</div>
+            </div>
+</div>
+</div></body></html>

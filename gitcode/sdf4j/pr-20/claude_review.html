@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Code Review: openHiTLS/sdf4j#20 - CLAUDE</title>
+    <style>
+        :root { --critical: #dc2626; --high: #ea580c; --medium: #ca8a04; --low: #65a30d; }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: system-ui, sans-serif; background: #f8fafc; color: #1e293b; padding: 2rem; line-height: 1.6; }
+        .container { max-width: 900px; margin: 0 auto; }
+        h1 { font-size: 1.5rem; margin-bottom: 0.5rem; }
+        .subtitle { color: #64748b; margin-bottom: 2rem; }
+        .section { margin-bottom: 2rem; }
+        .section-title { font-size: 1.1rem; font-weight: 600; padding: 0.5rem 1rem; border-radius: 0.5rem 0.5rem 0 0; color: white; }
+        .section-title.critical { background: var(--critical); }
+        .section-title.high { background: var(--high); }
+        .section-title.medium { background: var(--medium); }
+        .section-title.low { background: var(--low); }
+        .issue { background: white; border: 1px solid #e2e8f0; border-top: none; padding: 1rem; }
+        .issue:last-child { border-radius: 0 0 0.5rem 0.5rem; }
+        .issue-title { font-weight: 600; margin-bottom: 0.25rem; }
+        .issue-location { font-family: monospace; font-size: 0.875rem; color: #64748b; margin-bottom: 0.75rem; }
+        .issue-source { font-size: 0.75rem; color: #94a3b8; margin-top: 0.5rem; }
+        pre { background: #1e293b; color: #e2e8f0; padding: 0.75rem; border-radius: 0.375rem; overflow-x: auto; font-size: 0.875rem; margin: 0.5rem 0; }
+        .problem { margin: 0.75rem 0; }
+        .fix-label { font-weight: 600; margin-top: 0.75rem; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Code Review: openHiTLS/sdf4j#20 - CLAUDE</h1>
+        <div class="subtitle"></div>
+<div class="section"><div class="section-title critical">Critical</div>
+<div class="issue">
+                <div class="issue-title">Buffer overflow - insufficient allocation for post-quantum KEM ciphertext</div>
+                <div class="issue-location">sdf4j/src/main/native/src/sdf_jni_hybrid.c:104</div>
+                <pre>#define HYBRIDENCref_ECC_MAX_LEN 141
+...
+HybridCipher *cipher = (HybridCipher*)malloc(sizeof(HybridCipher) + HYBRIDENCref_ECC_MAX_LEN);</pre>
+                <div class="problem"><strong>Issue:</strong> The allocation `sizeof(HybridCipher) + HYBRIDENCref_ECC_MAX_LEN` uses only 141 bytes for the ECCCipher flexible array (ct_s.C[]). Post-quantum algorithms like MLKEM-1024 produce ciphertexts up to 1568 bytes. When SDF_GenerateKeyWithEPK_Hybrid is called with algorithms like SGD_HYBRID_ENV_SM2_MLKEM_1024, it will write beyond the allocated buffer, causing memory corruption.</div>
+                <div class="fix-label">Fix:</div><pre>#define HYBRIDENC_MAX_ECC_CIPHER_LEN 2048  /* Large enough for MLKEM-1024 (1568) + overhead */
+...
+HybridCipher *cipher = (HybridCipher*)malloc(sizeof(HybridCipher) + HYBRIDENC_MAX_ECC_CIPHER_LEN);
+if (cipher == NULL) {
+    (*env)-&gt;ReleasePrimitiveArrayCritical(env, publicKey, pub_key_buf, JNI_ABORT);
+    THROW_SDF_EXCEPTION(env, SDR_NOBUFFER, "Memory allocation failed for cipher");
+    return NULL;
+}
+memset(cipher, 0, sizeof(HybridCipher) + HYBRIDENC_MAX_ECC_CIPHER_LEN);</pre>
+                <div class="issue-source">Reviewer: claude</div>
+            </div>
+</div>
+<div class="section"><div class="section-title high">High</div>
+<div class="issue">
+                <div class="issue-title">ArrayIndexOutOfBoundsException - unchecked array access</div>
+                <div class="issue-location">sdf4j/src/main/native/src/type_conversion.c:787-790</div>
+                <pre>/* L - sig value length */
+if (l_value &gt; HYBRIDSIGref_MAX_LEN) l_value = HYBRIDSIGref_MAX_LEN;
+native_sig-&gt;L = (ULONG)l_value;
+
+/* sig_m  */
+if (sig_m_array != NULL) {
+    (*env)-&gt;GetByteArrayRegion(env, sig_m_array, 0, l_value, (jbyte*)native_sig-&gt;sig_m);
+}</pre>
+                <div class="problem"><strong>Issue:</strong> The code uses `l_value` (from Java object's l field) to read from `sig_m_array` without verifying the actual array length. If the Java object has l > sig_m_array.length, GetByteArrayRegion will throw a Java exception, causing unexpected JNI behavior.</div>
+                <div class="fix-label">Fix:</div><pre>/* L - sig value length */
+jsize actual_array_len = (sig_m_array != NULL) ? (*env)-&gt;GetArrayLength(env, sig_m_array) : 0;
+if (l_value &gt; HYBRIDSIGref_MAX_LEN || l_value &gt; actual_array_len) {
+    l_value = (l_value &gt; actual_array_len) ? actual_array_len : HYBRIDSIGref_MAX_LEN;
+}
+native_sig-&gt;L = (ULONG)l_value;
+
+/* sig_m  */
+if (sig_m_array != NULL &amp;&amp; l_value &gt; 0) {
+    (*env)-&gt;GetByteArrayRegion(env, sig_m_array, 0, l_value, (jbyte*)native_sig-&gt;sig_m);
+}</pre>
+                <div class="issue-source">Reviewer: claude</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">Wrong package declaration - test will not compile</div>
+                <div class="issue-location">sdf4j/src/test/java/org/openhitls/sdf4j/HybridAlgorithmTest.java:13</div>
+                <pre>package org.openhitls.sdf4j.examples;</pre>
+                <div class="problem"><strong>Issue:</strong> The file is located at `sdf4j/src/test/java/org/openhitls/sdf4j/HybridAlgorithmTest.java` but declares `package org.openhitls.sdf4j.examples;`. This mismatch will cause compilation failure.</div>
+                <div class="fix-label">Fix:</div><pre>package org.openhitls.sdf4j;</pre>
+                <div class="issue-source">Reviewer: claude</div>
+            </div>
+</div>
+<div class="section"><div class="section-title medium">Medium</div>
+<div class="issue">
+                <div class="issue-title">Duplicate function call - code redundancy</div>
+                <div class="issue-location">sdf4j/src/main/native/src/jni_cache.c:325-333</div>
+                <pre>if (init_common_class_cache(env) != JNI_TRUE) {
+        jni_cache_cleanup(env);
+        return JNI_FALSE;
+    }
+
+    if (init_common_class_cache(env) != JNI_TRUE) {
+        jni_cache_cleanup(env);
+        return JNI_FALSE;
+    }
+    g_jni_cache.initialized = true;</pre>
+                <div class="problem"><strong>Issue:</strong> The `init_common_class_cache(env)` function is called twice consecutively (lines 325 and 330). This is redundant code - the second call serves no purpose since the first call already initialized the cache.</div>
+                <div class="fix-label">Fix:</div><pre>if (init_common_class_cache(env) != JNI_TRUE) {
+        jni_cache_cleanup(env);
+        return JNI_FALSE;
+    }
+    g_jni_cache.initialized = true;</pre>
+                <div class="issue-source">Reviewer: claude</div>
+            </div>
+</div>
+<div class="section"><div class="section-title low">Low</div>
+<div class="issue">
+                <div class="issue-title">Misleading comment - sigM is not a MAC value</div>
+                <div class="issue-location">sdf4j/src/test/java/org/openhitls/sdf4j/HybridAlgorithmTest.java:204</div>
+                <pre>assertNotNull("MAC值不应为null", signature.getSigM());</pre>
+                <div class="problem"><strong>Issue:</strong> The comment says "MAC值不应为null" (MAC value should not be null) but `sigM` is actually the post-quantum signature component (e.g., ML-DSA signature), not a MAC.</div>
+                <div class="fix-label">Fix:</div><pre>assertNotNull("后量子签名值不应为null", signature.getSigM());
+// or
+assertNotNull("Post-quantum signature should not be null", signature.getSigM());</pre>
+                <div class="issue-source">Reviewer: claude</div>
+            </div>
+</div>
+</div></body></html>
