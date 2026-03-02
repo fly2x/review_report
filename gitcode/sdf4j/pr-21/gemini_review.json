@@ -1,0 +1,32 @@
+[
+  {
+    "source": "gemini",
+    "file": "sdf4j/src/main/native/src/type_conversion.c",
+    "line": "243-251",
+    "severity": "high",
+    "title": "Null reference passed to ECCCipher constructor for empty cipher",
+    "problem": "When `cipher_len` is 0, `c_array` is initialized to `NULL` and not allocated. It is then passed to the `ECCCipher` parameterized constructor. Since the Java constructor throws an `IllegalArgumentException` if the `c` array is null, this will cause a pending JNI exception and failure in the native call when attempting to create an `ECCCipher` object with an empty ciphertext.",
+    "code": "jbyteArray c_array = NULL;\n    if (cipher_len > 0) {\n        c_array = (*env)->NewByteArray(env, cipher_len);\n        if (c_array == NULL) {\n            THROW_SDF_EXCEPTION(env, SDR_INARGERR, \"Failed to create array object\");\n            return NULL;\n        }\n        (*env)->SetByteArrayRegion(env, c_array, 0, cipher_len, (jbyte*)&native_cipher->C);\n    }",
+    "fix": "jbyteArray c_array = (*env)->NewByteArray(env, cipher_len);\n    if (c_array == NULL) {\n        THROW_SDF_EXCEPTION(env, SDR_INARGERR, \"Failed to create array object\");\n        return NULL;\n    }\n    if (cipher_len > 0) {\n        (*env)->SetByteArrayRegion(env, c_array, 0, cipher_len, (jbyte*)&native_cipher->C);\n    }"
+  },
+  {
+    "source": "gemini",
+    "file": "sdf4j/src/main/native/src/type_conversion.c",
+    "line": "727-728",
+    "severity": "high",
+    "title": "Buffer over-read vulnerability in HybridCipher serialization",
+    "problem": "The bounds check `if (ctm_len > HYBRIDENCref_MAX_LEN)` was removed. If a hardware device or mock returns a `HybridCipher` structure with an `L1` value larger than `HYBRIDENCref_MAX_LEN` (1576 bytes), `SetByteArrayRegion` will read past the bounds of the fixed-size `ct_m` array, exposing adjacent uninitialized or sensitive native memory to the Java application.",
+    "code": "/* ctM byte array */\n    jsize ctm_len = (jsize)native_cipher->L1;\n    jbyteArray ctm_array = (*env)->NewByteArray(env, ctm_len);",
+    "fix": "/* ctM byte array */\n    jsize ctm_len = (jsize)native_cipher->L1;\n    if (ctm_len > HYBRIDENCref_MAX_LEN) {\n        THROW_SDF_EXCEPTION(env, SDR_INARGERR, \"Ciphertext length exceeds maximum\");\n        return NULL;\n    }\n    jbyteArray ctm_array = (*env)->NewByteArray(env, ctm_len);"
+  },
+  {
+    "source": "gemini",
+    "file": "sdf4j/src/main/native/src/type_conversion.c",
+    "line": "812-820",
+    "severity": "high",
+    "title": "Buffer over-read and potential Null reference in HybridSignature serialization",
+    "problem": "The bounds check `if (sig_m_len > HYBRIDSIGref_MAX_LEN)` was removed. If `sig_m_len` exceeds `HYBRIDSIGref_MAX_LEN`, an out-of-bounds read will occur when `SetByteArrayRegion` accesses `native_sig->sig_m`. Additionally, if `sig_m_len` is exactly `0`, `sig_m_array` remains `NULL`, which will crash the Java `HybridSignature` constructor via an `IllegalArgumentException`.",
+    "code": "/* sigM byte array */\n    jbyteArray sig_m_array = NULL;\n    if (sig_m_len > 0) {\n        sig_m_array = (*env)->NewByteArray(env, sig_m_len);\n        if (sig_m_array == NULL) {\n            THROW_SDF_EXCEPTION(env, SDR_INARGERR, \"Failed to new byte array\");\n            return NULL;\n        }\n        (*env)->SetByteArrayRegion(env, sig_m_array, 0, sig_m_len, (jbyte*)native_sig->sig_m);\n    }",
+    "fix": "/* sigM byte array */\n    if (sig_m_len > HYBRIDSIGref_MAX_LEN) {\n        THROW_SDF_EXCEPTION(env, SDR_INARGERR, \"Signature length exceeds maximum\");\n        return NULL;\n    }\n    jbyteArray sig_m_array = (*env)->NewByteArray(env, sig_m_len);\n    if (sig_m_array == NULL) {\n        THROW_SDF_EXCEPTION(env, SDR_INARGERR, \"Failed to new byte array\");\n        return NULL;\n    }\n    if (sig_m_len > 0) {\n        (*env)->SetByteArrayRegion(env, sig_m_array, 0, sig_m_len, (jbyte*)native_sig->sig_m);\n    }"
+  }
+]

@@ -1,0 +1,537 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Code Review: openHiTLS/sdf4j#21 - CLAUDE</title>
+    <style>
+        :root { --critical: #dc2626; --high: #ea580c; --medium: #ca8a04; --low: #65a30d; }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: system-ui, sans-serif; background: #f8fafc; color: #1e293b; padding: 2rem; line-height: 1.6; }
+        .container { max-width: 900px; margin: 0 auto; }
+        h1 { font-size: 1.5rem; margin-bottom: 0.5rem; }
+        .subtitle { color: #64748b; margin-bottom: 2rem; }
+        .section { margin-bottom: 2rem; }
+        .section-title { font-size: 1.1rem; font-weight: 600; padding: 0.5rem 1rem; border-radius: 0.5rem 0.5rem 0 0; color: white; }
+        .section-title.critical { background: var(--critical); }
+        .section-title.high { background: var(--high); }
+        .section-title.medium { background: var(--medium); }
+        .section-title.low { background: var(--low); }
+        .issue { background: white; border: 1px solid #e2e8f0; border-top: none; padding: 1rem; }
+        .issue:last-child { border-radius: 0 0 0.5rem 0.5rem; }
+        .issue-title { font-weight: 600; margin-bottom: 0.25rem; }
+        .issue-location { font-family: monospace; font-size: 0.875rem; color: #64748b; margin-bottom: 0.75rem; }
+        .issue-source { font-size: 0.75rem; color: #94a3b8; margin-top: 0.5rem; }
+        pre { background: #1e293b; color: #e2e8f0; padding: 0.75rem; border-radius: 0.375rem; overflow-x: auto; font-size: 0.875rem; margin: 0.5rem 0; }
+        .problem { margin: 0.75rem 0; }
+        .fix-label { font-weight: 600; margin-top: 0.75rem; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Code Review: openHiTLS/sdf4j#21 - CLAUDE</h1>
+        <div class="subtitle"></div>
+<div class="section"><div class="section-title critical">Critical</div>
+<div class="issue">
+                <div class="issue-title">Getter returns direct reference to internal array</div>
+                <div class="issue-location">sdf4j/src/main/java/org/openhitls/sdf4j/types/DeviceInfo.java:153-154</div>
+                <pre>public long[] getAsymAlgAbility() {
+    return asymAlgAbility;
+}</pre>
+                <div class="problem"><strong>Issue:</strong> getAsymAlgAbility() returns direct reference to internal array without defensive copying. This allows external code to modify the internal state, potentially violating immutability expectations and causing security issues.</div>
+                <div class="fix-label">Fix:</div><pre>public long[] getAsymAlgAbility() {
+    return asymAlgAbility != null ? Arrays.copyOf(asymAlgAbility, asymAlgAbility.length) : new long[2];
+}</pre>
+                <div class="issue-source">Reviewer: claude</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">Getter returns direct reference to private key material</div>
+                <div class="issue-location">sdf4j/src/main/java/org/openhitls/sdf4j/types/RSAPrivateKey.java:130-133</div>
+                <pre>public byte[] getD() {
+    return d;
+}</pre>
+                <div class="problem"><strong>Issue:</strong> getD() returns direct reference to private exponent without defensive copying. This is highly sensitive cryptographic material.</div>
+                <div class="fix-label">Fix:</div><pre>public byte[] getD() {
+    return d != null ? Arrays.copyOf(d, d.length) : null;
+}</pre>
+                <div class="issue-source">Reviewer: claude</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">Getter returns direct reference to prime factors</div>
+                <div class="issue-location">sdf4j/src/main/java/org/openhitls/sdf4j/types/RSAPrivateKey.java:139-142</div>
+                <pre>public byte[][] getPrime() {
+    return prime;
+}</pre>
+                <div class="problem"><strong>Issue:</strong> getPrime() returns direct reference to prime factors [p, q] without defensive copying. These are highly sensitive RSA private key components.</div>
+                <div class="fix-label">Fix:</div><pre>public byte[][] getPrime() {
+    if (prime == null) {
+        return null;
+    }
+    byte[][] copy = new byte[prime.length][];
+    for (int i = 0; i &lt; prime.length; i++) {
+        copy[i] = prime[i] != null ? Arrays.copyOf(prime[i], prime[i].length) : null;
+    }
+    return copy;
+}</pre>
+                <div class="issue-source">Reviewer: claude</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">Getter returns direct reference to CRT exponents</div>
+                <div class="issue-location">sdf4j/src/main/java/org/openhitls/sdf4j/types/RSAPrivateKey.java:148-151</div>
+                <pre>public byte[][] getPexp() {
+    return pexp;
+}</pre>
+                <div class="problem"><strong>Issue:</strong> getPexp() returns direct reference to CRT exponents [dp, dq] without defensive copying.</div>
+                <div class="fix-label">Fix:</div><pre>public byte[][] getPexp() {
+    if (pexp == null) {
+        return null;
+    }
+    byte[][] copy = new byte[pexp.length][];
+    for (int i = 0; i &lt; pexp.length; i++) {
+        copy[i] = pexp[i] != null ? Arrays.copyOf(pexp[i], pexp[i].length) : null;
+    }
+    return copy;
+}</pre>
+                <div class="issue-source">Reviewer: claude</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">Getter returns direct reference to CRT coefficient</div>
+                <div class="issue-location">sdf4j/src/main/java/org/openhitls/sdf4j/types/RSAPrivateKey.java:157-160</div>
+                <pre>public byte[] getCoef() {
+    return coef;
+}</pre>
+                <div class="problem"><strong>Issue:</strong> getCoef() returns direct reference to CRT coefficient without defensive copying.</div>
+                <div class="fix-label">Fix:</div><pre>public byte[] getCoef() {
+    return coef != null ? Arrays.copyOf(coef, coef.length) : null;
+}</pre>
+                <div class="issue-source">Reviewer: claude</div>
+            </div>
+</div>
+<div class="section"><div class="section-title high">High</div>
+<div class="issue">
+                <div class="issue-title">Default constructor leaves asymAlgAbility uninitialized</div>
+                <div class="issue-location">sdf4j/src/main/java/org/openhitls/sdf4j/types/DeviceInfo.java:43-47</div>
+                <pre>public DeviceInfo() {
+    this.asymAlgAbility = new long[2];
+}</pre>
+                <div class="problem"><strong>Issue:</strong> The default constructor no longer initializes asymAlgAbility array, leaving it as null. Callers using getAsymAlgAbility() will receive null, potentially causing NullPointerException.</div>
+                <div class="fix-label">Fix:</div><pre>public DeviceInfo() {
+    this.asymAlgAbility = new long[2];
+}</pre>
+                <div class="issue-source">Reviewer: claude</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">Getter returns direct reference to internal byte array</div>
+                <div class="issue-location">sdf4j/src/main/java/org/openhitls/sdf4j/types/ECCCipher.java:69-74</div>
+                <pre>public byte[] getX() {
+    return x;
+}</pre>
+                <div class="problem"><strong>Issue:</strong> getX() returns direct reference to internal byte array without defensive copying. For cryptographic objects, this allows callers to modify the key material directly, which is a security vulnerability.</div>
+                <div class="fix-label">Fix:</div><pre>public byte[] getX() {
+    return x != null ? Arrays.copyOf(x, x.length) : null;
+}</pre>
+                <div class="issue-source">Reviewer: claude</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">Getter returns direct reference to internal byte array</div>
+                <div class="issue-location">sdf4j/src/main/java/org/openhitls/sdf4j/types/ECCCipher.java:75-80</div>
+                <pre>public byte[] getY() {
+    return y;
+}</pre>
+                <div class="problem"><strong>Issue:</strong> getY() returns direct reference to internal byte array without defensive copying.</div>
+                <div class="fix-label">Fix:</div><pre>public byte[] getY() {
+    return y != null ? Arrays.copyOf(y, y.length) : null;
+}</pre>
+                <div class="issue-source">Reviewer: claude</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">Getter returns direct reference to internal byte array</div>
+                <div class="issue-location">sdf4j/src/main/java/org/openhitls/sdf4j/types/ECCCipher.java:90-95</div>
+                <pre>public byte[] getM() {
+    return m;
+}</pre>
+                <div class="problem"><strong>Issue:</strong> getM() returns direct reference to internal byte array without defensive copying.</div>
+                <div class="fix-label">Fix:</div><pre>public byte[] getM() {
+    return m != null ? Arrays.copyOf(m, m.length) : null;
+}</pre>
+                <div class="issue-source">Reviewer: claude</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">Getter returns direct reference to internal byte array</div>
+                <div class="issue-location">sdf4j/src/main/java/org/openhitls/sdf4j/types/ECCCipher.java:96-101</div>
+                <pre>public byte[] getC() {
+    return c;
+}</pre>
+                <div class="problem"><strong>Issue:</strong> getC() returns direct reference to internal byte array without defensive copying.</div>
+                <div class="fix-label">Fix:</div><pre>public byte[] getC() {
+    return c != null ? Arrays.copyOf(c, c.length) : null;
+}</pre>
+                <div class="issue-source">Reviewer: claude</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">Getter returns direct reference to internal byte array</div>
+                <div class="issue-location">sdf4j/src/main/java/org/openhitls/sdf4j/types/ECCPrivateKey.java:69-72</div>
+                <pre>public byte[] getK() {
+    return k;
+}</pre>
+                <div class="problem"><strong>Issue:</strong> getK() returns direct reference to private key material without defensive copying.</div>
+                <div class="fix-label">Fix:</div><pre>public byte[] getK() {
+    return k != null ? Arrays.copyOf(k, k.length) : null;
+}</pre>
+                <div class="issue-source">Reviewer: claude</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">Getter returns direct reference to internal byte array</div>
+                <div class="issue-location">sdf4j/src/main/java/org/openhitls/sdf4j/types/ECCPublicKey.java:77-80</div>
+                <pre>public byte[] getX() {
+    return x;
+}</pre>
+                <div class="problem"><strong>Issue:</strong> getX() returns direct reference to public key material without defensive copying.</div>
+                <div class="fix-label">Fix:</div><pre>public byte[] getX() {
+    return x != null ? Arrays.copyOf(x, x.length) : null;
+}</pre>
+                <div class="issue-source">Reviewer: claude</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">Getter returns direct reference to internal byte array</div>
+                <div class="issue-location">sdf4j/src/main/java/org/openhitls/sdf4j/types/ECCPublicKey.java:87-90</div>
+                <pre>public byte[] getY() {
+    return y;
+}</pre>
+                <div class="problem"><strong>Issue:</strong> getY() returns direct reference to public key material without defensive copying.</div>
+                <div class="fix-label">Fix:</div><pre>public byte[] getY() {
+    return y != null ? Arrays.copyOf(y, y.length) : null;
+}</pre>
+                <div class="issue-source">Reviewer: claude</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">Getter returns direct reference to internal byte array</div>
+                <div class="issue-location">sdf4j/src/main/java/org/openhitls/sdf4j/types/ECCSignature.java:39-42</div>
+                <pre>public byte[] getR() {
+    return r;
+}</pre>
+                <div class="problem"><strong>Issue:</strong> getR() returns direct reference to signature value without defensive copying.</div>
+                <div class="fix-label">Fix:</div><pre>public byte[] getR() {
+    return r != null ? Arrays.copyOf(r, r.length) : null;
+}</pre>
+                <div class="issue-source">Reviewer: claude</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">Getter returns direct reference to internal byte array</div>
+                <div class="issue-location">sdf4j/src/main/java/org/openhitls/sdf4j/types/ECCSignature.java:49-52</div>
+                <pre>public byte[] getS() {
+    return s;
+}</pre>
+                <div class="problem"><strong>Issue:</strong> getS() returns direct reference to signature value without defensive copying.</div>
+                <div class="fix-label">Fix:</div><pre>public byte[] getS() {
+    return s != null ? Arrays.copyOf(s, s.length) : null;
+}</pre>
+                <div class="issue-source">Reviewer: claude</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">Getter returns direct reference to key material</div>
+                <div class="issue-location">sdf4j/src/main/java/org/openhitls/sdf4j/types/RSAPrivateKey.java:113-116</div>
+                <pre>public byte[] getM() {
+    return m;
+}</pre>
+                <div class="problem"><strong>Issue:</strong> getM() returns direct reference to modulus without defensive copying.</div>
+                <div class="fix-label">Fix:</div><pre>public byte[] getM() {
+    return m != null ? Arrays.copyOf(m, m.length) : null;
+}</pre>
+                <div class="issue-source">Reviewer: claude</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">Getter returns direct reference to key material</div>
+                <div class="issue-location">sdf4j/src/main/java/org/openhitls/sdf4j/types/RSAPrivateKey.java:121-124</div>
+                <pre>public byte[] getE() {
+    return e;
+}</pre>
+                <div class="problem"><strong>Issue:</strong> getE() returns direct reference to public exponent without defensive copying.</div>
+                <div class="fix-label">Fix:</div><pre>public byte[] getE() {
+    return e != null ? Arrays.copyOf(e, e.length) : null;
+}</pre>
+                <div class="issue-source">Reviewer: claude</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">Getter returns direct reference to key material</div>
+                <div class="issue-location">sdf4j/src/main/java/org/openhitls/sdf4j/types/RSAPublicKey.java:78-81</div>
+                <pre>public byte[] getM() {
+    return m;
+}</pre>
+                <div class="problem"><strong>Issue:</strong> getM() returns direct reference to modulus without defensive copying.</div>
+                <div class="fix-label">Fix:</div><pre>public byte[] getM() {
+    return m != null ? Arrays.copyOf(m, m.length) : null;
+}</pre>
+                <div class="issue-source">Reviewer: claude</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">Getter returns direct reference to key material</div>
+                <div class="issue-location">sdf4j/src/main/java/org/openhitls/sdf4j/types/RSAPublicKey.java:88-91</div>
+                <pre>public byte[] getE() {
+    return e;
+}</pre>
+                <div class="problem"><strong>Issue:</strong> getE() returns direct reference to public exponent without defensive copying.</div>
+                <div class="fix-label">Fix:</div><pre>public byte[] getE() {
+    return e != null ? Arrays.copyOf(e, e.length) : null;
+}</pre>
+                <div class="issue-source">Reviewer: claude</div>
+            </div>
+</div>
+<div class="section"><div class="section-title medium">Medium</div>
+<div class="issue">
+                <div class="issue-title">Inconsistent validation between constructor and setter</div>
+                <div class="issue-location">sdf4j/src/main/java/org/openhitls/sdf4j/types/ECCCipher.java:37-42</div>
+                <pre>public void setC(byte[] c) {
+    if (c == null) {
+        throw new IllegalArgumentException("Ciphertext C cannot be null");
+    }
+    this.c = c;
+}</pre>
+                <div class="problem"><strong>Issue:</strong> The constructor validates that l <= c.length, but the setC() setter doesn't perform this validation. This allows setting a ciphertext array that is smaller than the l value, creating an inconsistent state.</div>
+                <div class="fix-label">Fix:</div><pre>public void setC(byte[] c) {
+    if (c == null) {
+        throw new IllegalArgumentException("Ciphertext C cannot be null");
+    }
+    if (l &gt; c.length) {
+        throw new IllegalArgumentException("l cannot be greater than c.length");
+    }
+    this.c = c;
+}</pre>
+                <div class="issue-source">Reviewer: claude</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">Array length check doesn't prevent buffer overflow</div>
+                <div class="issue-location">sdf4j/src/main/native/src/type_conversion.c:273-281</div>
+                <pre>jbyteArray m_array = (jbyteArray)(*env)-&gt;GetObjectField(env, java_key,
+                                                         g_jni_cache.rsaPublicKey.m);
+if (m_array != NULL) {
+    jsize len = (*env)-&gt;GetArrayLength(env, m_array);
+    if (len &gt; RSAref_MAX_LEN) {
+        THROW_SDF_EXCEPTION(env, SDR_INARGERR, "RSA modulus array exceeds 512");
+        return false;
+    }
+    (*env)-&gt;GetByteArrayRegion(env, m_array, 0, len, (jbyte*)native_key-&gt;m);
+}</pre>
+                <div class="problem"><strong>Issue:</strong> The check `if (len > RSAref_MAX_LEN)` throws an exception, but when GetObjectField returns null, the code continues without initializing native_key->m. The subsequent GetByteArrayRegion call with a null m_array would crash.</div>
+                <div class="fix-label">Fix:</div><pre>jbyteArray m_array = (jbyteArray)(*env)-&gt;GetObjectField(env, java_key,
+                                                         g_jni_cache.rsaPublicKey.m);
+if (m_array == NULL) {
+    THROW_SDF_EXCEPTION(env, SDR_INARGERR, "RSA modulus cannot be null");
+    return false;
+}
+jsize len = (*env)-&gt;GetArrayLength(env, m_array);
+if (len &gt; RSAref_MAX_LEN) {
+    THROW_SDF_EXCEPTION(env, SDR_INARGERR, "RSA modulus array exceeds 512");
+    return false;
+}
+(*env)-&gt;GetByteArrayRegion(env, m_array, 0, len, (jbyte*)native_key-&gt;m);</pre>
+                <div class="issue-source">Reviewer: claude</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">Missing null check for exponent array</div>
+                <div class="issue-location">sdf4j/src/main/native/src/type_conversion.c:282-290</div>
+                <pre>jbyteArray e_array = (jbyteArray)(*env)-&gt;GetObjectField(env, java_key,
+                                                         g_jni_cache.rsaPublicKey.e);
+if (e_array != NULL) {
+    jsize len = (*env)-&gt;GetArrayLength(env, e_array);
+    if (len &gt; RSAref_MAX_LEN) {
+        THROW_SDF_EXCEPTION(env, SDR_INARGERR, "RSA exponent array exceeds 512");
+        return false;
+    }
+    (*env)-&gt;GetByteArrayRegion(env, e_array, 0, len, (jbyte*)native_key-&gt;e);
+}</pre>
+                <div class="problem"><strong>Issue:</strong> Similar to the modulus case, if e_array is null, the code silently continues without initializing native_key->e.</div>
+                <div class="fix-label">Fix:</div><pre>jbyteArray e_array = (jbyteArray)(*env)-&gt;GetObjectField(env, java_key,
+                                                         g_jni_cache.rsaPublicKey.e);
+if (e_array == NULL) {
+    THROW_SDF_EXCEPTION(env, SDR_INARGERR, "RSA exponent cannot be null");
+    return false;
+}
+jsize len = (*env)-&gt;GetArrayLength(env, e_array);
+if (len &gt; RSAref_MAX_LEN) {
+    THROW_SDF_EXCEPTION(env, SDR_INARGERR, "RSA exponent array exceeds 512");
+    return false;
+}
+(*env)-&gt;GetByteArrayRegion(env, e_array, 0, len, (jbyte*)native_key-&gt;e);</pre>
+                <div class="issue-source">Reviewer: claude</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">Missing null checks for signature r and s arrays</div>
+                <div class="issue-location">sdf4j/src/main/native/src/type_conversion.c:333-344</div>
+                <pre>void java_to_native_ECCSignature(JNIEnv *env, jobject java_sig, ECCSignature *native_sig) {
+
+    /* r */
+    jbyteArray r_array = (jbyteArray)(*env)-&gt;GetObjectField(env, java_sig,
+                                                          g_jni_cache.eccSignature.r);
+    if (r_array != NULL) {
+        jsize len = (*env)-&gt;GetArrayLength(env, r_array);
+        if (len &gt; ECCref_MAX_LEN) len = ECCref_MAX_LEN;
+        (*env)-&gt;GetByteArrayRegion(env, r_array, 0, len, (jbyte*)native_sig-&gt;r);
+    }
+
+    /* s */
+    jbyteArray s_array = (jbyteArray)(*env)-&gt;GetObjectField(env, java_sig,
+                                                          g_jni_cache.eccSignature.s);
+    if (s_array != NULL) {
+        jsize len = (*env)-&gt;GetArrayLength(env, s_array);
+        if (len &gt; ECCref_MAX_LEN) len = ECCref_MAX_LEN;
+        (*env)-&gt;GetByteArrayRegion(env, s_array, 0, len, (jbyte*)native_sig-&gt;s);
+    }
+
+    return;
+}</pre>
+                <div class="problem"><strong>Issue:</strong> The java_to_native_ECCSignature function doesn't check if r_array or s_array are null before calling GetByteArrayRegion.</div>
+                <div class="fix-label">Fix:</div><pre>void java_to_native_ECCSignature(JNIEnv *env, jobject java_sig, ECCSignature *native_sig) {
+    memset(native_sig, 0, sizeof(ECCSignature));
+
+    /* r */
+    jbyteArray r_array = (jbyteArray)(*env)-&gt;GetObjectField(env, java_sig,
+                                                          g_jni_cache.eccSignature.r);
+    if (r_array == NULL) {
+        THROW_SDF_EXCEPTION(env, SDR_INARGERR, "Signature r cannot be null");
+        return;
+    }
+    jsize len = (*env)-&gt;GetArrayLength(env, r_array);
+    if (len &gt; ECCref_MAX_LEN) {
+        THROW_SDF_EXCEPTION(env, SDR_INARGERR, "Signature r exceeds 64 bytes");
+        return;
+    }
+    (*env)-&gt;GetByteArrayRegion(env, r_array, 0, len, (jbyte*)native_sig-&gt;r);
+
+    /* s */
+    jbyteArray s_array = (jbyteArray)(*env)-&gt;GetObjectField(env, java_sig,
+                                                          g_jni_cache.eccSignature.s);
+    if (s_array == NULL) {
+        THROW_SDF_EXCEPTION(env, SDR_INARGERR, "Signature s cannot be null");
+        return;
+    }
+    len = (*env)-&gt;GetArrayLength(env, s_array);
+    if (len &gt; ECCref_MAX_LEN) {
+        THROW_SDF_EXCEPTION(env, SDR_INARGERR, "Signature s exceeds 64 bytes");
+        return;
+    }
+    (*env)-&gt;GetByteArrayRegion(env, s_array, 0, len, (jbyte*)native_sig-&gt;s);
+
+    return;
+}</pre>
+                <div class="issue-source">Reviewer: claude</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">Missing null check for ECCPrivateKey k array</div>
+                <div class="issue-location">sdf4j/src/main/native/src/type_conversion.c:623-634</div>
+                <pre>void java_to_native_ECCPrivateKey(JNIEnv *env, jobject java_key, ECCrefPrivateKey *native_key) {
+
+    /* bits */
+    native_key-&gt;bits = (*env)-&gt;GetIntField(env, java_key, g_jni_cache.eccPrivateKey.bits);
+
+    /* k */
+    jbyteArray k_array = (jbyteArray)(*env)-&gt;GetObjectField(env, java_key,
+                                                          g_jni_cache.eccPrivateKey.k);
+    if (k_array != NULL) {
+        jsize len = (*env)-&gt;GetArrayLength(env, k_array);
+        (*env)-&gt;GetByteArrayRegion(env, k_array, 0, len, (jbyte*)native_key-&gt;K);
+    }
+
+    return;
+}</pre>
+                <div class="problem"><strong>Issue:</strong> The java_to_native_ECCPrivateKey function doesn't check if k_array is null before calling GetByteArrayRegion.</div>
+                <div class="fix-label">Fix:</div><pre>void java_to_native_ECCPrivateKey(JNIEnv *env, jobject java_key, ECCrefPrivateKey *native_key) {
+    memset(native_key, 0, sizeof(ECCrefPrivateKey));
+
+    /* bits */
+    native_key-&gt;bits = (*env)-&gt;GetIntField(env, java_key, g_jni_cache.eccPrivateKey.bits);
+
+    /* k */
+    jbyteArray k_array = (jbyteArray)(*env)-&gt;GetObjectField(env, java_key,
+                                                          g_jni_cache.eccPrivateKey.k);
+    if (k_array == NULL) {
+        THROW_SDF_EXCEPTION(env, SDR_INARGERR, "Private key K cannot be null");
+        return;
+    }
+    jsize len = (*env)-&gt;GetArrayLength(env, k_array);
+    if (len &gt; ECCref_MAX_LEN) {
+        THROW_SDF_EXCEPTION(env, SDR_INARGERR, "Private key K exceeds 64 bytes");
+        return;
+    }
+    (*env)-&gt;GetByteArrayRegion(env, k_array, 0, len, (jbyte*)native_key-&gt;K);
+
+    return;
+}</pre>
+                <div class="issue-source">Reviewer: claude</div>
+            </div>
+</div>
+<div class="section"><div class="section-title low">Low</div>
+<div class="issue">
+                <div class="issue-title">bytesToHex displays entire array without truncation</div>
+                <div class="issue-location">sdf4j/src/main/java/org/openhitls/sdf4j/types/ECCPublicKey.java:116-120</div>
+                <pre>private static String bytesToHex(byte[] bytes) {
+    if (bytes == null) {
+        return "";
+    }
+    StringBuilder sb = new StringBuilder();
+    for (int i = 0; i &lt; bytes.length; i++) {
+        sb.append(String.format("%02X", bytes[i]));
+    }
+    return sb.toString();
+}</pre>
+                <div class="problem"><strong>Issue:</strong> The bytesToHex method now displays the entire byte array without any truncation. For large keys (512-bit ECC), this will output 128 hex characters per coordinate, which could overwhelm logs.</div>
+                <div class="fix-label">Fix:</div><pre>private static String bytesToHex(byte[] bytes) {
+    if (bytes == null) {
+        return "";
+    }
+    int limit = Math.min(bytes.length, 32);
+    StringBuilder sb = new StringBuilder();
+    for (int i = 0; i &lt; limit; i++) {
+        sb.append(String.format("%02X", bytes[i]));
+    }
+    if (bytes.length &gt; limit) {
+        sb.append("...(").append(bytes.length).append(" bytes)");
+    }
+    return sb.toString();
+}</pre>
+                <div class="issue-source">Reviewer: claude</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">Missing validation in setCtM setter</div>
+                <div class="issue-location">sdf4j/src/main/java/org/openhitls/sdf4j/types/HybridCipher.java:49-57</div>
+                <pre>public void setCtM(byte[] ctM) {
+    this.ctM = ctM;
+}</pre>
+                <div class="problem"><strong>Issue:</strong> The setCtM() setter lacks null validation, while setCtS() has it. This inconsistency could lead to unexpected behavior.</div>
+                <div class="fix-label">Fix:</div><pre>public void setCtM(byte[] ctM) {
+    if (ctM == null) {
+        throw new IllegalArgumentException("ctM cannot be null");
+    }
+    this.ctM = ctM;
+}</pre>
+                <div class="issue-source">Reviewer: claude</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">Missing validation in setSigM setter</div>
+                <div class="issue-location">sdf4j/src/main/java/org/openhitls/sdf4j/types/HybridSignature.java:48-52</div>
+                <pre>public void setSigM(byte[] sigM) {
+    this.sigM = sigM;
+}</pre>
+                <div class="problem"><strong>Issue:</strong> The setSigM() setter lacks null validation.</div>
+                <div class="fix-label">Fix:</div><pre>public void setSigM(byte[] sigM) {
+    if (sigM == null) {
+        throw new IllegalArgumentException("sigM cannot be null");
+    }
+    this.sigM = sigM;
+}</pre>
+                <div class="issue-source">Reviewer: claude</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">No error handling when ecc_cipher_obj is null</div>
+                <div class="issue-location">sdf4j/src/main/native/src/type_conversion.c:696-700</div>
+                <pre>jobject ecc_cipher_obj = native_to_java_ECCCipher(env, &amp;native_cipher-&gt;ct_s, cipher_len);
+if (ecc_cipher_obj == NULL) {
+    THROW_SDF_EXCEPTION(env, SDR_INARGERR, "Failed to create ECCCipher object");
+    return NULL;
+}</pre>
+                <div class="problem"><strong>Issue:</strong> If native_to_java_ECCCipher returns null, the code continues and creates a HybridCipher object with a null ctS field.</div>
+                
+                <div class="issue-source">Reviewer: claude</div>
+            </div>
+</div>
+</div></body></html>

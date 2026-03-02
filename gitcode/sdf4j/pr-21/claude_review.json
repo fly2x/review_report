@@ -1,0 +1,281 @@
+[
+  {
+    "source": "claude",
+    "file": "sdf4j/src/main/java/org/openhitls/sdf4j/types/DeviceInfo.java",
+    "line": "153-154",
+    "severity": "critical",
+    "title": "Getter returns direct reference to internal array",
+    "problem": "getAsymAlgAbility() returns direct reference to internal array without defensive copying. This allows external code to modify the internal state, potentially violating immutability expectations and causing security issues.",
+    "code": "public long[] getAsymAlgAbility() {\n    return asymAlgAbility;\n}",
+    "fix": "public long[] getAsymAlgAbility() {\n    return asymAlgAbility != null ? Arrays.copyOf(asymAlgAbility, asymAlgAbility.length) : new long[2];\n}"
+  },
+  {
+    "source": "claude",
+    "file": "sdf4j/src/main/java/org/openhitls/sdf4j/types/RSAPrivateKey.java",
+    "line": "130-133",
+    "severity": "critical",
+    "title": "Getter returns direct reference to private key material",
+    "problem": "getD() returns direct reference to private exponent without defensive copying. This is highly sensitive cryptographic material.",
+    "code": "public byte[] getD() {\n    return d;\n}",
+    "fix": "public byte[] getD() {\n    return d != null ? Arrays.copyOf(d, d.length) : null;\n}"
+  },
+  {
+    "source": "claude",
+    "file": "sdf4j/src/main/java/org/openhitls/sdf4j/types/RSAPrivateKey.java",
+    "line": "139-142",
+    "severity": "critical",
+    "title": "Getter returns direct reference to prime factors",
+    "problem": "getPrime() returns direct reference to prime factors [p, q] without defensive copying. These are highly sensitive RSA private key components.",
+    "code": "public byte[][] getPrime() {\n    return prime;\n}",
+    "fix": "public byte[][] getPrime() {\n    if (prime == null) {\n        return null;\n    }\n    byte[][] copy = new byte[prime.length][];\n    for (int i = 0; i < prime.length; i++) {\n        copy[i] = prime[i] != null ? Arrays.copyOf(prime[i], prime[i].length) : null;\n    }\n    return copy;\n}"
+  },
+  {
+    "source": "claude",
+    "file": "sdf4j/src/main/java/org/openhitls/sdf4j/types/RSAPrivateKey.java",
+    "line": "148-151",
+    "severity": "critical",
+    "title": "Getter returns direct reference to CRT exponents",
+    "problem": "getPexp() returns direct reference to CRT exponents [dp, dq] without defensive copying.",
+    "code": "public byte[][] getPexp() {\n    return pexp;\n}",
+    "fix": "public byte[][] getPexp() {\n    if (pexp == null) {\n        return null;\n    }\n    byte[][] copy = new byte[pexp.length][];\n    for (int i = 0; i < pexp.length; i++) {\n        copy[i] = pexp[i] != null ? Arrays.copyOf(pexp[i], pexp[i].length) : null;\n    }\n    return copy;\n}"
+  },
+  {
+    "source": "claude",
+    "file": "sdf4j/src/main/java/org/openhitls/sdf4j/types/RSAPrivateKey.java",
+    "line": "157-160",
+    "severity": "critical",
+    "title": "Getter returns direct reference to CRT coefficient",
+    "problem": "getCoef() returns direct reference to CRT coefficient without defensive copying.",
+    "code": "public byte[] getCoef() {\n    return coef;\n}",
+    "fix": "public byte[] getCoef() {\n    return coef != null ? Arrays.copyOf(coef, coef.length) : null;\n}"
+  },
+  {
+    "source": "claude",
+    "file": "sdf4j/src/main/java/org/openhitls/sdf4j/types/DeviceInfo.java",
+    "line": "43-47",
+    "severity": "high",
+    "title": "Default constructor leaves asymAlgAbility uninitialized",
+    "problem": "The default constructor no longer initializes asymAlgAbility array, leaving it as null. Callers using getAsymAlgAbility() will receive null, potentially causing NullPointerException.",
+    "code": "public DeviceInfo() {\n    this.asymAlgAbility = new long[2];\n}",
+    "fix": "public DeviceInfo() {\n    this.asymAlgAbility = new long[2];\n}"
+  },
+  {
+    "source": "claude",
+    "file": "sdf4j/src/main/java/org/openhitls/sdf4j/types/ECCCipher.java",
+    "line": "69-74",
+    "severity": "high",
+    "title": "Getter returns direct reference to internal byte array",
+    "problem": "getX() returns direct reference to internal byte array without defensive copying. For cryptographic objects, this allows callers to modify the key material directly, which is a security vulnerability.",
+    "code": "public byte[] getX() {\n    return x;\n}",
+    "fix": "public byte[] getX() {\n    return x != null ? Arrays.copyOf(x, x.length) : null;\n}"
+  },
+  {
+    "source": "claude",
+    "file": "sdf4j/src/main/java/org/openhitls/sdf4j/types/ECCCipher.java",
+    "line": "75-80",
+    "severity": "high",
+    "title": "Getter returns direct reference to internal byte array",
+    "problem": "getY() returns direct reference to internal byte array without defensive copying.",
+    "code": "public byte[] getY() {\n    return y;\n}",
+    "fix": "public byte[] getY() {\n    return y != null ? Arrays.copyOf(y, y.length) : null;\n}"
+  },
+  {
+    "source": "claude",
+    "file": "sdf4j/src/main/java/org/openhitls/sdf4j/types/ECCCipher.java",
+    "line": "90-95",
+    "severity": "high",
+    "title": "Getter returns direct reference to internal byte array",
+    "problem": "getM() returns direct reference to internal byte array without defensive copying.",
+    "code": "public byte[] getM() {\n    return m;\n}",
+    "fix": "public byte[] getM() {\n    return m != null ? Arrays.copyOf(m, m.length) : null;\n}"
+  },
+  {
+    "source": "claude",
+    "file": "sdf4j/src/main/java/org/openhitls/sdf4j/types/ECCCipher.java",
+    "line": "96-101",
+    "severity": "high",
+    "title": "Getter returns direct reference to internal byte array",
+    "problem": "getC() returns direct reference to internal byte array without defensive copying.",
+    "code": "public byte[] getC() {\n    return c;\n}",
+    "fix": "public byte[] getC() {\n    return c != null ? Arrays.copyOf(c, c.length) : null;\n}"
+  },
+  {
+    "source": "claude",
+    "file": "sdf4j/src/main/java/org/openhitls/sdf4j/types/ECCPrivateKey.java",
+    "line": "69-72",
+    "severity": "high",
+    "title": "Getter returns direct reference to internal byte array",
+    "problem": "getK() returns direct reference to private key material without defensive copying.",
+    "code": "public byte[] getK() {\n    return k;\n}",
+    "fix": "public byte[] getK() {\n    return k != null ? Arrays.copyOf(k, k.length) : null;\n}"
+  },
+  {
+    "source": "claude",
+    "file": "sdf4j/src/main/java/org/openhitls/sdf4j/types/ECCPublicKey.java",
+    "line": "77-80",
+    "severity": "high",
+    "title": "Getter returns direct reference to internal byte array",
+    "problem": "getX() returns direct reference to public key material without defensive copying.",
+    "code": "public byte[] getX() {\n    return x;\n}",
+    "fix": "public byte[] getX() {\n    return x != null ? Arrays.copyOf(x, x.length) : null;\n}"
+  },
+  {
+    "source": "claude",
+    "file": "sdf4j/src/main/java/org/openhitls/sdf4j/types/ECCPublicKey.java",
+    "line": "87-90",
+    "severity": "high",
+    "title": "Getter returns direct reference to internal byte array",
+    "problem": "getY() returns direct reference to public key material without defensive copying.",
+    "code": "public byte[] getY() {\n    return y;\n}",
+    "fix": "public byte[] getY() {\n    return y != null ? Arrays.copyOf(y, y.length) : null;\n}"
+  },
+  {
+    "source": "claude",
+    "file": "sdf4j/src/main/java/org/openhitls/sdf4j/types/ECCSignature.java",
+    "line": "39-42",
+    "severity": "high",
+    "title": "Getter returns direct reference to internal byte array",
+    "problem": "getR() returns direct reference to signature value without defensive copying.",
+    "code": "public byte[] getR() {\n    return r;\n}",
+    "fix": "public byte[] getR() {\n    return r != null ? Arrays.copyOf(r, r.length) : null;\n}"
+  },
+  {
+    "source": "claude",
+    "file": "sdf4j/src/main/java/org/openhitls/sdf4j/types/ECCSignature.java",
+    "line": "49-52",
+    "severity": "high",
+    "title": "Getter returns direct reference to internal byte array",
+    "problem": "getS() returns direct reference to signature value without defensive copying.",
+    "code": "public byte[] getS() {\n    return s;\n}",
+    "fix": "public byte[] getS() {\n    return s != null ? Arrays.copyOf(s, s.length) : null;\n}"
+  },
+  {
+    "source": "claude",
+    "file": "sdf4j/src/main/java/org/openhitls/sdf4j/types/RSAPrivateKey.java",
+    "line": "113-116",
+    "severity": "high",
+    "title": "Getter returns direct reference to key material",
+    "problem": "getM() returns direct reference to modulus without defensive copying.",
+    "code": "public byte[] getM() {\n    return m;\n}",
+    "fix": "public byte[] getM() {\n    return m != null ? Arrays.copyOf(m, m.length) : null;\n}"
+  },
+  {
+    "source": "claude",
+    "file": "sdf4j/src/main/java/org/openhitls/sdf4j/types/RSAPrivateKey.java",
+    "line": "121-124",
+    "severity": "high",
+    "title": "Getter returns direct reference to key material",
+    "problem": "getE() returns direct reference to public exponent without defensive copying.",
+    "code": "public byte[] getE() {\n    return e;\n}",
+    "fix": "public byte[] getE() {\n    return e != null ? Arrays.copyOf(e, e.length) : null;\n}"
+  },
+  {
+    "source": "claude",
+    "file": "sdf4j/src/main/java/org/openhitls/sdf4j/types/RSAPublicKey.java",
+    "line": "78-81",
+    "severity": "high",
+    "title": "Getter returns direct reference to key material",
+    "problem": "getM() returns direct reference to modulus without defensive copying.",
+    "code": "public byte[] getM() {\n    return m;\n}",
+    "fix": "public byte[] getM() {\n    return m != null ? Arrays.copyOf(m, m.length) : null;\n}"
+  },
+  {
+    "source": "claude",
+    "file": "sdf4j/src/main/java/org/openhitls/sdf4j/types/RSAPublicKey.java",
+    "line": "88-91",
+    "severity": "high",
+    "title": "Getter returns direct reference to key material",
+    "problem": "getE() returns direct reference to public exponent without defensive copying.",
+    "code": "public byte[] getE() {\n    return e;\n}",
+    "fix": "public byte[] getE() {\n    return e != null ? Arrays.copyOf(e, e.length) : null;\n}"
+  },
+  {
+    "source": "claude",
+    "file": "sdf4j/src/main/java/org/openhitls/sdf4j/types/ECCCipher.java",
+    "line": "37-42",
+    "severity": "medium",
+    "title": "Inconsistent validation between constructor and setter",
+    "problem": "The constructor validates that l <= c.length, but the setC() setter doesn't perform this validation. This allows setting a ciphertext array that is smaller than the l value, creating an inconsistent state.",
+    "code": "public void setC(byte[] c) {\n    if (c == null) {\n        throw new IllegalArgumentException(\"Ciphertext C cannot be null\");\n    }\n    this.c = c;\n}",
+    "fix": "public void setC(byte[] c) {\n    if (c == null) {\n        throw new IllegalArgumentException(\"Ciphertext C cannot be null\");\n    }\n    if (l > c.length) {\n        throw new IllegalArgumentException(\"l cannot be greater than c.length\");\n    }\n    this.c = c;\n}"
+  },
+  {
+    "source": "claude",
+    "file": "sdf4j/src/main/native/src/type_conversion.c",
+    "line": "273-281",
+    "severity": "medium",
+    "title": "Array length check doesn't prevent buffer overflow",
+    "problem": "The check `if (len > RSAref_MAX_LEN)` throws an exception, but when GetObjectField returns null, the code continues without initializing native_key->m. The subsequent GetByteArrayRegion call with a null m_array would crash.",
+    "code": "jbyteArray m_array = (jbyteArray)(*env)->GetObjectField(env, java_key,\n                                                         g_jni_cache.rsaPublicKey.m);\nif (m_array != NULL) {\n    jsize len = (*env)->GetArrayLength(env, m_array);\n    if (len > RSAref_MAX_LEN) {\n        THROW_SDF_EXCEPTION(env, SDR_INARGERR, \"RSA modulus array exceeds 512\");\n        return false;\n    }\n    (*env)->GetByteArrayRegion(env, m_array, 0, len, (jbyte*)native_key->m);\n}",
+    "fix": "jbyteArray m_array = (jbyteArray)(*env)->GetObjectField(env, java_key,\n                                                         g_jni_cache.rsaPublicKey.m);\nif (m_array == NULL) {\n    THROW_SDF_EXCEPTION(env, SDR_INARGERR, \"RSA modulus cannot be null\");\n    return false;\n}\njsize len = (*env)->GetArrayLength(env, m_array);\nif (len > RSAref_MAX_LEN) {\n    THROW_SDF_EXCEPTION(env, SDR_INARGERR, \"RSA modulus array exceeds 512\");\n    return false;\n}\n(*env)->GetByteArrayRegion(env, m_array, 0, len, (jbyte*)native_key->m);"
+  },
+  {
+    "source": "claude",
+    "file": "sdf4j/src/main/native/src/type_conversion.c",
+    "line": "282-290",
+    "severity": "medium",
+    "title": "Missing null check for exponent array",
+    "problem": "Similar to the modulus case, if e_array is null, the code silently continues without initializing native_key->e.",
+    "code": "jbyteArray e_array = (jbyteArray)(*env)->GetObjectField(env, java_key,\n                                                         g_jni_cache.rsaPublicKey.e);\nif (e_array != NULL) {\n    jsize len = (*env)->GetArrayLength(env, e_array);\n    if (len > RSAref_MAX_LEN) {\n        THROW_SDF_EXCEPTION(env, SDR_INARGERR, \"RSA exponent array exceeds 512\");\n        return false;\n    }\n    (*env)->GetByteArrayRegion(env, e_array, 0, len, (jbyte*)native_key->e);\n}",
+    "fix": "jbyteArray e_array = (jbyteArray)(*env)->GetObjectField(env, java_key,\n                                                         g_jni_cache.rsaPublicKey.e);\nif (e_array == NULL) {\n    THROW_SDF_EXCEPTION(env, SDR_INARGERR, \"RSA exponent cannot be null\");\n    return false;\n}\njsize len = (*env)->GetArrayLength(env, e_array);\nif (len > RSAref_MAX_LEN) {\n    THROW_SDF_EXCEPTION(env, SDR_INARGERR, \"RSA exponent array exceeds 512\");\n    return false;\n}\n(*env)->GetByteArrayRegion(env, e_array, 0, len, (jbyte*)native_key->e);"
+  },
+  {
+    "source": "claude",
+    "file": "sdf4j/src/main/native/src/type_conversion.c",
+    "line": "333-344",
+    "severity": "medium",
+    "title": "Missing null checks for signature r and s arrays",
+    "problem": "The java_to_native_ECCSignature function doesn't check if r_array or s_array are null before calling GetByteArrayRegion.",
+    "code": "void java_to_native_ECCSignature(JNIEnv *env, jobject java_sig, ECCSignature *native_sig) {\n\n    /* r */\n    jbyteArray r_array = (jbyteArray)(*env)->GetObjectField(env, java_sig,\n                                                          g_jni_cache.eccSignature.r);\n    if (r_array != NULL) {\n        jsize len = (*env)->GetArrayLength(env, r_array);\n        if (len > ECCref_MAX_LEN) len = ECCref_MAX_LEN;\n        (*env)->GetByteArrayRegion(env, r_array, 0, len, (jbyte*)native_sig->r);\n    }\n\n    /* s */\n    jbyteArray s_array = (jbyteArray)(*env)->GetObjectField(env, java_sig,\n                                                          g_jni_cache.eccSignature.s);\n    if (s_array != NULL) {\n        jsize len = (*env)->GetArrayLength(env, s_array);\n        if (len > ECCref_MAX_LEN) len = ECCref_MAX_LEN;\n        (*env)->GetByteArrayRegion(env, s_array, 0, len, (jbyte*)native_sig->s);\n    }\n\n    return;\n}",
+    "fix": "void java_to_native_ECCSignature(JNIEnv *env, jobject java_sig, ECCSignature *native_sig) {\n    memset(native_sig, 0, sizeof(ECCSignature));\n\n    /* r */\n    jbyteArray r_array = (jbyteArray)(*env)->GetObjectField(env, java_sig,\n                                                          g_jni_cache.eccSignature.r);\n    if (r_array == NULL) {\n        THROW_SDF_EXCEPTION(env, SDR_INARGERR, \"Signature r cannot be null\");\n        return;\n    }\n    jsize len = (*env)->GetArrayLength(env, r_array);\n    if (len > ECCref_MAX_LEN) {\n        THROW_SDF_EXCEPTION(env, SDR_INARGERR, \"Signature r exceeds 64 bytes\");\n        return;\n    }\n    (*env)->GetByteArrayRegion(env, r_array, 0, len, (jbyte*)native_sig->r);\n\n    /* s */\n    jbyteArray s_array = (jbyteArray)(*env)->GetObjectField(env, java_sig,\n                                                          g_jni_cache.eccSignature.s);\n    if (s_array == NULL) {\n        THROW_SDF_EXCEPTION(env, SDR_INARGERR, \"Signature s cannot be null\");\n        return;\n    }\n    len = (*env)->GetArrayLength(env, s_array);\n    if (len > ECCref_MAX_LEN) {\n        THROW_SDF_EXCEPTION(env, SDR_INARGERR, \"Signature s exceeds 64 bytes\");\n        return;\n    }\n    (*env)->GetByteArrayRegion(env, s_array, 0, len, (jbyte*)native_sig->s);\n\n    return;\n}"
+  },
+  {
+    "source": "claude",
+    "file": "sdf4j/src/main/native/src/type_conversion.c",
+    "line": "623-634",
+    "severity": "medium",
+    "title": "Missing null check for ECCPrivateKey k array",
+    "problem": "The java_to_native_ECCPrivateKey function doesn't check if k_array is null before calling GetByteArrayRegion.",
+    "code": "void java_to_native_ECCPrivateKey(JNIEnv *env, jobject java_key, ECCrefPrivateKey *native_key) {\n\n    /* bits */\n    native_key->bits = (*env)->GetIntField(env, java_key, g_jni_cache.eccPrivateKey.bits);\n\n    /* k */\n    jbyteArray k_array = (jbyteArray)(*env)->GetObjectField(env, java_key,\n                                                          g_jni_cache.eccPrivateKey.k);\n    if (k_array != NULL) {\n        jsize len = (*env)->GetArrayLength(env, k_array);\n        (*env)->GetByteArrayRegion(env, k_array, 0, len, (jbyte*)native_key->K);\n    }\n\n    return;\n}",
+    "fix": "void java_to_native_ECCPrivateKey(JNIEnv *env, jobject java_key, ECCrefPrivateKey *native_key) {\n    memset(native_key, 0, sizeof(ECCrefPrivateKey));\n\n    /* bits */\n    native_key->bits = (*env)->GetIntField(env, java_key, g_jni_cache.eccPrivateKey.bits);\n\n    /* k */\n    jbyteArray k_array = (jbyteArray)(*env)->GetObjectField(env, java_key,\n                                                          g_jni_cache.eccPrivateKey.k);\n    if (k_array == NULL) {\n        THROW_SDF_EXCEPTION(env, SDR_INARGERR, \"Private key K cannot be null\");\n        return;\n    }\n    jsize len = (*env)->GetArrayLength(env, k_array);\n    if (len > ECCref_MAX_LEN) {\n        THROW_SDF_EXCEPTION(env, SDR_INARGERR, \"Private key K exceeds 64 bytes\");\n        return;\n    }\n    (*env)->GetByteArrayRegion(env, k_array, 0, len, (jbyte*)native_key->K);\n\n    return;\n}"
+  },
+  {
+    "source": "claude",
+    "file": "sdf4j/src/main/java/org/openhitls/sdf4j/types/ECCPublicKey.java",
+    "line": "116-120",
+    "severity": "low",
+    "title": "bytesToHex displays entire array without truncation",
+    "problem": "The bytesToHex method now displays the entire byte array without any truncation. For large keys (512-bit ECC), this will output 128 hex characters per coordinate, which could overwhelm logs.",
+    "code": "private static String bytesToHex(byte[] bytes) {\n    if (bytes == null) {\n        return \"\";\n    }\n    StringBuilder sb = new StringBuilder();\n    for (int i = 0; i < bytes.length; i++) {\n        sb.append(String.format(\"%02X\", bytes[i]));\n    }\n    return sb.toString();\n}",
+    "fix": "private static String bytesToHex(byte[] bytes) {\n    if (bytes == null) {\n        return \"\";\n    }\n    int limit = Math.min(bytes.length, 32);\n    StringBuilder sb = new StringBuilder();\n    for (int i = 0; i < limit; i++) {\n        sb.append(String.format(\"%02X\", bytes[i]));\n    }\n    if (bytes.length > limit) {\n        sb.append(\"...(\").append(bytes.length).append(\" bytes)\");\n    }\n    return sb.toString();\n}"
+  },
+  {
+    "source": "claude",
+    "file": "sdf4j/src/main/java/org/openhitls/sdf4j/types/HybridCipher.java",
+    "line": "49-57",
+    "severity": "low",
+    "title": "Missing validation in setCtM setter",
+    "problem": "The setCtM() setter lacks null validation, while setCtS() has it. This inconsistency could lead to unexpected behavior.",
+    "code": "public void setCtM(byte[] ctM) {\n    this.ctM = ctM;\n}",
+    "fix": "public void setCtM(byte[] ctM) {\n    if (ctM == null) {\n        throw new IllegalArgumentException(\"ctM cannot be null\");\n    }\n    this.ctM = ctM;\n}"
+  },
+  {
+    "source": "claude",
+    "file": "sdf4j/src/main/java/org/openhitls/sdf4j/types/HybridSignature.java",
+    "line": "48-52",
+    "severity": "low",
+    "title": "Missing validation in setSigM setter",
+    "problem": "The setSigM() setter lacks null validation.",
+    "code": "public void setSigM(byte[] sigM) {\n    this.sigM = sigM;\n}",
+    "fix": "public void setSigM(byte[] sigM) {\n    if (sigM == null) {\n        throw new IllegalArgumentException(\"sigM cannot be null\");\n    }\n    this.sigM = sigM;\n}"
+  },
+  {
+    "source": "claude",
+    "file": "sdf4j/src/main/native/src/type_conversion.c",
+    "line": "696-700",
+    "severity": "low",
+    "title": "No error handling when ecc_cipher_obj is null",
+    "problem": "If native_to_java_ECCCipher returns null, the code continues and creates a HybridCipher object with a null ctS field.",
+    "code": "jobject ecc_cipher_obj = native_to_java_ECCCipher(env, &native_cipher->ct_s, cipher_len);\nif (ecc_cipher_obj == NULL) {\n    THROW_SDF_EXCEPTION(env, SDR_INARGERR, \"Failed to create ECCCipher object\");\n    return NULL;\n}"
+  }
+]
