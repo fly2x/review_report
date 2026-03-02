@@ -3,9 +3,9 @@
 You are reviewing PR #21 for openHiTLS/sdf4j.
 
 
-## Changed Files (28 files)
+## Changed Files (27 files)
 
-**Source** (24 files):
+**Source** (23 files):
   - sdf4j/src/main/java/org/openhitls/sdf4j/SDFException.java
   - sdf4j/src/main/java/org/openhitls/sdf4j/types/DeviceInfo.java
   - sdf4j/src/main/java/org/openhitls/sdf4j/types/ECCCipher.java
@@ -19,14 +19,14 @@ You are reviewing PR #21 for openHiTLS/sdf4j.
   - sdf4j/src/main/java/org/openhitls/sdf4j/types/RSAPrivateKey.java
   - sdf4j/src/main/java/org/openhitls/sdf4j/types/RSAPublicKey.java
   - sdf4j/src/main/native/include/jni_cache.h
-  - sdf4j/src/main/native/include/type_conversion.h
   - sdf4j/src/main/native/src/jni_cache.c
   - sdf4j/src/main/native/src/sdf_jni_asymmetric.c
   - sdf4j/src/main/native/src/sdf_jni_file.c
   - sdf4j/src/main/native/src/sdf_jni_hybrid.c
   - sdf4j/src/main/native/src/sdf_jni_key.c
   - sdf4j/src/main/native/src/sdf_jni_keygen.c
-  - ... and 4 more
+  - sdf4j/src/main/native/src/sdf_jni_register.c
+  - ... and 3 more
 
 **Test** (4 files):
   - sdf4j/src/test/java/org/openhitls/sdf4j/DeviceAndSessionManageTest.java

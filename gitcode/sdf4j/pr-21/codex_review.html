@@ -31,142 +31,10 @@
     <div class="container">
         <h1>Code Review: openHiTLS/sdf4j#21 - CODEX</h1>
         <div class="subtitle"></div>
-<div class="section"><div class="section-title critical">Critical</div>
+<div class="section"><div class="section-title high">High</div>
 <div class="issue">
-                <div class="issue-title">Removed ECC coordinate length enforcement enables native buffer overflow</div>
-                <div class="issue-location">sdf4j/src/main/java/org/openhitls/sdf4j/types/ECCPublicKey.java:56-65</div>
-                <pre>public ECCPublicKey(int bits, byte[] x, byte[] y) {
-    if (bits &lt;= 0) {
-        throw new IllegalArgumentException("Invalid bits: " + bits);
-    }
-    if (x == null || y == null) {
-        throw new IllegalArgumentException("X and Y coordinates cannot be null");
-    }
-    this.bits = bits;
-    this.x = x;
-    this.y = y;
-}</pre>
-                <div class="problem"><strong>Issue:</strong> The constructor now stores caller-provided `x`/`y` arrays without max-length checks or fixed-size copy. JNI conversion (`java_to_native_ECCPublicKey`) copies Java array length directly into fixed 64-byte native fields, so oversized arrays can overflow native memory.</div>
-                <div class="fix-label">Fix:</div><pre>public static final int ECC_MAX_BITS = 512;
-public static final int ECC_MAX_LEN = (ECC_MAX_BITS + 7) / 8;
-
-public ECCPublicKey(int bits, byte[] x, byte[] y) {
-    if (bits &lt;= 0 || bits &gt; ECC_MAX_BITS) {
-        throw new IllegalArgumentException("Invalid bits: " + bits);
-    }
-    if (x == null || y == null) {
-        throw new IllegalArgumentException("X and Y coordinates cannot be null");
-    }
-    if (x.length &gt; ECC_MAX_LEN || y.length &gt; ECC_MAX_LEN) {
-        throw new IllegalArgumentException("ECC coordinate length exceeds " + ECC_MAX_LEN);
-    }
-    this.bits = bits;
-    this.x = Arrays.copyOf(x, ECC_MAX_LEN);
-    this.y = Arrays.copyOf(y, ECC_MAX_LEN);
-}</pre>
-                <div class="issue-source">Reviewer: codex</div>
-            </div>
-<div class="issue">
-                <div class="issue-title">Removed ECC private key size checks allows overflow in JNI conversion</div>
-                <div class="issue-location">sdf4j/src/main/java/org/openhitls/sdf4j/types/ECCPrivateKey.java:50-59</div>
-                <pre>public ECCPrivateKey(int bits, byte[] k) {
-    if (bits &lt;= 0) {
-        throw new IllegalArgumentException("Invalid bits: " + bits);
-    }
-    if (k == null) {
-        throw new IllegalArgumentException("Private key value cannot be null");
-    }
-    this.bits = bits;
-    this.k = k;
-}</pre>
-                <div class="problem"><strong>Issue:</strong> `k` is assigned directly without enforcing max length. JNI conversion (`java_to_native_ECCPrivateKey`) copies full Java array length into fixed 64-byte native `K`, so oversized keys can corrupt memory.</div>
-                <div class="fix-label">Fix:</div><pre>public static final int ECC_MAX_BITS = 512;
-public static final int ECC_MAX_LEN = (ECC_MAX_BITS + 7) / 8;
-
-public ECCPrivateKey(int bits, byte[] k) {
-    if (bits &lt;= 0 || bits &gt; ECC_MAX_BITS) {
-        throw new IllegalArgumentException("Invalid bits: " + bits);
-    }
-    if (k == null) {
-        throw new IllegalArgumentException("Private key value cannot be null");
-    }
-    if (k.length &gt; ECC_MAX_LEN) {
-        throw new IllegalArgumentException("Private key length exceeds " + ECC_MAX_LEN);
-    }
-    this.bits = bits;
-    this.k = Arrays.copyOf(k, ECC_MAX_LEN);
-}</pre>
-                <div class="issue-source">Reviewer: codex</div>
-            </div>
-<div class="issue">
-                <div class="issue-title">Signature component length validation removed, exposing native overflow path</div>
-                <div class="issue-location">sdf4j/src/main/java/org/openhitls/sdf4j/types/ECCSignature.java:50-56</div>
-                <pre>public ECCSignature(byte[] r, byte[] s) {
-    if (r == null || s == null) {
-        throw new IllegalArgumentException("Signature r and s cannot be null");
-    }
-    this.r = r;
-    this.s = s;
-}</pre>
-                <div class="problem"><strong>Issue:</strong> `r`/`s` are now accepted at arbitrary length and stored directly. JNI conversion (`java_to_native_ECCSignature`) copies raw array length into fixed-size native `ECCSignature` buffers, enabling memory corruption with oversized inputs.</div>
-                <div class="fix-label">Fix:</div><pre>public static final int ECC_MAX_LEN = 64;
-
-public ECCSignature(byte[] r, byte[] s) {
-    if (r == null || s == null) {
-        throw new IllegalArgumentException("Signature r and s cannot be null");
-    }
-    if (r.length &gt; ECC_MAX_LEN || s.length &gt; ECC_MAX_LEN) {
-        throw new IllegalArgumentException("ECC signature component exceeds " + ECC_MAX_LEN);
-    }
-    this.r = Arrays.copyOf(r, ECC_MAX_LEN);
-    this.s = Arrays.copyOf(s, ECC_MAX_LEN);
-}</pre>
-                <div class="issue-source">Reviewer: codex</div>
-            </div>
-<div class="issue">
-                <div class="issue-title">ECCCipher constructor no longer bounds-checks fixed-size fields</div>
-                <div class="issue-location">sdf4j/src/main/java/org/openhitls/sdf4j/types/ECCCipher.java:68-79</div>
-                <pre>public ECCCipher(byte[] x, byte[] y, byte[] m, long l, byte[] c) {
-    if (x == null || y == null || m == null || c == null) {
-        throw new IllegalArgumentException("x, y, m, c cannot be null");
-    }
-    if (l &lt; 0 || l &gt; c.length) {
-        throw new IllegalArgumentException("l is invalid");
-    }
-    this.x = x;
-    this.y = y;
-    this.m = m;
-    this.l = l;
-    this.c = c;
-}</pre>
-                <div class="problem"><strong>Issue:</strong> `x` and `y` are stored directly with no max-length checks. JNI conversion (`java_to_native_ECCCipher_alloc`) copies Java lengths directly into fixed-size native buffers (`x[64]`, `y[64]`), causing overflow when caller passes oversized arrays.</div>
-                <div class="fix-label">Fix:</div><pre>public static final int ECC_MAX_LEN = 64;
-public static final int HASH_LEN = 32;
-
-public ECCCipher(byte[] x, byte[] y, byte[] m, long l, byte[] c) {
-    if (x == null || y == null || m == null || c == null) {
-        throw new IllegalArgumentException("x, y, m, c cannot be null");
-    }
-    if (x.length &gt; ECC_MAX_LEN || y.length &gt; ECC_MAX_LEN) {
-        throw new IllegalArgumentException("ECC coordinate length exceeds " + ECC_MAX_LEN);
-    }
-    if (m.length &gt; HASH_LEN) {
-        throw new IllegalArgumentException("Hash value M exceeds " + HASH_LEN);
-    }
-    if (l &lt; 0 || l &gt; c.length) {
-        throw new IllegalArgumentException("l is invalid");
-    }
-    this.x = Arrays.copyOf(x, ECC_MAX_LEN);
-    this.y = Arrays.copyOf(y, ECC_MAX_LEN);
-    this.m = Arrays.copyOf(m, HASH_LEN);
-    this.l = l;
-    this.c = Arrays.copyOf(c, c.length);
-}</pre>
-                <div class="issue-source">Reviewer: codex</div>
-            </div>
-<div class="issue">
-                <div class="issue-title">HybridCipher conversion trusts device length and can read past fixed buffer</div>
-                <div class="issue-location">sdf4j/src/main/native/src/type_conversion.c:727-733</div>
+                <div class="issue-title">Unbounded `L1` causes out-of-bounds read when exporting `HybridCipher`</div>
+                <div class="issue-location">sdf4j/src/main/native/src/type_conversion.c:754-760</div>
                 <pre>jsize ctm_len = (jsize)native_cipher-&gt;L1;
 jbyteArray ctm_array = (*env)-&gt;NewByteArray(env, ctm_len);
 if (ctm_array == NULL) {
@@ -174,10 +42,10 @@ if (ctm_array == NULL) {
     return NULL;
 }
 (*env)-&gt;SetByteArrayRegion(env, ctm_array, 0, ctm_len, (jbyte*)native_cipher-&gt;ct_m);</pre>
-                <div class="problem"><strong>Issue:</strong> `ctm_len` is taken directly from `native_cipher->L1` and used for `SetByteArrayRegion` without capping to `HYBRIDENCref_MAX_LEN` (1576). If a provider returns oversized `L1`, this reads beyond `ct_m` and can leak memory or crash.</div>
+                <div class="problem"><strong>Issue:</strong> `native_cipher->L1` is used directly as copy length for `ct_m` without enforcing `HYBRIDENCref_MAX_LEN`. If a device/library returns an oversized `L1`, JNI reads past the fixed `ct_m` buffer and copies invalid memory into Java.</div>
                 <div class="fix-label">Fix:</div><pre>jsize ctm_len = (jsize)native_cipher-&gt;L1;
-if (ctm_len &lt; 0 || ctm_len &gt; HYBRIDENCref_MAX_LEN) {
-    THROW_SDF_EXCEPTION(env, SDR_INARGERR, "HybridCipher L1 exceeds max length");
+if (native_cipher-&gt;L1 &gt; HYBRIDENCref_MAX_LEN) {
+    THROW_SDF_EXCEPTION(env, SDR_INARGERR, "HybridCipher L1 exceeds 1576");
     return NULL;
 }
 jbyteArray ctm_array = (*env)-&gt;NewByteArray(env, ctm_len);
@@ -185,14 +53,12 @@ if (ctm_array == NULL) {
     THROW_SDF_EXCEPTION(env, SDR_INARGERR, "Failed to create ctM array");
     return NULL;
 }
-if (ctm_len &gt; 0) {
-    (*env)-&gt;SetByteArrayRegion(env, ctm_array, 0, ctm_len, (jbyte*)native_cipher-&gt;ct_m);
-}</pre>
+(*env)-&gt;SetByteArrayRegion(env, ctm_array, 0, ctm_len, (jbyte*)native_cipher-&gt;ct_m);</pre>
                 <div class="issue-source">Reviewer: codex</div>
             </div>
 <div class="issue">
-                <div class="issue-title">HybridSignature conversion removed max-length guard and can over-read sig_m</div>
-                <div class="issue-location">sdf4j/src/main/native/src/type_conversion.c:814-826</div>
+                <div class="issue-title">Hybrid signature conversion can read past native buffer and pass invalid null arg</div>
+                <div class="issue-location">sdf4j/src/main/native/src/type_conversion.c:840-853</div>
                 <pre>jbyteArray sig_m_array = NULL;
 if (sig_m_len &gt; 0) {
     sig_m_array = (*env)-&gt;NewByteArray(env, sig_m_len);
@@ -206,59 +72,87 @@ if (sig_m_len &gt; 0) {
 jobject obj = (*env)-&gt;NewObject(env, g_jni_cache.hybridSignature.cls,
                                 g_jni_cache.hybridSignature.ctor,
                                 ecc_sig_obj, (jint)native_sig-&gt;L, sig_m_array);</pre>
-                <div class="problem"><strong>Issue:</strong> `sig_m_len` is no longer clamped/validated against `HYBRIDSIGref_MAX_LEN` before copying from fixed-size `sig_m[4636]`. Oversized lengths can read out-of-bounds. Also, when `sig_m_len == 0`, `sig_m_array` remains `NULL` and is passed to a constructor that rejects null.</div>
+                <div class="problem"><strong>Issue:</strong> `sig_m_len` is not bounded to `HYBRIDSIGref_MAX_LEN` before copy, so oversized lengths can read past `native_sig->sig_m`. Also, when `sig_m_len == 0`, `sig_m_array` stays `NULL`, but the new Java constructor requires non-null `sigM`, causing constructor failure.</div>
                 <div class="fix-label">Fix:</div><pre>if (sig_m_len &gt; HYBRIDSIGref_MAX_LEN) {
-    THROW_SDF_EXCEPTION(env, SDR_INARGERR, "HybridSignature length exceeds max");
+    THROW_SDF_EXCEPTION(env, SDR_INARGERR, "HybridSignature L exceeds 4636");
     return NULL;
 }
 
-jbyteArray sig_m_array = (*env)-&gt;NewByteArray(env, sig_m_len);
+jbyteArray sig_m_array = (*env)-&gt;NewByteArray(env, (jsize)sig_m_len); /* non-null even when 0 */
 if (sig_m_array == NULL) {
     THROW_SDF_EXCEPTION(env, SDR_INARGERR, "Failed to new byte array");
     return NULL;
 }
 if (sig_m_len &gt; 0) {
-    (*env)-&gt;SetByteArrayRegion(env, sig_m_array, 0, sig_m_len, (jbyte*)native_sig-&gt;sig_m);
+    (*env)-&gt;SetByteArrayRegion(env, sig_m_array, 0, (jsize)sig_m_len, (jbyte*)native_sig-&gt;sig_m);
 }
 
 jobject obj = (*env)-&gt;NewObject(env, g_jni_cache.hybridSignature.cls,
                                 g_jni_cache.hybridSignature.ctor,
-                                ecc_sig_obj, (jint)native_sig-&gt;L, sig_m_array);</pre>
+                                ecc_sig_obj, (jint)sig_m_len, sig_m_array);</pre>
+                <div class="issue-source">Reviewer: codex</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">Incomplete `l_value` validation allows invalid copy length in `java_to_native_HybridSignature_alloc`</div>
+                <div class="issue-location">sdf4j/src/main/native/src/type_conversion.c:885-895</div>
+                <pre>if (l_value &gt; HYBRIDSIGref_MAX_LEN) {
+    free(native_sig);
+    THROW_SDF_EXCEPTION(env, SDR_INARGERR, "cipher len exceeds 4636");
+    return NULL;
+}
+native_sig-&gt;L = (ULONG)l_value;
+
+/* sig_m  */
+if (sig_m_array != NULL) {
+    (*env)-&gt;GetByteArrayRegion(env, sig_m_array, 0, l_value, (jbyte*)native_sig-&gt;sig_m);
+}</pre>
+                <div class="problem"><strong>Issue:</strong> Only `l_value > HYBRIDSIGref_MAX_LEN` is checked. Negative values and values larger than `sig_m_array` length are not rejected before `GetByteArrayRegion`, which can produce runtime JNI exceptions and propagate inconsistent `native_sig->L`.</div>
+                <div class="fix-label">Fix:</div><pre>if (l_value &lt; 0 || l_value &gt; HYBRIDSIGref_MAX_LEN) {
+    free(native_sig);
+    THROW_SDF_EXCEPTION(env, SDR_INARGERR, "HybridSignature length is invalid");
+    return NULL;
+}
+
+jsize sig_m_len = (sig_m_array != NULL) ? (*env)-&gt;GetArrayLength(env, sig_m_array) : 0;
+if ((jsize)l_value &gt; sig_m_len) {
+    free(native_sig);
+    THROW_SDF_EXCEPTION(env, SDR_INARGERR, "HybridSignature length exceeds sigM array length");
+    return NULL;
+}
+
+native_sig-&gt;L = (ULONG)l_value;
+if (sig_m_array != NULL &amp;&amp; l_value &gt; 0) {
+    (*env)-&gt;GetByteArrayRegion(env, sig_m_array, 0, (jsize)l_value, (jbyte*)native_sig-&gt;sig_m);
+}</pre>
                 <div class="issue-source">Reviewer: codex</div>
             </div>
 </div>
 <div class="section"><div class="section-title medium">Medium</div>
 <div class="issue">
-                <div class="issue-title">Zero-length ECCCipher output now fails due null `c` passed to strict constructor</div>
-                <div class="issue-location">sdf4j/src/main/native/src/type_conversion.c:243-256</div>
-                <pre>jbyteArray c_array = NULL;
-if (cipher_len &gt; 0) {
-    c_array = (*env)-&gt;NewByteArray(env, cipher_len);
-    if (c_array == NULL) {
-        THROW_SDF_EXCEPTION(env, SDR_INARGERR, "Failed to create array object");
-        return NULL;
-    }
-    (*env)-&gt;SetByteArrayRegion(env, c_array, 0, cipher_len, (jbyte*)&amp;native_cipher-&gt;C);
+                <div class="issue-title">Removal of `L` fallback creates ECC cipher length regression</div>
+                <div class="issue-location">sdf4j/src/main/native/src/type_conversion.c:365-370</div>
+                <pre>/* L - cipher data length */
+native_cipher-&gt;L = (ULONG)l_value;
+/* C - cipher data (now properly allocated) */
+if (c_array != NULL &amp;&amp; c_len &gt; 0) {
+    (*env)-&gt;GetByteArrayRegion(env, c_array, 0, c_len, (jbyte*)native_cipher-&gt;C);
+}</pre>
+                <div class="problem"><strong>Issue:</strong> `native_cipher->L` is now taken only from Java field `l`; when callers populate `c` but leave `l` at default 0 (legacy/common setter usage), JNI sends zero-length ciphertext to SDF even though bytes are present, causing decryption/import failures.</div>
+                <div class="fix-label">Fix:</div><pre>/* L - cipher data length */
+native_cipher-&gt;L = (ULONG)l_value;
+if (native_cipher-&gt;L == 0 &amp;&amp; c_len &gt; 0) {
+    native_cipher-&gt;L = (ULONG)c_len;  /* keep compatibility with setC-only usage */
 }
-
-jobject obj = (*env)-&gt;NewObject(env, g_jni_cache.eccCipher.cls,
-                        g_jni_cache.eccCipher.ctor,
-                        x_array, y_array, m_array,
-                        (jlong)native_cipher-&gt;L, c_array);</pre>
-                <div class="problem"><strong>Issue:</strong> `c_array` is left `NULL` when `cipher_len == 0`, but `ECCCipher(byte[] x, byte[] y, byte[] m, long l, byte[] c)` now throws if `c == null`. This creates a new failure path for valid zero-length cipher payloads.</div>
-                <div class="fix-label">Fix:</div><pre>jbyteArray c_array = (*env)-&gt;NewByteArray(env, cipher_len);
-if (c_array == NULL) {
-    THROW_SDF_EXCEPTION(env, SDR_INARGERR, "Failed to create array object");
+if ((ULONG)c_len &lt; native_cipher-&gt;L) {
+    free(native_cipher);
+    THROW_SDF_EXCEPTION(env, SDR_INARGERR, "ECCCipher L exceeds C length");
     return NULL;
 }
-if (cipher_len &gt; 0) {
-    (*env)-&gt;SetByteArrayRegion(env, c_array, 0, cipher_len, (jbyte*)&amp;native_cipher-&gt;C);
-}
 
-jobject obj = (*env)-&gt;NewObject(env, g_jni_cache.eccCipher.cls,
-                                g_jni_cache.eccCipher.ctor,
-                                x_array, y_array, m_array,
-                                (jlong)native_cipher-&gt;L, c_array);</pre>
+/* C - cipher data */
+if (c_array != NULL &amp;&amp; c_len &gt; 0) {
+    (*env)-&gt;GetByteArrayRegion(env, c_array, 0, c_len, (jbyte*)native_cipher-&gt;C);
+}</pre>
                 <div class="issue-source">Reviewer: codex</div>
             </div>
 </div>

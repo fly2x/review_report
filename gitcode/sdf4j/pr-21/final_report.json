@@ -11,121 +11,210 @@
     ]
   },
   "statistics": {
-    "total": 10,
-    "critical": 4,
+    "total": 18,
+    "critical": 2,
     "high": 3,
-    "medium": 1,
-    "low": 2
+    "medium": 4,
+    "low": 9
   },
   "issues": [
     {
       "file": "sdf4j/src/main/native/src/type_conversion.c",
-      "line": "368-388",
+      "line": "754-760",
       "severity": "critical",
-      "title": "JNI conversion function copies Java arrays to fixed-size native buffers without length validation",
-      "reviewers": "CODEX",
+      "title": "Unbounded L1 causes integer overflow and out-of-bounds memory read",
+      "reviewers": "CLAUDE, CODEX",
       "confidence": "trusted",
-      "problem": "The java_to_native_ECCPublicKey function copies Java array data directly into fixed-size native buffers (64-byte x[64], y[64]) without validating array lengths. An oversized array passed from Java code can overflow the native buffer, causing memory corruption and potential code execution.",
-      "code": "bool java_to_native_ECCPublicKey(JNIEnv *env, jobject java_key, ECCrefPublicKey *native_key) {\n    memset(native_key, 0, sizeof(ECCrefPublicKey));\n    native_key->bits = (*env)->GetIntField(env, java_key, g_jni_cache.eccPublicKey.bits);\n    jbyteArray x_array = (jbyteArray)(*env)->GetObjectField(env, java_key,\n                                                             g_jni_cache.eccPublicKey.x);\n    if (x_array != NULL) {\n        jsize len = (*env)->GetArrayLength(env, x_array);\n        (*env)->GetByteArrayRegion(env, x_array, 0, len, (jbyte*)native_key->x);\n    }\n    jbyteArray y_array = (jbyteArray)(*env)->GetObjectField(env, java_key,\n                                                             g_jni_cache.eccPublicKey.y);\n    if (y_array != NULL) {\n        jsize len = (*env)->GetArrayLength(env, y_array);\n        (*env)->GetByteArrayRegion(env, y_array, 0, len, (jbyte*)native_key->y);\n    }\n    return true;\n}",
-      "fix": "bool java_to_native_ECCPublicKey(JNIEnv *env, jobject java_key, ECCrefPublicKey *native_key) {\n    memset(native_key, 0, sizeof(ECCrefPublicKey));\n    native_key->bits = (*env)->GetIntField(env, java_key, g_jni_cache.eccPublicKey.bits);\n    \n    jbyteArray x_array = (jbyteArray)(*env)->GetObjectField(env, java_key,\n                                                             g_jni_cache.eccPublicKey.x);\n    if (x_array == NULL) {\n        THROW_SDF_EXCEPTION(env, SDR_INARGERR, \"X coordinate cannot be null\");\n        return false;\n    }\n    jsize len = (*env)->GetArrayLength(env, x_array);\n    if (len > ECCref_MAX_LEN) {\n        THROW_SDF_EXCEPTION(env, SDR_INARGERR, \"X coordinate exceeds 64 bytes\");\n        return false;\n    }\n    (*env)->GetByteArrayRegion(env, x_array, 0, len, (jbyte*)native_key->x);\n    \n    jbyteArray y_array = (jbyteArray)(*env)->GetObjectField(env, java_key,\n                                                             g_jni_cache.eccPublicKey.y);\n    if (y_array == NULL) {\n        THROW_SDF_EXCEPTION(env, SDR_INARGERR, \"Y coordinate cannot be null\");\n        return false;\n    }\n    len = (*env)->GetArrayLength(env, y_array);\n    if (len > ECCref_MAX_LEN) {\n        THROW_SDF_EXCEPTION(env, SDR_INARGERR, \"Y coordinate exceeds 64 bytes\");\n        return false;\n    }\n    (*env)->GetByteArrayRegion(env, y_array, 0, len, (jbyte*)native_key->y);\n    return true;\n}"
-    },
-    {
-      "file": "sdf4j/src/main/native/src/type_conversion.c",
-      "line": "328-342",
-      "severity": "critical",
-      "title": "ECCCipher JNI conversion copies arrays without length validation",
-      "reviewers": "CODEX",
-      "confidence": "trusted",
-      "problem": "The java_to_native_ECCCipher_alloc function copies Java arrays (x, y) into fixed-size native buffers without length checks. The ECCref_MAX_LEN (64 bytes) bounds check was removed, allowing oversized arrays to overflow native buffers.",
-      "code": "jbyteArray x_array = (jbyteArray)(*env)->GetObjectField(env, java_cipher,\n                                                         g_jni_cache.eccCipher.x);\nif (x_array != NULL) {\n    jsize len = (*env)->GetArrayLength(env, x_array);\n    (*env)->GetByteArrayRegion(env, x_array, 0, len, (jbyte*)native_cipher->x);\n}",
-      "fix": "jbyteArray x_array = (jbyteArray)(*env)->GetObjectField(env, java_cipher,\n                                                         g_jni_cache.eccCipher.x);\nif (x_array == NULL) {\n    THROW_SDF_EXCEPTION(env, SDR_INARGERR, \"X coordinate cannot be null\");\n    free(native_cipher);\n    return NULL;\n}\njsize len = (*env)->GetArrayLength(env, x_array);\nif (len > ECCref_MAX_LEN) {\n    THROW_SDF_EXCEPTION(env, SDR_INARGERR, \"X coordinate exceeds 64 bytes\");\n    free(native_cipher);\n    return NULL;\n}\n(*env)->GetByteArrayRegion(env, x_array, 0, len, (jbyte*)native_cipher->x);"
-    },
-    {
-      "file": "sdf4j/src/main/native/src/type_conversion.c",
-      "line": "679-692",
-      "severity": "critical",
-      "title": "ECCPrivateKey JNI conversion copies K array without length validation",
-      "reviewers": "CODEX",
-      "confidence": "trusted",
-      "problem": "The java_to_native_ECCPrivateKey function copies the private key K array into a fixed 64-byte buffer without validating the length. An oversized K array can overflow the native buffer.",
-      "code": "void java_to_native_ECCPrivateKey(JNIEnv *env, jobject java_key, ECCrefPrivateKey *native_key) {\n    native_key->bits = (*env)->GetIntField(env, java_key, g_jni_cache.eccPrivateKey.bits);\n    jbyteArray k_array = (jbyteArray)(*env)->GetObjectField(env, java_key,\n                                                             g_jni_cache.eccPrivateKey.k);\n    if (k_array != NULL) {\n        jsize len = (*env)->GetArrayLength(env, k_array);\n        (*env)->GetByteArrayRegion(env, k_array, 0, len, (jbyte*)native_key->K);\n    }\n    return;\n}",
-      "fix": "void java_to_native_ECCPrivateKey(JNIEnv *env, jobject java_key, ECCrefPrivateKey *native_key) {\n    memset(native_key, 0, sizeof(ECCrefPrivateKey));\n    native_key->bits = (*env)->GetIntField(env, java_key, g_jni_cache.eccPrivateKey.bits);\n    jbyteArray k_array = (jbyteArray)(*env)->GetObjectField(env, java_key,\n                                                             g_jni_cache.eccPrivateKey.k);\n    if (k_array == NULL) {\n        THROW_SDF_EXCEPTION(env, SDR_INARGERR, \"Private key K cannot be null\");\n        return;\n    }\n    jsize len = (*env)->GetArrayLength(env, k_array);\n    if (len > ECCref_MAX_LEN) {\n        THROW_SDF_EXCEPTION(env, SDR_INARGERR, \"Private key K exceeds 64 bytes\");\n        return;\n    }\n    (*env)->GetByteArrayRegion(env, k_array, 0, len, (jbyte*)native_key->K);\n    return;\n}"
-    },
-    {
-      "file": "sdf4j/src/main/native/src/type_conversion.c",
-      "line": "676-714",
-      "severity": "critical",
-      "title": "ECCSignature JNI conversion copies arrays without length validation",
-      "reviewers": "CODEX",
-      "confidence": "trusted",
-      "problem": "The java_to_native_ECCSignature function copies r and s arrays into fixed 64-byte buffers without length validation. Oversized signature components can overflow native buffers.",
-      "code": "void java_to_native_ECCSignature(JNIEnv *env, jobject java_sig, ECCSignature *native_sig) {\n    jbyteArray r_array = (jbyteArray)(*env)->GetObjectField(env, java_sig,\n                                                          g_jni_cache.eccSignature.r);\n    if (r_array != NULL) {\n        jsize len = (*env)->GetArrayLength(env, r_array);\n        if (len > ECCref_MAX_LEN) len = ECCref_MAX_LEN;\n        (*env)->GetByteArrayRegion(env, r_array, 0, len, (jbyte*)native_sig->r);\n    }\n    jbyteArray s_array = (jbyteArray)(*env)->GetObjectField(env, java_sig,\n                                                          g_jni_cache.eccSignature.s);\n    if (s_array != NULL) {\n        jsize len = (*env)->GetArrayLength(env, s_array);\n        if (len > ECCref_MAX_LEN) len = ECCref_MAX_LEN;\n        (*env)->GetByteArrayRegion(env, s_array, 0, len, (jbyte*)native_sig->s);\n    }\n    return;\n}",
-      "fix": "void java_to_native_ECCSignature(JNIEnv *env, jobject java_sig, ECCSignature *native_sig) {\n    memset(native_sig, 0, sizeof(ECCSignature));\n    \n    jbyteArray r_array = (jbyteArray)(*env)->GetObjectField(env, java_sig,\n                                                          g_jni_cache.eccSignature.r);\n    if (r_array == NULL) {\n        THROW_SDF_EXCEPTION(env, SDR_INARGERR, \"Signature r cannot be null\");\n        return;\n    }\n    jsize len = (*env)->GetArrayLength(env, r_array);\n    if (len > ECCref_MAX_LEN) {\n        THROW_SDF_EXCEPTION(env, SDR_INARGERR, \"Signature r exceeds 64 bytes\");\n        return;\n    }\n    (*env)->GetByteArrayRegion(env, r_array, 0, len, (jbyte*)native_sig->r);\n    \n    jbyteArray s_array = (jbyteArray)(*env)->GetObjectField(env, java_sig,\n                                                          g_jni_cache.eccSignature.s);\n    if (s_array == NULL) {\n        THROW_SDF_EXCEPTION(env, SDR_INARGERR, \"Signature s cannot be null\");\n        return;\n    }\n    len = (*env)->GetArrayLength(env, s_array);\n    if (len > ECCref_MAX_LEN) {\n        THROW_SDF_EXCEPTION(env, SDR_INARGERR, \"Signature s exceeds 64 bytes\");\n        return;\n    }\n    (*env)->GetByteArrayRegion(env, s_array, 0, len, (jbyte*)native_sig->s);\n    return;\n}"
-    },
-    {
-      "file": "sdf4j/src/main/native/src/type_conversion.c",
-      "line": "249-270",
-      "severity": "high",
-      "title": "Null byte array passed to ECCCipher constructor when cipher_len is zero",
-      "reviewers": "GEMINI, CODEX",
-      "confidence": "trusted",
-      "problem": "When cipher_len is 0, c_array remains NULL and is passed to ECCCipher constructor. The Java constructor requires non-null arrays, throwing IllegalArgumentException. This breaks valid zero-length cipher payloads.",
-      "code": "jbyteArray c_array = NULL;\nif (cipher_len > 0) {\n    c_array = (*env)->NewByteArray(env, cipher_len);\n    if (c_array == NULL) {\n        THROW_SDF_EXCEPTION(env, SDR_INARGERR, \"Failed to create array object\");\n        return NULL;\n    }\n    (*env)->SetByteArrayRegion(env, c_array, 0, cipher_len, (jbyte*)&native_cipher->C);\n}\njobject obj = (*env)->NewObject(env, g_jni_cache.eccCipher.cls,\n                        g_jni_cache.eccCipher.ctor,\n                        x_array, y_array, m_array,\n                        (jlong)native_cipher->L, c_array);",
-      "fix": "jbyteArray c_array = (*env)->NewByteArray(env, cipher_len);\nif (c_array == NULL) {\n    THROW_SDF_EXCEPTION(env, SDR_INARGERR, \"Failed to create array object\");\n    return NULL;\n}\nif (cipher_len > 0) {\n    (*env)->SetByteArrayRegion(env, c_array, 0, cipher_len, (jbyte*)&native_cipher->C);\n}\njobject obj = (*env)->NewObject(env, g_jni_cache.eccCipher.cls,\n                        g_jni_cache.eccCipher.ctor,\n                        x_array, y_array, m_array,\n                        (jlong)native_cipher->L, c_array);"
-    },
-    {
-      "file": "sdf4j/src/main/native/src/type_conversion.c",
-      "line": "717-729",
-      "severity": "high",
-      "title": "HybridCipher conversion removed bounds check enabling buffer over-read",
-      "reviewers": "CODEX, GEMINI",
-      "confidence": "trusted",
-      "problem": "The native_to_java_HybridCipher function uses native_cipher->L1 directly as array length without validating against HYBRIDENCref_MAX_LEN (1576). If a device returns oversized L1, SetByteArrayRegion reads beyond ct_m buffer bounds, potentially leaking memory or crashing.",
+      "problem": "native_cipher->L1 (ULONG) is cast directly to jsize (signed int) without validating against HYBRIDENCref_MAX_LEN (1576) or INT_MAX. If the device returns an oversized L1 value, this causes: 1) Integer overflow when L1 exceeds INT_MAX, producing negative jsize; 2) Out-of-bounds read from fixed-size ct_m buffer when copying L1 bytes",
       "code": "jsize ctm_len = (jsize)native_cipher->L1;\njbyteArray ctm_array = (*env)->NewByteArray(env, ctm_len);\nif (ctm_array == NULL) {\n    THROW_SDF_EXCEPTION(env, SDR_INARGERR, \"Failed to create ctM array\");\n    return NULL;\n}\n(*env)->SetByteArrayRegion(env, ctm_array, 0, ctm_len, (jbyte*)native_cipher->ct_m);",
-      "fix": "jsize ctm_len = (jsize)native_cipher->L1;\nif (ctm_len < 0 || ctm_len > HYBRIDENCref_MAX_LEN) {\n    THROW_SDF_EXCEPTION(env, SDR_INARGERR, \"HybridCipher L1 exceeds max length\");\n    return NULL;\n}\njbyteArray ctm_array = (*env)->NewByteArray(env, ctm_len);\nif (ctm_array == NULL) {\n    THROW_SDF_EXCEPTION(env, SDR_INARGERR, \"Failed to create ctM array\");\n    return NULL;\n}\nif (ctm_len > 0) {\n    (*env)->SetByteArrayRegion(env, ctm_array, 0, ctm_len, (jbyte*)native_cipher->ct_m);\n}"
+      "fix": "jsize ctm_len = (jsize)native_cipher->L1;\nif (native_cipher->L1 > HYBRIDENCref_MAX_LEN) {\n    THROW_SDF_EXCEPTION(env, SDR_INARGERR, \"HybridCipher L1 exceeds maximum 1576\");\n    return NULL;\n}\njbyteArray ctm_array = (*env)->NewByteArray(env, ctm_len);\nif (ctm_array == NULL) {\n    THROW_SDF_EXCEPTION(env, SDR_INARGERR, \"Failed to create ctM array\");\n    return NULL;\n}\n(*env)->SetByteArrayRegion(env, ctm_array, 0, ctm_len, (jbyte*)native_cipher->ct_m);"
     },
     {
       "file": "sdf4j/src/main/native/src/type_conversion.c",
-      "line": "803-830",
-      "severity": "high",
-      "title": "HybridSignature conversion removed bounds check enabling buffer over-read",
-      "reviewers": "CODEX, GEMINI",
+      "line": "840-853",
+      "severity": "critical",
+      "title": "Unbounded sig_m_len causes out-of-bounds read and potential null constructor argument",
+      "reviewers": "CLAUDE, CODEX",
       "confidence": "trusted",
-      "problem": "The native_to_java_HybridSignature function uses sig_m_len directly without validating against HYBRIDSIGref_MAX_LEN (4636). Additionally, when sig_m_len is 0, sig_m_array remains NULL and is passed to HybridSignature constructor which rejects null.",
-      "code": "jbyteArray sig_m_array = NULL;\nif (sig_m_len > 0) {\n    sig_m_array = (*env)->NewByteArray(env, sig_m_len);\n    if (sig_m_array == NULL) {\n        THROW_SDF_EXCEPTION(env, SDR_INARGERR, \"Failed to new byte array\");\n        return NULL;\n    }\n    (*env)->SetByteArrayRegion(env, sig_m_array, 0, sig_m_len, (jbyte*)native_sig->sig_m);\n}\njobject obj = (*env)->NewObject(env, g_jni_cache.hybridSignature.cls,\n                                g_jni_cache.hybridSignature.ctor,\n                                ecc_sig_obj, (jint)native_sig->L, sig_m_array);",
-      "fix": "if (sig_m_len > HYBRIDSIGref_MAX_LEN) {\n    THROW_SDF_EXCEPTION(env, SDR_INARGERR, \"HybridSignature length exceeds max\");\n    return NULL;\n}\njbyteArray sig_m_array = (*env)->NewByteArray(env, sig_m_len);\nif (sig_m_array == NULL) {\n    THROW_SDF_EXCEPTION(env, SDR_INARGERR, \"Failed to new byte array\");\n    return NULL;\n}\nif (sig_m_len > 0) {\n    (*env)->SetByteArrayRegion(env, sig_m_array, 0, sig_m_len, (jbyte*)native_sig->sig_m);\n}\njobject obj = (*env)->NewObject(env, g_jni_cache.hybridSignature.cls,\n                                g_jni_cache.hybridSignature.ctor,\n                                ecc_sig_obj, (jint)native_sig->L, sig_m_array);"
+      "problem": "sig_m_len is not validated against HYBRIDSIGref_MAX_LEN (4636) before copying. Additionally, when sig_m_len == 0, sig_m_array remains NULL but is passed to the Java constructor which requires non-null sigM parameter, causing constructor failure.",
+      "code": "jbyteArray sig_m_array = NULL;\nif (sig_m_len > 0) {\n    sig_m_array = (*env)->NewByteArray(env, sig_m_len);\n    if (sig_m_array == NULL) {\n        THROW_SDF_EXCEPTION(env, SDR_INARGERR, \"Failed to new byte array\");\n        return NULL;\n    }\n    (*env)->SetByteArrayRegion(env, sig_m_array, 0, sig_m_len, (jbyte*)native_sig->sig_m);\n}\n\njobject obj = (*env)->NewObject(env, g_jni_cache.hybridSignature.cls,\n                                g_jni_cache.hybridSignature.ctor,\n                                ecc_sig_obj, (jint)native_sig->L, sig_m_array);",
+      "fix": "if (sig_m_len > HYBRIDSIGref_MAX_LEN) {\n    THROW_SDF_EXCEPTION(env, SDR_INARGERR, \"HybridSignature L exceeds maximum 4636\");\n    return NULL;\n}\n\njbyteArray sig_m_array = (*env)->NewByteArray(env, (jsize)sig_m_len);\nif (sig_m_array == NULL) {\n    THROW_SDF_EXCEPTION(env, SDR_INARGERR, \"Failed to new byte array\");\n    return NULL;\n}\nif (sig_m_len > 0) {\n    (*env)->SetByteArrayRegion(env, sig_m_array, 0, (jsize)sig_m_len, (jbyte*)native_sig->sig_m);\n}\n\njobject obj = (*env)->NewObject(env, g_jni_cache.hybridSignature.cls,\n                                g_jni_cache.hybridSignature.ctor,\n                                ecc_sig_obj, (jint)native_sig->L, sig_m_array);"
+    },
+    {
+      "file": "sdf4j/src/main/native/src/type_conversion.c",
+      "line": "885-895",
+      "severity": "high",
+      "title": "Incomplete l_value validation allows negative values and out-of-bounds array access",
+      "reviewers": "CODEX",
+      "confidence": "trusted",
+      "problem": "The validation only checks if l_value > HYBRIDSIGref_MAX_LEN. It does not check: 1) Negative l_value (jint is signed); 2) Whether l_value exceeds the actual sig_m_array length. This can cause JNI exceptions from GetByteArrayRegion and inconsistent native_sig->L state.",
+      "code": "/* L - sig value length */\nif (l_value > HYBRIDSIGref_MAX_LEN) {\n    free(native_sig);\n    THROW_SDF_EXCEPTION(env, SDR_INARGERR, \"cipher len exceeds 4636\");\n    return NULL;\n}\nnative_sig->L = (ULONG)l_value;\n\n/* sig_m  */\nif (sig_m_array != NULL) {\n    (*env)->GetByteArrayRegion(env, sig_m_array, 0, l_value, (jbyte*)native_sig->sig_m);\n}",
+      "fix": "/* L - sig value length */\nif (l_value < 0 || l_value > HYBRIDSIGref_MAX_LEN) {\n    free(native_sig);\n    THROW_SDF_EXCEPTION(env, SDR_INARGERR, \"HybridSignature length is invalid\");\n    return NULL;\n}\n\njsize sig_m_len = (sig_m_array != NULL) ? (*env)->GetArrayLength(env, sig_m_array) : 0;\nif ((jsize)l_value > sig_m_len) {\n    free(native_sig);\n    THROW_SDF_EXCEPTION(env, SDR_INARGERR, \"HybridSignature length exceeds sigM array length\");\n    return NULL;\n}\n\nnative_sig->L = (ULONG)l_value;\nif (sig_m_array != NULL && l_value > 0) {\n    (*env)->GetByteArrayRegion(env, sig_m_array, 0, (jsize)l_value, (jbyte*)native_sig->sig_m);\n}"
+    },
+    {
+      "file": "sdf4j/src/main/java/org/openhitls/sdf4j/types/ECCPrivateKey.java",
+      "line": "79-80",
+      "severity": "high",
+      "title": "Getter returns direct reference to sensitive private key material",
+      "reviewers": "CLAUDE",
+      "confidence": "trusted",
+      "problem": "getK() returns a direct reference to the internal private key array instead of a defensive copy. This allows callers to modify the private key material externally, breaking encapsulation and creating a security vulnerability.",
+      "code": "public byte[] getK() {\n    return k;\n}",
+      "fix": "public byte[] getK() {\n    return k != null ? Arrays.copyOf(k, k.length) : null;\n}"
+    },
+    {
+      "file": "sdf4j/src/main/java/org/openhitls/sdf4j/types/RSAPrivateKey.java",
+      "line": "133-189",
+      "severity": "high",
+      "title": "Getters return direct references to sensitive key material and missing null validation in setters",
+      "reviewers": "CLAUDE",
+      "confidence": "trusted",
+      "problem": "getM(), getE(), getD(), getPrime(), getPexp(), getCoef() return direct references to internal arrays containing private key material. Additionally, setters setM(), setE(), setD(), setPrime(), setPexp(), setCoef() have no null validation, allowing null key material to be set.",
+      "code": "public byte[] getM() {\n    return m;\n}\n\npublic void setM(byte[] m) {\n    this.m = m;\n}\n\npublic byte[] getD() {\n    return d;\n}\n\npublic void setD(byte[] d) {\n    this.d = d;\n}",
+      "fix": "public byte[] getM() {\n    return m != null ? Arrays.copyOf(m, m.length) : null;\n}\n\npublic void setM(byte[] m) {\n    if (m == null) {\n        throw new IllegalArgumentException(\"Modulus cannot be null\");\n    }\n    this.m = m;\n}\n\npublic byte[] getD() {\n    return d != null ? Arrays.copyOf(d, d.length) : null;\n}\n\npublic void setD(byte[] d) {\n    if (d == null) {\n        throw new IllegalArgumentException(\"Private exponent cannot be null\");\n    }\n    this.d = d;\n}"
+    },
+    {
+      "file": "sdf4j/src/main/java/org/openhitls/sdf4j/types/HybridCipher.java",
+      "line": "70-74",
+      "severity": "medium",
+      "title": "setCtM validation uses stale l1 value",
+      "reviewers": "CLAUDE",
+      "confidence": "trusted",
+      "problem": "When setCtM is called, it validates this.l1 against the new ctM array, but this.l1 may be a stale value from a previous usage. The validation should be coordinated with setL1 to ensure consistency.",
+      "code": "public void setCtM(byte[] ctM) {\n    if (ctM == null || this.l1 > ctM.length) {\n        throw new IllegalArgumentException(\"cipher value is invalid\");\n    }\n    this.ctM = ctM;\n}",
+      "fix": "public void setCtM(byte[] ctM) {\n    if (ctM == null) {\n        throw new IllegalArgumentException(\"cipher value cannot be null\");\n    }\n    this.ctM = ctM;\n}\n\npublic void setL1(long l1) {\n    if (l1 < 0) {\n        throw new IllegalArgumentException(\"Ciphertext length cannot be negative\");\n    }\n    if (ctM != null && l1 > ctM.length) {\n        throw new IllegalArgumentException(\"l1 cannot exceed ctM length\");\n    }\n    this.l1 = l1;\n}"
+    },
+    {
+      "file": "sdf4j/src/main/java/org/openhitls/sdf4j/types/HybridSignature.java",
+      "line": "63-67",
+      "severity": "medium",
+      "title": "setSigM validation uses stale l value",
+      "reviewers": "CLAUDE",
+      "confidence": "trusted",
+      "problem": "When setSigM is called, it validates this.l against the new sigM array, but this.l may be a stale value from previous usage. The validation should be coordinated with setL.",
+      "code": "public void setSigM(byte[] sigM) {\n    if (sigM == null || this.l > sigM.length) {\n        throw new IllegalArgumentException(\"signature value is invalid\");\n    }\n    this.sigM = sigM;\n}",
+      "fix": "public void setSigM(byte[] sigM) {\n    if (sigM == null) {\n        throw new IllegalArgumentException(\"signature value cannot be null\");\n    }\n    this.sigM = sigM;\n}\n\npublic void setL(int l) {\n    if (l < 0) {\n        throw new IllegalArgumentException(\"Signature length cannot be negative\");\n    }\n    if (sigM != null && l > sigM.length) {\n        throw new IllegalArgumentException(\"l cannot exceed sigM length\");\n    }\n    this.l = l;\n}"
     },
     {
       "file": "sdf4j/src/main/java/org/openhitls/sdf4j/types/DeviceInfo.java",
-      "line": "43-47",
+      "line": "76-77",
       "severity": "medium",
-      "title": "Default constructor leaves asymAlgAbility uninitialized",
+      "title": "Default constructor leaves asymAlgAbility null causing potential NPE",
       "reviewers": "CLAUDE",
-      "confidence": "likely",
-      "problem": "The default constructor no longer initializes asymAlgAbility array, leaving it as null. Callers using getAsymAlgAbility() will receive null, potentially causing NullPointerException in code that expects an array.",
-      "code": "public DeviceInfo() {\n}\npublic long[] getAsymAlgAbility() {\n    return asymAlgAbility;\n}",
-      "fix": "public DeviceInfo() {\n    this.asymAlgAbility = new long[2];\n}"
+      "confidence": "trusted",
+      "problem": "The default constructor does not initialize asymAlgAbility, leaving it null. If getAsymAlgAbility() is called on an object created with the default constructor, it returns null. While setAsymAlgAbility() validates null, the getter returns the direct reference without null check, potentially causing NPE when the array is accessed (e.g., in toString()).",
+      "code": "public DeviceInfo() {\n}\n\npublic long[] getAsymAlgAbility() {\n    return asymAlgAbility;\n}",
+      "fix": "public DeviceInfo() {\n    this.asymAlgAbility = new long[2];\n}\n\npublic long[] getAsymAlgAbility() {\n    return asymAlgAbility != null ? Arrays.copyOf(asymAlgAbility, asymAlgAbility.length) : null;\n}"
     },
     {
-      "file": "sdf4j/src/main/java/org/openhitls/sdf4j/types",
-      "severity": "low",
-      "title": "Getters return direct references to internal arrays (performance-security tradeoff)",
+      "file": "sdf4j/src/main/java/org/openhitls/sdf4j/types/RSAPrivateKey.java",
+      "line": "101-112",
+      "severity": "medium",
+      "title": "Constructor accepts 2D arrays without validating dimensions",
       "reviewers": "CLAUDE",
-      "confidence": "evaluate",
-      "problem": "Multiple getter methods across crypto type classes (DeviceInfo, ECCCipher, ECCPrivateKey, ECCPublicKey, ECCSignature, RSAPrivateKey, RSAPublicKey) now return direct references to internal arrays instead of defensive copies. This is an intentional performance optimization documented with comments like \"Returns a direct reference to the internal array. Callers should not modify the returned value.\" However, this breaks encapsulation and allows external code to modify cryptographic key material directly, which may be a security concern in some contexts. The tradeoff between performance and immutability should be evaluated based on the project's security requirements.",
-      "code": "public byte[] getX() {\n    return x;  // direct reference, not Arrays.copyOf(x, x.length)\n}",
-      "fix": "Option 1 (defensive copying - safer):\npublic byte[] getX() {\n    return x != null ? Arrays.copyOf(x, x.length) : null;\n}\n\nOption 2 (keep current - performance):\n// Document the contract and rely on caller discipline\n/**\n * Returns a direct reference to the internal array. Callers should not modify the returned value.\n */\npublic byte[] getX() {\n    return x;\n}"
+      "confidence": "trusted",
+      "problem": "The constructor accepts prime and pexp 2D arrays without validating they have exactly 2 elements or that each element has the correct length (max RSA_MAX_PLEN = 256 bytes).",
+      "code": "public RSAPrivateKey(int bits, byte[] m, byte[] e, byte[] d,\n                     byte[][] prime, byte[][] pexp, byte[] coef) {\n    if (bits <= 0 || bits > RSA_MAX_BITS) {\n        throw new IllegalArgumentException(\"Invalid bits: \" + bits);\n    }\n    this.bits = bits;\n    this.m = m;\n    this.e = e;\n    this.d = d;\n    this.prime = prime;\n    this.pexp = pexp;\n    this.coef = coef;\n}",
+      "fix": "public RSAPrivateKey(int bits, byte[] m, byte[] e, byte[] d,\n                     byte[][] prime, byte[][] pexp, byte[] coef) {\n    if (bits <= 0 || bits > RSA_MAX_BITS) {\n        throw new IllegalArgumentException(\"Invalid bits: \" + bits);\n    }\n    if (prime == null || prime.length != 2) {\n        throw new IllegalArgumentException(\"Prime array must have exactly 2 elements\");\n    }\n    if (pexp == null || pexp.length != 2) {\n        throw new IllegalArgumentException(\"Pexp array must have exactly 2 elements\");\n    }\n    this.bits = bits;\n    this.m = m;\n    this.e = e;\n    this.d = d;\n    this.prime = prime;\n    this.pexp = pexp;\n    this.coef = coef;\n}"
     },
     {
       "file": "sdf4j/src/main/java/org/openhitls/sdf4j/types/ECCCipher.java",
-      "line": "37-42",
+      "line": "72-73",
       "severity": "low",
-      "title": "Inconsistent validation between constructor and setC setter",
+      "title": "Validation allows zero-length cipher with non-empty ciphertext data",
       "reviewers": "CLAUDE",
       "confidence": "likely",
-      "problem": "The constructor validates that l <= c.length, but the setC() setter doesn't perform this validation. This allows setting a ciphertext array that is smaller than the l value, creating an inconsistent state.",
-      "code": "public ECCCipher(byte[] x, byte[] y, byte[] m, long l, byte[] c) {\n    if (x == null || y == null || m == null || c == null) {\n        throw new IllegalArgumentException(\"x, y, m, c cannot be null\");\n    }\n    if (l < 0 || l > c.length) {\n        throw new IllegalArgumentException(\"l is invalid\");\n    }\n    this.x = x;\n    this.y = y;\n    this.m = m;\n    this.l = l;\n    this.c = c;\n}\n\npublic void setC(byte[] c) {\n    if (c == null) {\n        throw new IllegalArgumentException(\"Ciphertext C cannot be null\");\n    }\n    this.c = c;\n}",
-      "fix": "public void setC(byte[] c) {\n    if (c == null) {\n        throw new IllegalArgumentException(\"Ciphertext C cannot be null\");\n    }\n    if (this.l > c.length) {\n        throw new IllegalArgumentException(\"l cannot be greater than c.length\");\n    }\n    this.c = c;\n}"
+      "problem": "The validation allows l to be 0 even when c is non-empty, which is semantically incorrect for ciphertext length. This could cause issues in cryptographic operations where a zero-length cipher is invalid.",
+      "code": "if (l < 0 || l > c.length) {\n    throw new IllegalArgumentException(\"l is invalid\");\n}",
+      "fix": "if (l < 0 || l > c.length) {\n    throw new IllegalArgumentException(\"l is invalid\");\n}\nif (l == 0 && c.length > 0) {\n    throw new IllegalArgumentException(\"l cannot be zero when c is non-empty\");\n}"
+    },
+    {
+      "file": "sdf4j/src/main/java/org/openhitls/sdf4j/types/ECCPublicKey.java",
+      "line": "86-87",
+      "severity": "low",
+      "title": "Getters return direct references to public key coordinates",
+      "reviewers": "CLAUDE",
+      "confidence": "trusted",
+      "problem": "getX() and getY() return direct references to internal coordinate arrays instead of defensive copies. While less critical than private key exposure, this still breaks encapsulation.",
+      "code": "public byte[] getX() {\n    return x;\n}\n\npublic byte[] getY() {\n    return y;\n}",
+      "fix": "public byte[] getX() {\n    return x != null ? Arrays.copyOf(x, x.length) : null;\n}\n\npublic byte[] getY() {\n    return y != null ? Arrays.copyOf(y, y.length) : null;\n}"
+    },
+    {
+      "file": "sdf4j/src/main/java/org/openhitls/sdf4j/types/ECCSignature.java",
+      "line": "65-66",
+      "severity": "low",
+      "title": "Getters return direct references to signature values",
+      "reviewers": "CLAUDE",
+      "confidence": "trusted",
+      "problem": "getR() and getS() return direct references to internal signature arrays instead of defensive copies, allowing external modification.",
+      "code": "public byte[] getR() {\n    return r;\n}\n\npublic byte[] getS() {\n    return s;\n}",
+      "fix": "public byte[] getR() {\n    return r != null ? Arrays.copyOf(r, r.length) : null;\n}\n\npublic byte[] getS() {\n    return s != null ? Arrays.copyOf(s, s.length) : null;\n}"
+    },
+    {
+      "file": "sdf4j/src/main/java/org/openhitls/sdf4j/types/ECCCipher.java",
+      "line": "89-90",
+      "severity": "low",
+      "title": "Getters return direct references to ciphertext components",
+      "reviewers": "CLAUDE",
+      "confidence": "trusted",
+      "problem": "getX(), getY(), getM(), and getC() return direct references to internal arrays containing ciphertext data.",
+      "code": "public byte[] getX() {\n    return x;\n}\n\npublic byte[] getY() {\n    return y;\n}\n\npublic byte[] getM() {\n    return m;\n}\n\npublic byte[] getC() {\n    return c;\n}",
+      "fix": "public byte[] getX() {\n    return x != null ? Arrays.copyOf(x, x.length) : null;\n}\n\npublic byte[] getY() {\n    return y != null ? Arrays.copyOf(y, y.length) : null;\n}\n\npublic byte[] getM() {\n    return m != null ? Arrays.copyOf(m, m.length) : null;\n}\n\npublic byte[] getC() {\n    return c != null ? Arrays.copyOf(c, c.length) : null;\n}"
+    },
+    {
+      "file": "sdf4j/src/main/java/org/openhitls/sdf4j/types/RSAPublicKey.java",
+      "line": "87-88",
+      "severity": "low",
+      "title": "Getters return direct references to public key components",
+      "reviewers": "CLAUDE",
+      "confidence": "trusted",
+      "problem": "getM() and getE() return direct references to internal modulus and exponent arrays.",
+      "code": "public byte[] getM() {\n    return m;\n}\n\npublic byte[] getE() {\n    return e;\n}",
+      "fix": "public byte[] getM() {\n    return m != null ? Arrays.copyOf(m, m.length) : null;\n}\n\npublic byte[] getE() {\n    return e != null ? Arrays.copyOf(e, e.length) : null;\n}"
+    },
+    {
+      "file": "sdf4j/src/main/java/org/openhitls/sdf4j/types/KeyEncryptionResult.java",
+      "line": "52-53",
+      "severity": "low",
+      "title": "Getter returns direct reference to encrypted key material",
+      "reviewers": "CLAUDE",
+      "confidence": "trusted",
+      "problem": "getEncryptedKey() returns direct reference to internal array containing encrypted key data.",
+      "code": "public byte[] getEncryptedKey() {\n    return encryptedKey;\n}",
+      "fix": "public byte[] getEncryptedKey() {\n    return encryptedKey != null ? Arrays.copyOf(encryptedKey, encryptedKey.length) : null;\n}"
+    },
+    {
+      "file": "sdf4j/src/main/java/org/openhitls/sdf4j/types/HybridCipher.java",
+      "line": "66-68",
+      "severity": "low",
+      "title": "Getter returns direct reference to PQC ciphertext",
+      "reviewers": "CLAUDE",
+      "confidence": "trusted",
+      "problem": "getCtM() returns direct reference to internal array containing post-quantum ciphertext.",
+      "code": "public byte[] getCtM() {\n    return ctM;\n}",
+      "fix": "public byte[] getCtM() {\n    return ctM != null ? Arrays.copyOf(ctM, ctM.length) : null;\n}"
+    },
+    {
+      "file": "sdf4j/src/main/java/org/openhitls/sdf4j/types/HybridSignature.java",
+      "line": "59-61",
+      "severity": "low",
+      "title": "Getter returns direct reference to signature data",
+      "reviewers": "CLAUDE",
+      "confidence": "trusted",
+      "problem": "getSigM() returns direct reference to internal array containing signature data.",
+      "code": "public byte[] getSigM() {\n    return sigM;\n}",
+      "fix": "public byte[] getSigM() {\n    return sigM != null ? Arrays.copyOf(sigM, sigM.length) : null;\n}"
+    },
+    {
+      "file": "sdf4j/src/main/java/org/openhitls/sdf4j/types/DeviceInfo.java",
+      "line": "156-157",
+      "severity": "low",
+      "title": "Getter returns direct reference to algorithm abilities array",
+      "reviewers": "CLAUDE",
+      "confidence": "trusted",
+      "problem": "getAsymAlgAbility() returns direct reference to internal array.",
+      "code": "public long[] getAsymAlgAbility() {\n    return asymAlgAbility;\n}",
+      "fix": "public long[] getAsymAlgAbility() {\n    return asymAlgAbility != null ? Arrays.copyOf(asymAlgAbility, asymAlgAbility.length) : null;\n}"
     }
   ]
 }
