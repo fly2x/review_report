@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Code Review: openHiTLS/openhitls#1114 - CODEX</title>
+    <style>
+        :root { --critical: #dc2626; --high: #ea580c; --medium: #ca8a04; --low: #65a30d; }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: system-ui, sans-serif; background: #f8fafc; color: #1e293b; padding: 2rem; line-height: 1.6; }
+        .container { max-width: 900px; margin: 0 auto; }
+        h1 { font-size: 1.5rem; margin-bottom: 0.5rem; }
+        .subtitle { color: #64748b; margin-bottom: 2rem; }
+        .section { margin-bottom: 2rem; }
+        .section-title { font-size: 1.1rem; font-weight: 600; padding: 0.5rem 1rem; border-radius: 0.5rem 0.5rem 0 0; color: white; }
+        .section-title.critical { background: var(--critical); }
+        .section-title.high { background: var(--high); }
+        .section-title.medium { background: var(--medium); }
+        .section-title.low { background: var(--low); }
+        .issue { background: white; border: 1px solid #e2e8f0; border-top: none; padding: 1rem; }
+        .issue:last-child { border-radius: 0 0 0.5rem 0.5rem; }
+        .issue-title { font-weight: 600; margin-bottom: 0.25rem; }
+        .issue-location { font-family: monospace; font-size: 0.875rem; color: #64748b; margin-bottom: 0.75rem; }
+        .issue-source { font-size: 0.75rem; color: #94a3b8; margin-top: 0.5rem; }
+        pre { background: #1e293b; color: #e2e8f0; padding: 0.75rem; border-radius: 0.375rem; overflow-x: auto; font-size: 0.875rem; margin: 0.5rem 0; }
+        .problem { margin: 0.75rem 0; }
+        .fix-label { font-weight: 600; margin-top: 0.75rem; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Code Review: openHiTLS/openhitls#1114 - CODEX</h1>
+        <div class="subtitle"></div>
+<div class="section"><div class="section-title medium">Medium</div>
+<div class="issue">
+                <div class="issue-title">AArch64 PAC return-address signing macro removed from default defines</div>
+                <div class="issue-location">config/json/compile.json:33-39</div>
+                <pre>"CC_DEFINE_FLAGS": [
+    "-DHITLS_CRYPTO_EAL_REPORT",
+    "-DHITLS_CRYPTO_NIST_ECC_ACCELERATE",
+    "-DHITLS_CRYPTO_BN_COMBA",
+    "-DHITLS_CRYPTO_AES_PRECALC_TABLES",
+    "-DHITLS_CRYPTO_SM2_PRECOMPUTE_512K_TBL"
+]</pre>
+                <div class="problem"><strong>Issue:</strong> The default compile defines no longer include `-DHITLS_AARCH64_PACIASP`, so `AARCH64_PACIASP/AARCH64_AUTIASP` expand to no-ops in assembly (`crypt_arm.h`). This removes return-address signing hardening for AArch64 assembly crypto code.</div>
+                <div class="fix-label">Fix:</div><pre>"CC_DEFINE_FLAGS": [
+    "-DHITLS_CRYPTO_EAL_REPORT",
+    "-DHITLS_CRYPTO_NIST_ECC_ACCELERATE",
+    "-DHITLS_CRYPTO_BN_COMBA",
+    "-DHITLS_CRYPTO_AES_PRECALC_TABLES",
+    "-DHITLS_AARCH64_PACIASP",
+    "-DHITLS_CRYPTO_SM2_PRECOMPUTE_512K_TBL"
+]</pre>
+                <div class="issue-source">Reviewer: codex</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">x2 SHAKE path is endianness-incorrect on big-endian AArch64</div>
+                <div class="issue-location">crypto/sha3/src/aarch64_sha3.c:216-218</div>
+                <pre>uint64x1_t v0 = vreinterpret_u64_u8(vld1_u8(in0 + i * 8));
+uint64x1_t v1 = vreinterpret_u64_u8(vld1_u8(in1 + i * 8));
+state[i] = veorq_u64(state[i], vcombine_u64(v0, v1));
+
+...
+
+vst1_u8(out0 + i * 8, vreinterpret_u8_u64(vget_low_u64(s[i])));
+vst1_u8(out1 + i * 8, vreinterpret_u8_u64(vget_high_u64(s[i])));</pre>
+                <div class="problem"><strong>Issue:</strong> The new NEON x2 SHAKE absorb/squeeze path loads/stores 64-bit lanes as raw bytes without LE conversion. Existing SHA3 ARMv8 assembly handles `HITLS_BIG_ENDIAN`, but this new C path does not, producing wrong SHAKE output on big-endian targets.</div>
+                <div class="fix-label">Fix:</div><pre>#ifdef HITLS_BIG_ENDIAN
+uint64_t lane0 = GET_UINT64_LE(in0, i * 8);
+uint64_t lane1 = GET_UINT64_LE(in1, i * 8);
+state[i] = veorq_u64(state[i], vcombine_u64(vcreate_u64(lane0), vcreate_u64(lane1)));
+#else
+uint64x1_t v0 = vreinterpret_u64_u8(vld1_u8(in0 + i * 8));
+uint64x1_t v1 = vreinterpret_u64_u8(vld1_u8(in1 + i * 8));
+state[i] = veorq_u64(state[i], vcombine_u64(v0, v1));
+#endif
+
+...
+
+#ifdef HITLS_BIG_ENDIAN
+PUT_UINT64_LE(vgetq_lane_u64(s[i], 0), out0, i * 8);
+PUT_UINT64_LE(vgetq_lane_u64(s[i], 1), out1, i * 8);
+#else
+vst1_u8(out0 + i * 8, vreinterpret_u8_u64(vget_low_u64(s[i])));
+vst1_u8(out1 + i * 8, vreinterpret_u8_u64(vget_high_u64(s[i])));
+#endif</pre>
+                <div class="issue-source">Reviewer: codex</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">ML-KEM switched from provider-aware hash dispatch to hardwired local SHA3/SHAKE</div>
+                <div class="issue-location">crypto/mlkem/src/ml_kem_pke.c:346</div>
+                <pre>CRYPT_SHA3_512(digest, seed, MLKEM_SEED_LEN + 1);
+
+...
+
+CRYPT_SHAKE256(bufEncE, MLKEM_PRF_BLOCKSIZE * ctx-&gt;info-&gt;eta2, r, MLKEM_SEED_LEN + 1);</pre>
+                <div class="problem"><strong>Issue:</strong> Keygen/encrypt now call direct one-shot SHA3/SHAKE functions, bypassing `ctx->libCtx` provider dispatch and its error path. This breaks consistency with provider-based operation used elsewhere in the file and can violate provider/FIPS routing expectations.</div>
+                <div class="fix-label">Fix:</div><pre>ret = HashFuncG(ctx-&gt;libCtx, seed, MLKEM_SEED_LEN + 1, digest, CRYPT_SHA3_512_DIGESTSIZE);
+RETURN_RET_IF(ret != CRYPT_SUCCESS, ret);
+
+...
+
+ret = HashFuncJ(ctx-&gt;libCtx, r, MLKEM_SEED_LEN + 1, bufEncE, MLKEM_PRF_BLOCKSIZE * ctx-&gt;info-&gt;eta2);
+GOTO_ERR_IF_EX(ret, ret);</pre>
+                <div class="issue-source">Reviewer: codex</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">Noise PRF path ignores `libCtx` and cannot report SHAKE provider errors</div>
+                <div class="issue-location">crypto/mlkem/src/ml_kem_poly.c:266-273</div>
+                <pre>CRYPT_SHAKE256(prfOut, MLKEM_PRF_BLOCKSIZE * MLKEM_ETA1_MAX, q, MLKEM_SEED_LEN + 1);
+...
+CRYPT_SHAKE256(prfOut, MLKEM_PRF_BLOCKSIZE * MLKEM_ETA2_MAX, q, MLKEM_SEED_LEN + 1);</pre>
+                <div class="problem"><strong>Issue:</strong> `SampleEta1/2` now use direct `CRYPT_SHAKE256` one-shot calls and always return success, bypassing provider dispatch (`ctx->libCtx`) and removing error propagation previously provided by EAL MD calls.</div>
+                <div class="fix-label">Fix:</div><pre>uint32_t outLen = MLKEM_PRF_BLOCKSIZE * MLKEM_ETA1_MAX;
+int32_t ret = EAL_Md(CRYPT_MD_SHAKE256, ctx-&gt;libCtx, NULL, q, MLKEM_SEED_LEN + 1,
+    prfOut, &amp;outLen, false, ctx-&gt;libCtx != NULL);
+RETURN_RET_IF(ret != CRYPT_SUCCESS, ret);
+
+/* Apply the same pattern for eta2 output length */
+outLen = MLKEM_PRF_BLOCKSIZE * MLKEM_ETA2_MAX;
+ret = EAL_Md(CRYPT_MD_SHAKE256, ctx-&gt;libCtx, NULL, q, MLKEM_SEED_LEN + 1,
+    prfOut, &amp;outLen, false, ctx-&gt;libCtx != NULL);
+RETURN_RET_IF(ret != CRYPT_SUCCESS, ret);</pre>
+                <div class="issue-source">Reviewer: codex</div>
+            </div>
+</div>
+<div class="section"><div class="section-title low">Low</div>
+<div class="issue">
+                <div class="issue-title">Sensitive buffer cleanse length not updated after buffer size increase</div>
+                <div class="issue-location">crypto/mlkem/src/ml_kem_pke.c:551</div>
+                <pre>uint8_t kr[CRYPT_SHA3_512_DIGESTSIZE + 1];    // K and r
+...
+BSL_SAL_CleanseData(kr, CRYPT_SHA3_512_DIGESTSIZE);
+...
+BSL_SAL_CleanseData(kr, CRYPT_SHA3_512_DIGESTSIZE);</pre>
+                <div class="problem"><strong>Issue:</strong> `kr` was expanded from 64 to 65 bytes, but cleansing still wipes only 64 bytes. One byte remains uncleansed on stack.</div>
+                <div class="fix-label">Fix:</div><pre>uint8_t kr[CRYPT_SHA3_512_DIGESTSIZE + 1];    // K and r
+...
+BSL_SAL_CleanseData(kr, sizeof(kr));
+...
+BSL_SAL_CleanseData(kr, sizeof(kr));</pre>
+                <div class="issue-source">Reviewer: codex</div>
+            </div>
+</div>
+</div></body></html>

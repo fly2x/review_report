@@ -1,38 +1,31 @@
 # Change Review Task
 
-You are reviewing PR #21 for openHiTLS/sdf4j.
+You are reviewing PR #1114 for openHiTLS/openhitls.
 
 
-## Changed Files (27 files)
+## Changed Files (16 files)
 
-**Source** (23 files):
-  - sdf4j/src/main/java/org/openhitls/sdf4j/SDFException.java
-  - sdf4j/src/main/java/org/openhitls/sdf4j/types/DeviceInfo.java
-  - sdf4j/src/main/java/org/openhitls/sdf4j/types/ECCCipher.java
-  - sdf4j/src/main/java/org/openhitls/sdf4j/types/ECCKeyEncryptionResult.java
-  - sdf4j/src/main/java/org/openhitls/sdf4j/types/ECCPrivateKey.java
-  - sdf4j/src/main/java/org/openhitls/sdf4j/types/ECCPublicKey.java
-  - sdf4j/src/main/java/org/openhitls/sdf4j/types/ECCSignature.java
-  - sdf4j/src/main/java/org/openhitls/sdf4j/types/HybridCipher.java
-  - sdf4j/src/main/java/org/openhitls/sdf4j/types/HybridSignature.java
-  - sdf4j/src/main/java/org/openhitls/sdf4j/types/KeyEncryptionResult.java
-  - sdf4j/src/main/java/org/openhitls/sdf4j/types/RSAPrivateKey.java
-  - sdf4j/src/main/java/org/openhitls/sdf4j/types/RSAPublicKey.java
-  - sdf4j/src/main/native/include/jni_cache.h
-  - sdf4j/src/main/native/src/jni_cache.c
-  - sdf4j/src/main/native/src/sdf_jni_asymmetric.c
-  - sdf4j/src/main/native/src/sdf_jni_file.c
-  - sdf4j/src/main/native/src/sdf_jni_hybrid.c
-  - sdf4j/src/main/native/src/sdf_jni_key.c
-  - sdf4j/src/main/native/src/sdf_jni_keygen.c
-  - sdf4j/src/main/native/src/sdf_jni_register.c
-  - ... and 3 more
+**Source** (11 files):
+  - crypto/mlkem/src/asm_ml_kem_ntt.c
+  - crypto/mlkem/src/asm_ml_kem_poly.c
+  - crypto/mlkem/src/ml_kem_local.h
+  - crypto/mlkem/src/ml_kem_pke.c
+  - crypto/mlkem/src/ml_kem_poly.c
+  - crypto/sha3/include/crypt_sha3.h
+  - crypto/sha3/src/aarch64_sha3.c
+  - crypto/sha3/src/aarch64_sha3.h
+  - crypto/sha3/src/noasm_sha3.c
+  - crypto/sha3/src/sha3.c
+  - crypto/sha3/src/sha3_core.h
 
-**Test** (4 files):
-  - sdf4j/src/test/java/org/openhitls/sdf4j/DeviceAndSessionManageTest.java
-  - sdf4j/src/test/java/org/openhitls/sdf4j/JniValidationTest.java
-  - sdf4j/src/test/java/org/openhitls/sdf4j/types/ECCSignatureTest.java
-  - sdf4j/src/test/java/org/openhitls/sdf4j/types/TypeValidationTest.java
+**Config** (2 files):
+  - config/json/compile.json
+  - config/json/feature.json
+
+**Other** (3 files):
+  - crypto/mlkem/src/asm/ml_kem_basemul_armv8.S
+  - crypto/mlkem/src/asm/ml_kem_ntt_armv8.S
+  - crypto/mlkem/src/asm/ml_kem_poly_armv8.S
 
 
 ## Your Task
@@ -40,11 +33,11 @@ You are reviewing PR #21 for openHiTLS/sdf4j.
 Perform a thorough change review by:
 
 1. **Understand the Change**
-   - Read the diff stats: `git diff --stat 9867718249fcded3611be9a9b74f99ca45ea2ed7 mr-21`
+   - Read the diff stats: `git diff --stat 9d2dc392c81ef0675c050a9bc66f3ca44e60fcb0 mr-1114`
    - Understand what this PR is trying to achieve
 
 2. **Review Each File**
-   - For each changed file, view its diff: `git diff 9867718249fcded3611be9a9b74f99ca45ea2ed7 mr-21 -- <file>`
+   - For each changed file, view its diff: `git diff 9d2dc392c81ef0675c050a9bc66f3ca44e60fcb0 mr-1114 -- <file>`
    - If you need more context, read the full file or search for related code
    - Look for: security issues, logic errors, edge cases, error handling
    - For non-code files (docs/config), focus on correctness and safety of the content

@@ -1,0 +1,42 @@
+[
+  {
+    "source": "claude",
+    "file": "config/json/compile.json",
+    "line": "61",
+    "severity": "high",
+    "title": "Removal of pointer authentication reduces security hardening",
+    "problem": "The removal of `-DHITLS_AARCH64_PACIASP` from CC_DEFINE_FLAGS_REMOVE disables pointer authentication for ALL ARMv8 assembly code (AES, SHA, SM2/3/4, ECC, ML-KEM, etc.). This is a security regression as PAC (Pointer Authentication Codes) is a significant hardening feature that helps prevent ROP (Return-Oriented Programming) attacks on ARMv8.3-A+ processors.\n\nThe change affects not just the new ML-KEM code but ALL existing ARMv8 assembly implementations.",
+    "code": "\"CC_DEFINE_FLAGS_REMOVE\": [\n                \"-DHITLS_AARCH64_PACIASP\"\n            ]",
+    "fix": "\"CC_DEFINE_FLAGS_REMOVE\": [\n            ]"
+  },
+  {
+    "source": "claude",
+    "file": "crypto/mlkem/src/asm_ml_kem_poly.c",
+    "line": "226",
+    "severity": "medium",
+    "title": "Potential buffer overflow in GenMatrixSingle",
+    "problem": "The `Shake128Squeeze` function is called without verifying the state has been properly initialized. The `buf` array size calculation assumes GEN_MATRIX_NBLOCKS is sufficient, but rejection sampling may require significantly more data. The while loop on line 221 correctly handles the case by calling `Shake128Squeeze` again, but the initial call on line 216 should check if ctr == MLKEM_N before the loop to avoid unnecessary XOF calls.",
+    "code": "KyberShakeAbsorb(&state, seed, x, y);\n    Shake128Squeeze(buf, GEN_MATRIX_NBLOCKS, &state);  // May be unnecessary if MLKEMRejUniform fills all\n    uint32_t buflen = GEN_MATRIX_NBLOCKS * CRYPT_SHAKE128_BLOCKSIZE;\n    uint32_t ctr = MLKEMRejUniform(poly, buf);\n    \n    while (ctr < MLKEM_N) {  // If ctr == MLKEM_N above, this loop is unnecessary",
+    "fix": "KyberShakeAbsorb(&state, seed, x, y);\n    uint32_t ctr = 0;\n    uint32_t buflen = 0;\n    uint8_t buf[GEN_MATRIX_NBLOCKS * CRYPT_SHAKE128_BLOCKSIZE + 2];\n    \n    while (ctr < MLKEM_N) {\n        uint32_t off = buflen % 3;\n        for (uint32_t m = 0; m < off; m++) {\n            buf[m] = buf[buflen - off + m];\n        }\n        Shake128Squeeze(buf + off, 1, &state);\n        buflen = off + CRYPT_SHAKE128_BLOCKSIZE;\n        ctr += Parse(poly + ctr, buf, buflen, MLKEM_N - ctr);\n    }"
+  },
+  {
+    "source": "claude",
+    "file": "crypto/mlkem/src/asm_ml_kem_poly.c",
+    "line": "267",
+    "severity": "medium",
+    "title": "VLA array declaration may cause stack overflow for large k",
+    "problem": "The `s_asym` variable is declared as a VLA (Variable Length Array) with size `k * (MLKEM_N >> 1)` elements (k * 128 * sizeof(int16_t) = k * 256 bytes). For k=4, this is 1024 bytes on stack. Combined with other local variables and the Keccakx2State (400 bytes), the stack usage per function call could exceed 2KB. While MLKEM_K_MAX is 4, defensive coding should ensure this doesn't cause issues in deep call stacks or with threads with small stacks.",
+    "code": "void MLKEM_PKEGen(uint32_t k, MLKEM_MatrixSt *mat, uint8_t *seed, uint8_t *pk, uint8_t *dk)\n{\n    int16_t s_asym[k][MLKEM_N >> 1];  // VLA: k * 128 * 2 = k * 256 bytes\n    int16_t e[MLKEM_K_MAX][MLKEM_N];  // 4 * 256 * 2 = 2048 bytes",
+    "fix": "int16_t s_asym[MLKEM_K_MAX][MLKEM_N >> 1];  // Fixed size, no VLA\n    // or use BSL_SAL_Calloc/BSL_SAL_Free for dynamic allocation"
+  },
+  {
+    "source": "claude",
+    "file": "crypto/sha3/src/aarch64_sha3.c",
+    "line": "232",
+    "severity": "low",
+    "title": "Unaligned NEON load may have performance impact",
+    "problem": "The `vld1q_u64(tmp0)` loads from a stack-allocated array `tmp0[2]` which may not be 16-byte aligned on all ARMv8 implementations. While ARMv8 supports unaligned loads, they may be slower than aligned loads. This occurs in the hot path of the absorb function.",
+    "code": "uint64_t lane0 = ((uint64_t)in0[i]) << (8 * (i % 8));\n        uint64_t lane1 = ((uint64_t)in1[i]) << (8 * (i % 8));\n        tmp0[0] = lane0;\n        tmp0[1] = lane1;\n        state[i / 8] = veorq_u64(state[i / 8], vld1q_u64(tmp0));  // Potentially unaligned load",
+    "fix": "uint64x1_t v0 = vcreate_u64(((uint64_t)in0[i]) << (8 * (i % 8)));\n        uint64x1_t v1 = vcreate_u64(((uint64_t)in1[i]) << (8 * (i % 8)));\n        state[i / 8] = veorq_u64(state[i / 8], vcombine_u64(v0, v1));"
+  }
+]

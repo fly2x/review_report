@@ -1,0 +1,52 @@
+[
+  {
+    "source": "codex",
+    "file": "config/json/compile.json",
+    "line": "33-39",
+    "severity": "medium",
+    "title": "AArch64 PAC return-address signing macro removed from default defines",
+    "problem": "The default compile defines no longer include `-DHITLS_AARCH64_PACIASP`, so `AARCH64_PACIASP/AARCH64_AUTIASP` expand to no-ops in assembly (`crypt_arm.h`). This removes return-address signing hardening for AArch64 assembly crypto code.",
+    "code": "\"CC_DEFINE_FLAGS\": [\n    \"-DHITLS_CRYPTO_EAL_REPORT\",\n    \"-DHITLS_CRYPTO_NIST_ECC_ACCELERATE\",\n    \"-DHITLS_CRYPTO_BN_COMBA\",\n    \"-DHITLS_CRYPTO_AES_PRECALC_TABLES\",\n    \"-DHITLS_CRYPTO_SM2_PRECOMPUTE_512K_TBL\"\n]",
+    "fix": "\"CC_DEFINE_FLAGS\": [\n    \"-DHITLS_CRYPTO_EAL_REPORT\",\n    \"-DHITLS_CRYPTO_NIST_ECC_ACCELERATE\",\n    \"-DHITLS_CRYPTO_BN_COMBA\",\n    \"-DHITLS_CRYPTO_AES_PRECALC_TABLES\",\n    \"-DHITLS_AARCH64_PACIASP\",\n    \"-DHITLS_CRYPTO_SM2_PRECOMPUTE_512K_TBL\"\n]"
+  },
+  {
+    "source": "codex",
+    "file": "crypto/sha3/src/aarch64_sha3.c",
+    "line": "216-218",
+    "severity": "medium",
+    "title": "x2 SHAKE path is endianness-incorrect on big-endian AArch64",
+    "problem": "The new NEON x2 SHAKE absorb/squeeze path loads/stores 64-bit lanes as raw bytes without LE conversion. Existing SHA3 ARMv8 assembly handles `HITLS_BIG_ENDIAN`, but this new C path does not, producing wrong SHAKE output on big-endian targets.",
+    "code": "uint64x1_t v0 = vreinterpret_u64_u8(vld1_u8(in0 + i * 8));\nuint64x1_t v1 = vreinterpret_u64_u8(vld1_u8(in1 + i * 8));\nstate[i] = veorq_u64(state[i], vcombine_u64(v0, v1));\n\n...\n\nvst1_u8(out0 + i * 8, vreinterpret_u8_u64(vget_low_u64(s[i])));\nvst1_u8(out1 + i * 8, vreinterpret_u8_u64(vget_high_u64(s[i])));",
+    "fix": "#ifdef HITLS_BIG_ENDIAN\nuint64_t lane0 = GET_UINT64_LE(in0, i * 8);\nuint64_t lane1 = GET_UINT64_LE(in1, i * 8);\nstate[i] = veorq_u64(state[i], vcombine_u64(vcreate_u64(lane0), vcreate_u64(lane1)));\n#else\nuint64x1_t v0 = vreinterpret_u64_u8(vld1_u8(in0 + i * 8));\nuint64x1_t v1 = vreinterpret_u64_u8(vld1_u8(in1 + i * 8));\nstate[i] = veorq_u64(state[i], vcombine_u64(v0, v1));\n#endif\n\n...\n\n#ifdef HITLS_BIG_ENDIAN\nPUT_UINT64_LE(vgetq_lane_u64(s[i], 0), out0, i * 8);\nPUT_UINT64_LE(vgetq_lane_u64(s[i], 1), out1, i * 8);\n#else\nvst1_u8(out0 + i * 8, vreinterpret_u8_u64(vget_low_u64(s[i])));\nvst1_u8(out1 + i * 8, vreinterpret_u8_u64(vget_high_u64(s[i])));\n#endif"
+  },
+  {
+    "source": "codex",
+    "file": "crypto/mlkem/src/ml_kem_pke.c",
+    "line": "346",
+    "severity": "medium",
+    "title": "ML-KEM switched from provider-aware hash dispatch to hardwired local SHA3/SHAKE",
+    "problem": "Keygen/encrypt now call direct one-shot SHA3/SHAKE functions, bypassing `ctx->libCtx` provider dispatch and its error path. This breaks consistency with provider-based operation used elsewhere in the file and can violate provider/FIPS routing expectations.",
+    "code": "CRYPT_SHA3_512(digest, seed, MLKEM_SEED_LEN + 1);\n\n...\n\nCRYPT_SHAKE256(bufEncE, MLKEM_PRF_BLOCKSIZE * ctx->info->eta2, r, MLKEM_SEED_LEN + 1);",
+    "fix": "ret = HashFuncG(ctx->libCtx, seed, MLKEM_SEED_LEN + 1, digest, CRYPT_SHA3_512_DIGESTSIZE);\nRETURN_RET_IF(ret != CRYPT_SUCCESS, ret);\n\n...\n\nret = HashFuncJ(ctx->libCtx, r, MLKEM_SEED_LEN + 1, bufEncE, MLKEM_PRF_BLOCKSIZE * ctx->info->eta2);\nGOTO_ERR_IF_EX(ret, ret);"
+  },
+  {
+    "source": "codex",
+    "file": "crypto/mlkem/src/ml_kem_poly.c",
+    "line": "266-273",
+    "severity": "medium",
+    "title": "Noise PRF path ignores `libCtx` and cannot report SHAKE provider errors",
+    "problem": "`SampleEta1/2` now use direct `CRYPT_SHAKE256` one-shot calls and always return success, bypassing provider dispatch (`ctx->libCtx`) and removing error propagation previously provided by EAL MD calls.",
+    "code": "CRYPT_SHAKE256(prfOut, MLKEM_PRF_BLOCKSIZE * MLKEM_ETA1_MAX, q, MLKEM_SEED_LEN + 1);\n...\nCRYPT_SHAKE256(prfOut, MLKEM_PRF_BLOCKSIZE * MLKEM_ETA2_MAX, q, MLKEM_SEED_LEN + 1);",
+    "fix": "uint32_t outLen = MLKEM_PRF_BLOCKSIZE * MLKEM_ETA1_MAX;\nint32_t ret = EAL_Md(CRYPT_MD_SHAKE256, ctx->libCtx, NULL, q, MLKEM_SEED_LEN + 1,\n    prfOut, &outLen, false, ctx->libCtx != NULL);\nRETURN_RET_IF(ret != CRYPT_SUCCESS, ret);\n\n/* Apply the same pattern for eta2 output length */\noutLen = MLKEM_PRF_BLOCKSIZE * MLKEM_ETA2_MAX;\nret = EAL_Md(CRYPT_MD_SHAKE256, ctx->libCtx, NULL, q, MLKEM_SEED_LEN + 1,\n    prfOut, &outLen, false, ctx->libCtx != NULL);\nRETURN_RET_IF(ret != CRYPT_SUCCESS, ret);"
+  },
+  {
+    "source": "codex",
+    "file": "crypto/mlkem/src/ml_kem_pke.c",
+    "line": "551",
+    "severity": "low",
+    "title": "Sensitive buffer cleanse length not updated after buffer size increase",
+    "problem": "`kr` was expanded from 64 to 65 bytes, but cleansing still wipes only 64 bytes. One byte remains uncleansed on stack.",
+    "code": "uint8_t kr[CRYPT_SHA3_512_DIGESTSIZE + 1];    // K and r\n...\nBSL_SAL_CleanseData(kr, CRYPT_SHA3_512_DIGESTSIZE);\n...\nBSL_SAL_CleanseData(kr, CRYPT_SHA3_512_DIGESTSIZE);",
+    "fix": "uint8_t kr[CRYPT_SHA3_512_DIGESTSIZE + 1];    // K and r\n...\nBSL_SAL_CleanseData(kr, sizeof(kr));\n...\nBSL_SAL_CleanseData(kr, sizeof(kr));"
+  }
+]

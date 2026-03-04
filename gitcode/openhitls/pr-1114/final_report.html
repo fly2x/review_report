@@ -1,0 +1,292 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Final Report: openHiTLS/openhitls#1114</title>
+    <style>
+        :root { --critical: #dc2626; --high: #ea580c; --medium: #ca8a04; --low: #65a30d;
+                 --trusted: #059669; --likely: #0284c7; --evaluate: #7c3aed; }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: system-ui, sans-serif; background: #f8fafc; color: #1e293b; padding: 2rem; line-height: 1.6; }
+        .container { max-width: 900px; margin: 0 auto; }
+        h1 { font-size: 1.75rem; margin-bottom: 0.5rem; }
+        .subtitle { color: #64748b; margin-bottom: 1rem; }
+        .stats { display: flex; gap: 1rem; margin-bottom: 2rem; flex-wrap: wrap; }
+        .stat { background: white; border: 1px solid #e2e8f0; border-radius: 0.5rem; padding: 1rem; min-width: 100px; text-align: center; }
+        .stat-value { font-size: 1.5rem; font-weight: 700; }
+        .stat-label { font-size: 0.875rem; color: #64748b; }
+        .stat.critical .stat-value { color: var(--critical); }
+        .stat.high .stat-value { color: var(--high); }
+        .stat.medium .stat-value { color: var(--medium); }
+        .stat.low .stat-value { color: var(--low); }
+        .reviewers { background: #e0e7ff; color: #3730a3; padding: 0.5rem 1rem; border-radius: 0.5rem; margin-bottom: 2rem; }
+        .section { margin-bottom: 2rem; }
+        .section-title { font-size: 1.1rem; font-weight: 600; padding: 0.5rem 1rem; border-radius: 0.5rem 0.5rem 0 0; color: white; }
+        .section-title.critical { background: var(--critical); }
+        .section-title.high { background: var(--high); }
+        .section-title.medium { background: var(--medium); }
+        .section-title.low { background: var(--low); }
+        .issue { background: white; border: 1px solid #e2e8f0; border-top: none; padding: 1rem; }
+        .issue:last-child { border-radius: 0 0 0.5rem 0.5rem; }
+        .issue-title { font-weight: 600; margin-bottom: 0.25rem; }
+        .issue-location { font-family: monospace; font-size: 0.875rem; color: #64748b; margin-bottom: 0.5rem; }
+        .issue-meta { font-size: 0.75rem; margin-bottom: 0.75rem; display: flex; gap: 0.75rem; align-items: center; }
+        .issue-meta .reviewers { background: #f1f5f9; color: #475569; padding: 0.25rem 0.5rem; border-radius: 0.25rem; margin: 0; }
+        .confidence-badge { padding: 0.25rem 0.5rem; border-radius: 0.25rem; font-weight: 500; }
+        .confidence-badge.trusted { background: #d1fae5; color: #065f46; }
+        .confidence-badge.likely { background: #dbeafe; color: #1e40af; }
+        .confidence-badge.evaluate { background: #ede9fe; color: #5b21b6; }
+        pre { background: #1e293b; color: #e2e8f0; padding: 0.75rem; border-radius: 0.375rem; overflow-x: auto; font-size: 0.875rem; margin: 0.5rem 0; }
+        .problem { margin: 0.75rem 0; }
+        .fix-label { font-weight: 600; margin-top: 0.75rem; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Final Code Review Report</h1>
+        <div class="subtitle">openHiTLS/openhitls - PR #1114</div>
+        <p style="margin-bottom: 1rem;"></p>
+
+        <div class="stats">
+            <div class="stat"><div class="stat-value">7</div><div class="stat-label">Total</div></div>
+            <div class="stat critical"><div class="stat-value">0</div><div class="stat-label">Critical</div></div>
+            <div class="stat high"><div class="stat-value">1</div><div class="stat-label">High</div></div>
+            <div class="stat medium"><div class="stat-value">3</div><div class="stat-label">Medium</div></div>
+            <div class="stat low"><div class="stat-value">3</div><div class="stat-label">Low</div></div>
+        </div>
+
+        <div class="reviewers">Reviewers: claude, gemini, codex</div>
+<div class="section"><div class="section-title high">High</div>
+<div class="issue">
+                <div class="issue-title">AArch64 PAC return-address signing removed from default compilation flags</div>
+                <div class="issue-location">config/json/compile.json:33-39</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CLAUDE, CODEX</span>
+                    <span class="confidence-badge trusted">置信度: 可信</span>
+                </div>
+                <pre>"CC_DEFINE_FLAGS": [
+    "-DHITLS_CRYPTO_EAL_REPORT",
+    "-DHITLS_CRYPTO_NIST_ECC_ACCELERATE",
+    "-DHITLS_CRYPTO_BN_COMBA",
+    "-DHITLS_CRYPTO_AES_PRECALC_TABLES",
+-   "-DHITLS_AARCH64_PACIASP",
+    "-DHITLS_CRYPTO_SM2_PRECOMPUTE_512K_TBL"
+]</pre>
+                <div class="problem"><strong>Issue:</strong> The `-DHITLS_AARCH64_PACIASP` flag was removed from CC_DEFINE_FLAGS. This disables Pointer Authentication (PAC) for all ARMv8 assembly code (AES, SHA, SM2/3/4, ECC, ML-KEM, etc.). PAC is a significant security hardening feature that helps prevent ROP (Return-Oriented Programming) attacks on ARMv.3-A+ processors. This change affects not just the new ML-KEM code but ALL existing ARMv8 assembly implementations.</div>
+                <div class="fix-label">Fix:</div><pre>"CC_DEFINE_FLAGS": [
+    "-DHITLS_CRYPTO_EAL_REPORT",
+    "-DHITLS_CRYPTO_NIST_ECC_ACCELERATE",
+    "-DHITLS_CRYPTO_BN_COMBA",
+    "-DHITLS_CRYPTO_AES_PRECALC_TABLES",
+    "-DHITLS_AARCH64_PACIASP",
+    "-DHITLS_CRYPTO_SM2_PRECOMPUTE_512K_TBL"
+]</pre>
+            </div>
+</div>
+<div class="section"><div class="section-title medium">Medium</div>
+<div class="issue">
+                <div class="issue-title">x2 SHAKE path lacks big-endian byte order conversion</div>
+                <div class="issue-location">crypto/sha3/src/aarch64_sha3.c:216-218</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CODEX</span>
+                    <span class="confidence-badge likely">置信度: 较可信</span>
+                </div>
+                <pre>/* Process full blocks */
+for (i = 0; i &lt; rate / 8; i++) {
+    uint64x1_t v0 = vreinterpret_u64_u8(vld1_u8(in0 + i * 8));
+    uint64x1_t v1 = vreinterpret_u64_u8(vld1_u8(in1 + i * 8));
+    state[i] = veorq_u64(state[i], vcombine_u64(v0, v1));
+}
+...
+/* Squeeze blocks */
+for (i = 0; i &lt; blockSize; i++) {
+    vst1_u8(out0 + i * 8, vreinterpret_u8_u64(vget_low_u64(s[i])));
+    vst1_u8(out1 + i * 8, vreinterpret_u8_u64(vget_high_u64(s[i])));
+}</pre>
+                <div class="problem"><strong>Issue:</strong> The new NEON x2 SHAKE absorb/squeeze path loads and stores 64-bit lanes using `vld1_u8`/`vst1_u8` without little-endian conversion. The existing SHA3 ARMv8 assembly in `crypto/sha3/src/asm/sha3_armv8.S` handles `HITLS_BIG_ENDIAN`, and the noasm version in `noasm_sha3.c` uses `GET_UINT64_LE`/`PUT_UINT64_LE` macros. This new C path will produce incorrect SHAKE output on big-endian targets.</div>
+                <div class="fix-label">Fix:</div><pre>/* Process full blocks */
+#ifdef HITLS_BIG_ENDIAN
+for (i = 0; i &lt; rate / 8; i++) {
+    uint64_t lane0 = GET_UINT64_LE(in0, i * 8);
+    uint64_t lane1 = GET_UINT64_LE(in1, i * 8);
+    state[i] = veorq_u64(state[i], vcombine_u64(vcreate_u64(lane0), vcreate_u64(lane1)));
+}
+#else
+for (i = 0; i &lt; rate / 8; i++) {
+    uint64x1_t v0 = vreinterpret_u64_u8(vld1_u8(in0 + i * 8));
+    uint64x1_t v1 = vreinterpret_u64_u8(vld1_u8(in1 + i * 8));
+    state[i] = veorq_u64(state[i], vcombine_u64(v0, v1));
+}
+#endif
+...
+/* Squeeze blocks */
+#ifdef HITLS_BIG_ENDIAN
+for (i = 0; i &lt; blockSize; i++) {
+    PUT_UINT64_LE(vgetq_lane_u64(s[i], 0), out0, i * 8);
+    PUT_UINT64_LE(vgetq_lane_u64(s[i], 1), out1, i * 8);
+}
+#else
+for (i = 0; i &lt; blockSize; i++) {
+    vst1_u8(out0 + i * 8, vreinterpret_u8_u64(vget_low_u64(s[i])));
+    vst1_u8(out1 + i * 8, vreinterpret_u8_u64(vget_high_u64(s[i])));
+}
+#endif</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">Direct SHA3/SHAKE calls bypass provider dispatch in keygen/encrypt</div>
+                <div class="issue-location">crypto/mlkem/src/ml_kem_pke.c:93</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CODEX</span>
+                    <span class="confidence-badge likely">置信度: 较可信</span>
+                </div>
+                <pre>static int32_t PkeKeyGen(CRYPT_ML_KEM_Ctx *ctx, uint8_t *pk, uint8_t *dk, uint8_t *d)
+{
+    ...
+-   int32_t ret = HashFuncG(ctx-&gt;libCtx, seed, MLKEM_SEED_LEN + 1, digest, CRYPT_SHA3_512_DIGESTSIZE);
+-   RETURN_RET_IF(ret != CRYPT_SUCCESS, ret);
++   CRYPT_SHA3_512(digest, seed, MLKEM_SEED_LEN + 1);
+    ...
+}
+...
+static int32_t PkeEncrypt(...)
+{
+    ...
+-   GOTO_ERR_IF(PRF(ctx-&gt;libCtx, seedE, MLKEM_SEED_LEN + 1, bufEncE, MLKEM_PRF_BLOCKSIZE * ctx-&gt;info-&gt;eta2), ret);
++   CRYPT_SHAKE256(bufEncE, MLKEM_PRF_BLOCKSIZE * ctx-&gt;info-&gt;eta2, r, MLKEM_SEED_LEN + 1);
+    MLKEM_SamplePolyCBD(polyE2, bufEncE, ctx-&gt;info-&gt;eta2);
+    ...
+}</pre>
+                <div class="problem"><strong>Issue:</strong> Key generation and encryption now call direct one-shot functions `CRYPT_SHA3_512()` and `CRYPT_SHAKE256()`, bypassing `ctx->libCtx` provider dispatch. This breaks consistency with the provider-based architecture used elsewhere in the codebase and violates provider/FIPS routing expectations. Error paths that were previously handled via EAL MD are now silently ignored.</div>
+                <div class="fix-label">Fix:</div><pre>static int32_t PkeKeyGen(CRYPT_ML_KEM_Ctx *ctx, uint8_t *pk, uint8_t *dk, uint8_t *d)
+{
+    ...
+    int32_t ret = HashFuncG(ctx-&gt;libCtx, seed, MLKEM_SEED_LEN + 1, digest, CRYPT_SHA3_512_DIGESTSIZE);
+    RETURN_RET_IF(ret != CRYPT_SUCCESS, ret);
+    ...
+}
+...
+static int32_t PkeEncrypt(...)
+{
+    ...
+    (void)memcpy_s(seedE, MLKEM_SEED_LEN, r, MLKEM_SEED_LEN);
+    seedE[MLKEM_SEED_LEN] = nonce;
+    uint32_t outLen = MLKEM_PRF_BLOCKSIZE * ctx-&gt;info-&gt;eta2;
+    GOTO_ERR_IF(EAL_Md(CRYPT_MD_SHAKE256, ctx-&gt;libCtx, NULL, seedE, MLKEM_SEED_LEN + 1,
+        bufEncE, &amp;outLen, false, ctx-&gt;libCtx != NULL), ret);
+    MLKEM_SamplePolyCBD(polyE2, bufEncE, ctx-&gt;info-&gt;eta2);
+    ...
+}</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">SampleEta1/2 use direct SHAKE calls, bypassing provider dispatch</div>
+                <div class="issue-location">crypto/mlkem/src/ml_kem_poly.c:266-273</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CODEX</span>
+                    <span class="confidence-badge likely">置信度: 较可信</span>
+                </div>
+                <pre>int32_t SampleEta1(const CRYPT_ML_KEM_Ctx *ctx, uint8_t *seed, int16_t *s[], int16_t *e[])
+{
+    uint8_t q[MLKEM_SEED_LEN + 1] = { 0 };
+    uint8_t prfOut[MLKEM_PRF_BLOCKSIZE * MLKEM_ETA1_MAX] = { 0 };
+    (void)memcpy_s(q, MLKEM_SEED_LEN, seed, MLKEM_SEED_LEN);
+    uint8_t nonce = 0;
+    for (uint8_t i = 0; i &lt; ctx-&gt;info-&gt;k; i++) {
+        q[MLKEM_SEED_LEN] = nonce++;
+-       int32_t ret = PRF(ctx-&gt;libCtx, q, MLKEM_SEED_LEN + 1, prfOut, MLKEM_PRF_BLOCKSIZE * MLKEM_ETA1_MAX);
+-       RETURN_RET_IF(ret != CRYPT_SUCCESS, ret);
++       CRYPT_SHAKE256(prfOut, MLKEM_PRF_BLOCKSIZE * MLKEM_ETA1_MAX, q, MLKEM_SEED_LEN + 1);
+        MLKEM_SamplePolyCBD(s[i], prfOut, ctx-&gt;info-&gt;eta1);
+        ...
+    }
+    ...
+}</pre>
+                <div class="problem"><strong>Issue:</strong> `SampleEta1` and `SampleEta2` now use direct `CRYPT_SHAKE256` one-shot calls instead of provider-aware EAL MD calls. This bypasses `ctx->libCtx` provider dispatch, removes error propagation capability, and is inconsistent with the provider-based architecture.</div>
+                <div class="fix-label">Fix:</div><pre>int32_t SampleEta1(const CRYPT_ML_KEM_Ctx *ctx, uint8_t *seed, int16_t *s[], int16_t *e[])
+{
+    uint8_t q[MLKEM_SEED_LEN + 1] = { 0 };
+    uint8_t prfOut[MLKEM_PRF_BLOCKSIZE * MLKEM_ETA1_MAX] = { 0 };
+    (void)memcpy_s(q, MLKEM_SEED_LEN, seed, MLKEM_SEED_LEN);
+    uint8_t nonce = 0;
+    for (uint8_t i = 0; i &lt; ctx-&gt;info-&gt;k; i++) {
+        q[MLKEM_SEED_LEN] = nonce++;
+        uint32_t outLen = MLKEM_PRF_BLOCKSIZE * MLKEM_ETA1_MAX;
+        int32_t ret = EAL_Md(CRYPT_MD_SHAKE256, ctx-&gt;libCtx, NULL, q, MLKEM_SEED_LEN + 1,
+            prfOut, &amp;outLen, false, ctx-&gt;libCtx != NULL);
+        RETURN_RET_IF(ret != CRYPT_SUCCESS, ret);
+        MLKEM_SamplePolyCBD(s[i], prfOut, ctx-&gt;info-&gt;eta1);
+        ...
+    }
+    ...
+}</pre>
+            </div>
+</div>
+<div class="section"><div class="section-title low">Low</div>
+<div class="issue">
+                <div class="issue-title">Buffer cleanse length mismatch for kr buffer</div>
+                <div class="issue-location">crypto/mlkem/src/ml_kem_pke.c:537</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CODEX</span>
+                    <span class="confidence-badge likely">置信度: 较可信</span>
+                </div>
+                <pre>uint8_t kr[CRYPT_SHA3_512_DIGESTSIZE + 1];    // K and r (+1 for nonce)
+...
+ret = HashFuncG(ctx-&gt;libCtx, mhek, MLKEM_SEED_LEN + CRYPT_SHA3_256_DIGESTSIZE, kr, CRYPT_SHA3_512_DIGESTSIZE);
+...
+BSL_SAL_CleanseData(kr, CRYPT_SHA3_512_DIGESTSIZE);  // Only wipes 64 bytes</pre>
+                <div class="problem"><strong>Issue:</strong> The `kr` buffer is declared as `uint8_t kr[CRYPT_SHA3_512_DIGESTSIZE + 1]` (65 bytes) to accommodate the extra nonce byte written by `SampleEta2`. However, `BSL_SAL_CleanseData(kr, CRYPT_SHA3_512_DIGESTSIZE)` only wipes 64 bytes, leaving one byte (the nonce) uncleansed on the stack.</div>
+                <div class="fix-label">Fix:</div><pre>uint8_t kr[CRYPT_SHA3_512_DIGESTSIZE + 1];    // K and r (+1 for nonce)
+...
+ret = HashFuncG(ctx-&gt;libCtx, mhek, MLKEM_SEED_LEN + CRYPT_SHA3_256_DIGESTSIZE, kr, CRYPT_SHA3_512_DIGESTSIZE);
+...
+BSL_SAL_CleanseData(kr, sizeof(kr));  // Wipes all 65 bytes</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">Variable Length Array may cause stack overflow in deep call stacks</div>
+                <div class="issue-location">crypto/mlkem/src/asm_ml_kem_poly.c:266</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CLAUDE</span>
+                    <span class="confidence-badge likely">置信度: 较可信</span>
+                </div>
+                <pre>void MLKEM_PKEGen(uint32_t k, MLKEM_MatrixSt *mat, uint8_t *seed, uint8_t *pk, uint8_t *dk)
+{
+    int16_t s_asym[k][MLKEM_N &gt;&gt; 1];  // VLA: k * 128 * 2 = k * 256 bytes
+    int16_t e[MLKEM_K_MAX][MLKEM_N];  // Fixed: 4 * 256 * 2 = 2048 bytes
+    ...
+}</pre>
+                <div class="problem"><strong>Issue:</strong> The `s_asym` variable is declared as a VLA with size `k * (MLKEM_N >> 1)` elements. For k=4, this is 1024 bytes on stack. Combined with `e[MLKEM_K_MAX][MLKEM_N]` (2048 bytes) and other local variables including Keccakx2State, total stack usage could exceed 2KB. This may cause issues in embedded contexts or deep call stacks with limited stack space.</div>
+                <div class="fix-label">Fix:</div><pre>void MLKEM_PKEGen(uint32_t k, MLKEM_MatrixSt *mat, uint8_t *seed, uint8_t *pk, uint8_t *dk)
+{
+    int16_t s_asym[MLKEM_K_MAX][MLKEM_N &gt;&gt; 1];  // Fixed size, no VLA
+    int16_t e[MLKEM_K_MAX][MLKEM_N];
+    ...
+}
+/* Or dynamically allocate:
+    int16_t *s_asym = BSL_SAL_Calloc(k * (MLKEM_N &gt;&gt; 1), sizeof(int16_t));
+    ...
+    BSL_SAL_Free(s_asym);
+*/</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">Potentially unaligned NEON load may impact performance</div>
+                <div class="issue-location">crypto/sha3/src/aarch64_sha3.c:232</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CLAUDE</span>
+                    <span class="confidence-badge evaluate">置信度: 需评估</span>
+                </div>
+                <pre>for (i = 0; i &lt; inlen; i++) {
+    uint64_t lane0 = ((uint64_t)in0[i]) &lt;&lt; (8 * (i % 8));
+    uint64_t lane1 = ((uint64_t)in1[i]) &lt;&lt; (8 * (i % 8));
+    tmp0[0] = lane0;
+    tmp0[1] = lane1;
+    state[i / 8] = veorq_u64(state[i / 8], vld1q_u64(tmp0));  // Potentially unaligned
+}</pre>
+                <div class="problem"><strong>Issue:</strong> The `vld1q_u64(tmp0)` loads from a stack-allocated array `tmp0[2]` which may not be 16-byte aligned on all ARMv8 implementations. While ARMv8 supports unaligned loads, they may be slower than aligned loads. This occurs in the hot path of the absorb function and could impact performance.</div>
+                <div class="fix-label">Fix:</div><pre>for (i = 0; i &lt; inlen; i++) {
+    uint64x1_t v0 = vcreate_u64(((uint64_t)in0[i]) &lt;&lt; (8 * (i % 8)));
+    uint64x1_t v1 = vcreate_u64(((uint64_t)in1[i]) &lt;&lt; (8 * (i % 8)));
+    state[i / 8] = veorq_u64(state[i / 8], vcombine_u64(v0, v1));
+}</pre>
+            </div>
+</div>
+</div></body></html>

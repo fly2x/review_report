@@ -1,0 +1,99 @@
+{
+  "context": {
+    "owner": "openHiTLS",
+    "repo": "openhitls",
+    "pr_id": "1114",
+    "title": "",
+    "reviewers": [
+      "claude",
+      "gemini",
+      "codex"
+    ]
+  },
+  "statistics": {
+    "total": 7,
+    "critical": 0,
+    "high": 1,
+    "medium": 3,
+    "low": 3
+  },
+  "issues": [
+    {
+      "file": "config/json/compile.json",
+      "line": "33-39",
+      "severity": "high",
+      "title": "AArch64 PAC return-address signing removed from default compilation flags",
+      "reviewers": "CLAUDE, CODEX",
+      "confidence": "trusted",
+      "problem": "The `-DHITLS_AARCH64_PACIASP` flag was removed from CC_DEFINE_FLAGS. This disables Pointer Authentication (PAC) for all ARMv8 assembly code (AES, SHA, SM2/3/4, ECC, ML-KEM, etc.). PAC is a significant security hardening feature that helps prevent ROP (Return-Oriented Programming) attacks on ARMv.3-A+ processors. This change affects not just the new ML-KEM code but ALL existing ARMv8 assembly implementations.",
+      "code": "\"CC_DEFINE_FLAGS\": [\n    \"-DHITLS_CRYPTO_EAL_REPORT\",\n    \"-DHITLS_CRYPTO_NIST_ECC_ACCELERATE\",\n    \"-DHITLS_CRYPTO_BN_COMBA\",\n    \"-DHITLS_CRYPTO_AES_PRECALC_TABLES\",\n-   \"-DHITLS_AARCH64_PACIASP\",\n    \"-DHITLS_CRYPTO_SM2_PRECOMPUTE_512K_TBL\"\n]",
+      "fix": "\"CC_DEFINE_FLAGS\": [\n    \"-DHITLS_CRYPTO_EAL_REPORT\",\n    \"-DHITLS_CRYPTO_NIST_ECC_ACCELERATE\",\n    \"-DHITLS_CRYPTO_BN_COMBA\",\n    \"-DHITLS_CRYPTO_AES_PRECALC_TABLES\",\n    \"-DHITLS_AARCH64_PACIASP\",\n    \"-DHITLS_CRYPTO_SM2_PRECOMPUTE_512K_TBL\"\n]"
+    },
+    {
+      "file": "crypto/sha3/src/aarch64_sha3.c",
+      "line": "216-218",
+      "severity": "medium",
+      "title": "x2 SHAKE path lacks big-endian byte order conversion",
+      "reviewers": "CODEX",
+      "confidence": "likely",
+      "problem": "The new NEON x2 SHAKE absorb/squeeze path loads and stores 64-bit lanes using `vld1_u8`/`vst1_u8` without little-endian conversion. The existing SHA3 ARMv8 assembly in `crypto/sha3/src/asm/sha3_armv8.S` handles `HITLS_BIG_ENDIAN`, and the noasm version in `noasm_sha3.c` uses `GET_UINT64_LE`/`PUT_UINT64_LE` macros. This new C path will produce incorrect SHAKE output on big-endian targets.",
+      "code": "/* Process full blocks */\nfor (i = 0; i < rate / 8; i++) {\n    uint64x1_t v0 = vreinterpret_u64_u8(vld1_u8(in0 + i * 8));\n    uint64x1_t v1 = vreinterpret_u64_u8(vld1_u8(in1 + i * 8));\n    state[i] = veorq_u64(state[i], vcombine_u64(v0, v1));\n}\n...\n/* Squeeze blocks */\nfor (i = 0; i < blockSize; i++) {\n    vst1_u8(out0 + i * 8, vreinterpret_u8_u64(vget_low_u64(s[i])));\n    vst1_u8(out1 + i * 8, vreinterpret_u8_u64(vget_high_u64(s[i])));\n}",
+      "fix": "/* Process full blocks */\n#ifdef HITLS_BIG_ENDIAN\nfor (i = 0; i < rate / 8; i++) {\n    uint64_t lane0 = GET_UINT64_LE(in0, i * 8);\n    uint64_t lane1 = GET_UINT64_LE(in1, i * 8);\n    state[i] = veorq_u64(state[i], vcombine_u64(vcreate_u64(lane0), vcreate_u64(lane1)));\n}\n#else\nfor (i = 0; i < rate / 8; i++) {\n    uint64x1_t v0 = vreinterpret_u64_u8(vld1_u8(in0 + i * 8));\n    uint64x1_t v1 = vreinterpret_u64_u8(vld1_u8(in1 + i * 8));\n    state[i] = veorq_u64(state[i], vcombine_u64(v0, v1));\n}\n#endif\n...\n/* Squeeze blocks */\n#ifdef HITLS_BIG_ENDIAN\nfor (i = 0; i < blockSize; i++) {\n    PUT_UINT64_LE(vgetq_lane_u64(s[i], 0), out0, i * 8);\n    PUT_UINT64_LE(vgetq_lane_u64(s[i], 1), out1, i * 8);\n}\n#else\nfor (i = 0; i < blockSize; i++) {\n    vst1_u8(out0 + i * 8, vreinterpret_u8_u64(vget_low_u64(s[i])));\n    vst1_u8(out1 + i * 8, vreinterpret_u8_u64(vget_high_u64(s[i])));\n}\n#endif"
+    },
+    {
+      "file": "crypto/mlkem/src/ml_kem_pke.c",
+      "line": "93",
+      "severity": "medium",
+      "title": "Direct SHA3/SHAKE calls bypass provider dispatch in keygen/encrypt",
+      "reviewers": "CODEX",
+      "confidence": "likely",
+      "problem": "Key generation and encryption now call direct one-shot functions `CRYPT_SHA3_512()` and `CRYPT_SHAKE256()`, bypassing `ctx->libCtx` provider dispatch. This breaks consistency with the provider-based architecture used elsewhere in the codebase and violates provider/FIPS routing expectations. Error paths that were previously handled via EAL MD are now silently ignored.",
+      "code": "static int32_t PkeKeyGen(CRYPT_ML_KEM_Ctx *ctx, uint8_t *pk, uint8_t *dk, uint8_t *d)\n{\n    ...\n-   int32_t ret = HashFuncG(ctx->libCtx, seed, MLKEM_SEED_LEN + 1, digest, CRYPT_SHA3_512_DIGESTSIZE);\n-   RETURN_RET_IF(ret != CRYPT_SUCCESS, ret);\n+   CRYPT_SHA3_512(digest, seed, MLKEM_SEED_LEN + 1);\n    ...\n}\n...\nstatic int32_t PkeEncrypt(...)\n{\n    ...\n-   GOTO_ERR_IF(PRF(ctx->libCtx, seedE, MLKEM_SEED_LEN + 1, bufEncE, MLKEM_PRF_BLOCKSIZE * ctx->info->eta2), ret);\n+   CRYPT_SHAKE256(bufEncE, MLKEM_PRF_BLOCKSIZE * ctx->info->eta2, r, MLKEM_SEED_LEN + 1);\n    MLKEM_SamplePolyCBD(polyE2, bufEncE, ctx->info->eta2);\n    ...\n}",
+      "fix": "static int32_t PkeKeyGen(CRYPT_ML_KEM_Ctx *ctx, uint8_t *pk, uint8_t *dk, uint8_t *d)\n{\n    ...\n    int32_t ret = HashFuncG(ctx->libCtx, seed, MLKEM_SEED_LEN + 1, digest, CRYPT_SHA3_512_DIGESTSIZE);\n    RETURN_RET_IF(ret != CRYPT_SUCCESS, ret);\n    ...\n}\n...\nstatic int32_t PkeEncrypt(...)\n{\n    ...\n    (void)memcpy_s(seedE, MLKEM_SEED_LEN, r, MLKEM_SEED_LEN);\n    seedE[MLKEM_SEED_LEN] = nonce;\n    uint32_t outLen = MLKEM_PRF_BLOCKSIZE * ctx->info->eta2;\n    GOTO_ERR_IF(EAL_Md(CRYPT_MD_SHAKE256, ctx->libCtx, NULL, seedE, MLKEM_SEED_LEN + 1,\n        bufEncE, &outLen, false, ctx->libCtx != NULL), ret);\n    MLKEM_SamplePolyCBD(polyE2, bufEncE, ctx->info->eta2);\n    ...\n}"
+    },
+    {
+      "file": "crypto/mlkem/src/ml_kem_poly.c",
+      "line": "266-273",
+      "severity": "medium",
+      "title": "SampleEta1/2 use direct SHAKE calls, bypassing provider dispatch",
+      "reviewers": "CODEX",
+      "confidence": "likely",
+      "problem": "`SampleEta1` and `SampleEta2` now use direct `CRYPT_SHAKE256` one-shot calls instead of provider-aware EAL MD calls. This bypasses `ctx->libCtx` provider dispatch, removes error propagation capability, and is inconsistent with the provider-based architecture.",
+      "code": "int32_t SampleEta1(const CRYPT_ML_KEM_Ctx *ctx, uint8_t *seed, int16_t *s[], int16_t *e[])\n{\n    uint8_t q[MLKEM_SEED_LEN + 1] = { 0 };\n    uint8_t prfOut[MLKEM_PRF_BLOCKSIZE * MLKEM_ETA1_MAX] = { 0 };\n    (void)memcpy_s(q, MLKEM_SEED_LEN, seed, MLKEM_SEED_LEN);\n    uint8_t nonce = 0;\n    for (uint8_t i = 0; i < ctx->info->k; i++) {\n        q[MLKEM_SEED_LEN] = nonce++;\n-       int32_t ret = PRF(ctx->libCtx, q, MLKEM_SEED_LEN + 1, prfOut, MLKEM_PRF_BLOCKSIZE * MLKEM_ETA1_MAX);\n-       RETURN_RET_IF(ret != CRYPT_SUCCESS, ret);\n+       CRYPT_SHAKE256(prfOut, MLKEM_PRF_BLOCKSIZE * MLKEM_ETA1_MAX, q, MLKEM_SEED_LEN + 1);\n        MLKEM_SamplePolyCBD(s[i], prfOut, ctx->info->eta1);\n        ...\n    }\n    ...\n}",
+      "fix": "int32_t SampleEta1(const CRYPT_ML_KEM_Ctx *ctx, uint8_t *seed, int16_t *s[], int16_t *e[])\n{\n    uint8_t q[MLKEM_SEED_LEN + 1] = { 0 };\n    uint8_t prfOut[MLKEM_PRF_BLOCKSIZE * MLKEM_ETA1_MAX] = { 0 };\n    (void)memcpy_s(q, MLKEM_SEED_LEN, seed, MLKEM_SEED_LEN);\n    uint8_t nonce = 0;\n    for (uint8_t i = 0; i < ctx->info->k; i++) {\n        q[MLKEM_SEED_LEN] = nonce++;\n        uint32_t outLen = MLKEM_PRF_BLOCKSIZE * MLKEM_ETA1_MAX;\n        int32_t ret = EAL_Md(CRYPT_MD_SHAKE256, ctx->libCtx, NULL, q, MLKEM_SEED_LEN + 1,\n            prfOut, &outLen, false, ctx->libCtx != NULL);\n        RETURN_RET_IF(ret != CRYPT_SUCCESS, ret);\n        MLKEM_SamplePolyCBD(s[i], prfOut, ctx->info->eta1);\n        ...\n    }\n    ...\n}"
+    },
+    {
+      "file": "crypto/mlkem/src/ml_kem_pke.c",
+      "line": "537",
+      "severity": "low",
+      "title": "Buffer cleanse length mismatch for kr buffer",
+      "reviewers": "CODEX",
+      "confidence": "likely",
+      "problem": "The `kr` buffer is declared as `uint8_t kr[CRYPT_SHA3_512_DIGESTSIZE + 1]` (65 bytes) to accommodate the extra nonce byte written by `SampleEta2`. However, `BSL_SAL_CleanseData(kr, CRYPT_SHA3_512_DIGESTSIZE)` only wipes 64 bytes, leaving one byte (the nonce) uncleansed on the stack.",
+      "code": "uint8_t kr[CRYPT_SHA3_512_DIGESTSIZE + 1];    // K and r (+1 for nonce)\n...\nret = HashFuncG(ctx->libCtx, mhek, MLKEM_SEED_LEN + CRYPT_SHA3_256_DIGESTSIZE, kr, CRYPT_SHA3_512_DIGESTSIZE);\n...\nBSL_SAL_CleanseData(kr, CRYPT_SHA3_512_DIGESTSIZE);  // Only wipes 64 bytes",
+      "fix": "uint8_t kr[CRYPT_SHA3_512_DIGESTSIZE + 1];    // K and r (+1 for nonce)\n...\nret = HashFuncG(ctx->libCtx, mhek, MLKEM_SEED_LEN + CRYPT_SHA3_256_DIGESTSIZE, kr, CRYPT_SHA3_512_DIGESTSIZE);\n...\nBSL_SAL_CleanseData(kr, sizeof(kr));  // Wipes all 65 bytes"
+    },
+    {
+      "file": "crypto/mlkem/src/asm_ml_kem_poly.c",
+      "line": "266",
+      "severity": "low",
+      "title": "Variable Length Array may cause stack overflow in deep call stacks",
+      "reviewers": "CLAUDE",
+      "confidence": "likely",
+      "problem": "The `s_asym` variable is declared as a VLA with size `k * (MLKEM_N >> 1)` elements. For k=4, this is 1024 bytes on stack. Combined with `e[MLKEM_K_MAX][MLKEM_N]` (2048 bytes) and other local variables including Keccakx2State, total stack usage could exceed 2KB. This may cause issues in embedded contexts or deep call stacks with limited stack space.",
+      "code": "void MLKEM_PKEGen(uint32_t k, MLKEM_MatrixSt *mat, uint8_t *seed, uint8_t *pk, uint8_t *dk)\n{\n    int16_t s_asym[k][MLKEM_N >> 1];  // VLA: k * 128 * 2 = k * 256 bytes\n    int16_t e[MLKEM_K_MAX][MLKEM_N];  // Fixed: 4 * 256 * 2 = 2048 bytes\n    ...\n}",
+      "fix": "void MLKEM_PKEGen(uint32_t k, MLKEM_MatrixSt *mat, uint8_t *seed, uint8_t *pk, uint8_t *dk)\n{\n    int16_t s_asym[MLKEM_K_MAX][MLKEM_N >> 1];  // Fixed size, no VLA\n    int16_t e[MLKEM_K_MAX][MLKEM_N];\n    ...\n}\n/* Or dynamically allocate:\n    int16_t *s_asym = BSL_SAL_Calloc(k * (MLKEM_N >> 1), sizeof(int16_t));\n    ...\n    BSL_SAL_Free(s_asym);\n*/"
+    },
+    {
+      "file": "crypto/sha3/src/aarch64_sha3.c",
+      "line": "232",
+      "severity": "low",
+      "title": "Potentially unaligned NEON load may impact performance",
+      "reviewers": "CLAUDE",
+      "confidence": "evaluate",
+      "problem": "The `vld1q_u64(tmp0)` loads from a stack-allocated array `tmp0[2]` which may not be 16-byte aligned on all ARMv8 implementations. While ARMv8 supports unaligned loads, they may be slower than aligned loads. This occurs in the hot path of the absorb function and could impact performance.",
+      "code": "for (i = 0; i < inlen; i++) {\n    uint64_t lane0 = ((uint64_t)in0[i]) << (8 * (i % 8));\n    uint64_t lane1 = ((uint64_t)in1[i]) << (8 * (i % 8));\n    tmp0[0] = lane0;\n    tmp0[1] = lane1;\n    state[i / 8] = veorq_u64(state[i / 8], vld1q_u64(tmp0));  // Potentially unaligned\n}",
+      "fix": "for (i = 0; i < inlen; i++) {\n    uint64x1_t v0 = vcreate_u64(((uint64_t)in0[i]) << (8 * (i % 8)));\n    uint64x1_t v1 = vcreate_u64(((uint64_t)in1[i]) << (8 * (i % 8)));\n    state[i / 8] = veorq_u64(state[i / 8], vcombine_u64(v0, v1));\n}"
+    }
+  ]
+}

@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Code Review: openHiTLS/openhitls#1114 - CLAUDE</title>
+    <style>
+        :root { --critical: #dc2626; --high: #ea580c; --medium: #ca8a04; --low: #65a30d; }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: system-ui, sans-serif; background: #f8fafc; color: #1e293b; padding: 2rem; line-height: 1.6; }
+        .container { max-width: 900px; margin: 0 auto; }
+        h1 { font-size: 1.5rem; margin-bottom: 0.5rem; }
+        .subtitle { color: #64748b; margin-bottom: 2rem; }
+        .section { margin-bottom: 2rem; }
+        .section-title { font-size: 1.1rem; font-weight: 600; padding: 0.5rem 1rem; border-radius: 0.5rem 0.5rem 0 0; color: white; }
+        .section-title.critical { background: var(--critical); }
+        .section-title.high { background: var(--high); }
+        .section-title.medium { background: var(--medium); }
+        .section-title.low { background: var(--low); }
+        .issue { background: white; border: 1px solid #e2e8f0; border-top: none; padding: 1rem; }
+        .issue:last-child { border-radius: 0 0 0.5rem 0.5rem; }
+        .issue-title { font-weight: 600; margin-bottom: 0.25rem; }
+        .issue-location { font-family: monospace; font-size: 0.875rem; color: #64748b; margin-bottom: 0.75rem; }
+        .issue-source { font-size: 0.75rem; color: #94a3b8; margin-top: 0.5rem; }
+        pre { background: #1e293b; color: #e2e8f0; padding: 0.75rem; border-radius: 0.375rem; overflow-x: auto; font-size: 0.875rem; margin: 0.5rem 0; }
+        .problem { margin: 0.75rem 0; }
+        .fix-label { font-weight: 600; margin-top: 0.75rem; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Code Review: openHiTLS/openhitls#1114 - CLAUDE</h1>
+        <div class="subtitle"></div>
+<div class="section"><div class="section-title high">High</div>
+<div class="issue">
+                <div class="issue-title">Removal of pointer authentication reduces security hardening</div>
+                <div class="issue-location">config/json/compile.json:61</div>
+                <pre>"CC_DEFINE_FLAGS_REMOVE": [
+                "-DHITLS_AARCH64_PACIASP"
+            ]</pre>
+                <div class="problem"><strong>Issue:</strong> The removal of `-DHITLS_AARCH64_PACIASP` from CC_DEFINE_FLAGS_REMOVE disables pointer authentication for ALL ARMv8 assembly code (AES, SHA, SM2/3/4, ECC, ML-KEM, etc.). This is a security regression as PAC (Pointer Authentication Codes) is a significant hardening feature that helps prevent ROP (Return-Oriented Programming) attacks on ARMv8.3-A+ processors.
+
+The change affects not just the new ML-KEM code but ALL existing ARMv8 assembly implementations.</div>
+                <div class="fix-label">Fix:</div><pre>"CC_DEFINE_FLAGS_REMOVE": [
+            ]</pre>
+                <div class="issue-source">Reviewer: claude</div>
+            </div>
+</div>
+<div class="section"><div class="section-title medium">Medium</div>
+<div class="issue">
+                <div class="issue-title">Potential buffer overflow in GenMatrixSingle</div>
+                <div class="issue-location">crypto/mlkem/src/asm_ml_kem_poly.c:226</div>
+                <pre>KyberShakeAbsorb(&amp;state, seed, x, y);
+    Shake128Squeeze(buf, GEN_MATRIX_NBLOCKS, &amp;state);  // May be unnecessary if MLKEMRejUniform fills all
+    uint32_t buflen = GEN_MATRIX_NBLOCKS * CRYPT_SHAKE128_BLOCKSIZE;
+    uint32_t ctr = MLKEMRejUniform(poly, buf);
+    
+    while (ctr &lt; MLKEM_N) {  // If ctr == MLKEM_N above, this loop is unnecessary</pre>
+                <div class="problem"><strong>Issue:</strong> The `Shake128Squeeze` function is called without verifying the state has been properly initialized. The `buf` array size calculation assumes GEN_MATRIX_NBLOCKS is sufficient, but rejection sampling may require significantly more data. The while loop on line 221 correctly handles the case by calling `Shake128Squeeze` again, but the initial call on line 216 should check if ctr == MLKEM_N before the loop to avoid unnecessary XOF calls.</div>
+                <div class="fix-label">Fix:</div><pre>KyberShakeAbsorb(&amp;state, seed, x, y);
+    uint32_t ctr = 0;
+    uint32_t buflen = 0;
+    uint8_t buf[GEN_MATRIX_NBLOCKS * CRYPT_SHAKE128_BLOCKSIZE + 2];
+    
+    while (ctr &lt; MLKEM_N) {
+        uint32_t off = buflen % 3;
+        for (uint32_t m = 0; m &lt; off; m++) {
+            buf[m] = buf[buflen - off + m];
+        }
+        Shake128Squeeze(buf + off, 1, &amp;state);
+        buflen = off + CRYPT_SHAKE128_BLOCKSIZE;
+        ctr += Parse(poly + ctr, buf, buflen, MLKEM_N - ctr);
+    }</pre>
+                <div class="issue-source">Reviewer: claude</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">VLA array declaration may cause stack overflow for large k</div>
+                <div class="issue-location">crypto/mlkem/src/asm_ml_kem_poly.c:267</div>
+                <pre>void MLKEM_PKEGen(uint32_t k, MLKEM_MatrixSt *mat, uint8_t *seed, uint8_t *pk, uint8_t *dk)
+{
+    int16_t s_asym[k][MLKEM_N &gt;&gt; 1];  // VLA: k * 128 * 2 = k * 256 bytes
+    int16_t e[MLKEM_K_MAX][MLKEM_N];  // 4 * 256 * 2 = 2048 bytes</pre>
+                <div class="problem"><strong>Issue:</strong> The `s_asym` variable is declared as a VLA (Variable Length Array) with size `k * (MLKEM_N >> 1)` elements (k * 128 * sizeof(int16_t) = k * 256 bytes). For k=4, this is 1024 bytes on stack. Combined with other local variables and the Keccakx2State (400 bytes), the stack usage per function call could exceed 2KB. While MLKEM_K_MAX is 4, defensive coding should ensure this doesn't cause issues in deep call stacks or with threads with small stacks.</div>
+                <div class="fix-label">Fix:</div><pre>int16_t s_asym[MLKEM_K_MAX][MLKEM_N &gt;&gt; 1];  // Fixed size, no VLA
+    // or use BSL_SAL_Calloc/BSL_SAL_Free for dynamic allocation</pre>
+                <div class="issue-source">Reviewer: claude</div>
+            </div>
+</div>
+<div class="section"><div class="section-title low">Low</div>
+<div class="issue">
+                <div class="issue-title">Unaligned NEON load may have performance impact</div>
+                <div class="issue-location">crypto/sha3/src/aarch64_sha3.c:232</div>
+                <pre>uint64_t lane0 = ((uint64_t)in0[i]) &lt;&lt; (8 * (i % 8));
+        uint64_t lane1 = ((uint64_t)in1[i]) &lt;&lt; (8 * (i % 8));
+        tmp0[0] = lane0;
+        tmp0[1] = lane1;
+        state[i / 8] = veorq_u64(state[i / 8], vld1q_u64(tmp0));  // Potentially unaligned load</pre>
+                <div class="problem"><strong>Issue:</strong> The `vld1q_u64(tmp0)` loads from a stack-allocated array `tmp0[2]` which may not be 16-byte aligned on all ARMv8 implementations. While ARMv8 supports unaligned loads, they may be slower than aligned loads. This occurs in the hot path of the absorb function.</div>
+                <div class="fix-label">Fix:</div><pre>uint64x1_t v0 = vcreate_u64(((uint64_t)in0[i]) &lt;&lt; (8 * (i % 8)));
+        uint64x1_t v1 = vcreate_u64(((uint64_t)in1[i]) &lt;&lt; (8 * (i % 8)));
+        state[i / 8] = veorq_u64(state[i / 8], vcombine_u64(v0, v1));</pre>
+                <div class="issue-source">Reviewer: claude</div>
+            </div>
+</div>
+</div></body></html>
