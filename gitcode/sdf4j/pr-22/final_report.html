@@ -1,0 +1,533 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Final Report: openHiTLS/sdf4j#22</title>
+    <style>
+        :root { --critical: #dc2626; --high: #ea580c; --medium: #ca8a04; --low: #65a30d;
+                 --trusted: #059669; --likely: #0284c7; --evaluate: #7c3aed; }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: system-ui, sans-serif; background: #f8fafc; color: #1e293b; padding: 2rem; line-height: 1.6; }
+        .container { max-width: 900px; margin: 0 auto; }
+        h1 { font-size: 1.75rem; margin-bottom: 0.5rem; }
+        .subtitle { color: #64748b; margin-bottom: 1rem; }
+        .stats { display: flex; gap: 1rem; margin-bottom: 2rem; flex-wrap: wrap; }
+        .stat { background: white; border: 1px solid #e2e8f0; border-radius: 0.5rem; padding: 1rem; min-width: 100px; text-align: center; }
+        .stat-value { font-size: 1.5rem; font-weight: 700; }
+        .stat-label { font-size: 0.875rem; color: #64748b; }
+        .stat.critical .stat-value { color: var(--critical); }
+        .stat.high .stat-value { color: var(--high); }
+        .stat.medium .stat-value { color: var(--medium); }
+        .stat.low .stat-value { color: var(--low); }
+        .reviewers { background: #e0e7ff; color: #3730a3; padding: 0.5rem 1rem; border-radius: 0.5rem; margin-bottom: 2rem; }
+        .section { margin-bottom: 2rem; }
+        .section-title { font-size: 1.1rem; font-weight: 600; padding: 0.5rem 1rem; border-radius: 0.5rem 0.5rem 0 0; color: white; }
+        .section-title.critical { background: var(--critical); }
+        .section-title.high { background: var(--high); }
+        .section-title.medium { background: var(--medium); }
+        .section-title.low { background: var(--low); }
+        .issue { background: white; border: 1px solid #e2e8f0; border-top: none; padding: 1rem; }
+        .issue:last-child { border-radius: 0 0 0.5rem 0.5rem; }
+        .issue-title { font-weight: 600; margin-bottom: 0.25rem; }
+        .issue-location { font-family: monospace; font-size: 0.875rem; color: #64748b; margin-bottom: 0.5rem; }
+        .issue-meta { font-size: 0.75rem; margin-bottom: 0.75rem; display: flex; gap: 0.75rem; align-items: center; }
+        .issue-meta .reviewers { background: #f1f5f9; color: #475569; padding: 0.25rem 0.5rem; border-radius: 0.25rem; margin: 0; }
+        .confidence-badge { padding: 0.25rem 0.5rem; border-radius: 0.25rem; font-weight: 500; }
+        .confidence-badge.trusted { background: #d1fae5; color: #065f46; }
+        .confidence-badge.likely { background: #dbeafe; color: #1e40af; }
+        .confidence-badge.evaluate { background: #ede9fe; color: #5b21b6; }
+        pre { background: #1e293b; color: #e2e8f0; padding: 0.75rem; border-radius: 0.375rem; overflow-x: auto; font-size: 0.875rem; margin: 0.5rem 0; }
+        .problem { margin: 0.75rem 0; }
+        .fix-label { font-weight: 600; margin-top: 0.75rem; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Final Code Review Report</h1>
+        <div class="subtitle">openHiTLS/sdf4j - PR #22</div>
+        <p style="margin-bottom: 1rem;"></p>
+
+        <div class="stats">
+            <div class="stat"><div class="stat-value">15</div><div class="stat-label">Total</div></div>
+            <div class="stat critical"><div class="stat-value">2</div><div class="stat-label">Critical</div></div>
+            <div class="stat high"><div class="stat-value">4</div><div class="stat-label">High</div></div>
+            <div class="stat medium"><div class="stat-value">6</div><div class="stat-label">Medium</div></div>
+            <div class="stat low"><div class="stat-value">3</div><div class="stat-label">Low</div></div>
+        </div>
+
+        <div class="reviewers">Reviewers: claude, gemini, codex</div>
+<div class="section"><div class="section-title critical">Critical</div>
+<div class="issue">
+                <div class="issue-title">SM2 JNI functions copy fixed-size buffers without validating Java array lengths</div>
+                <div class="issue-location">sdf4j-jce/src/main/native/src/sdf_jce_sm2.c:198-240</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CODEX</span>
+                    <span class="confidence-badge trusted">置信度: 可信</span>
+                </div>
+                <pre>jbyte *xBytes = (*env)-&gt;GetByteArrayElements(env, publicKeyX, NULL);
+jbyte *yBytes = (*env)-&gt;GetByteArrayElements(env, publicKeyY, NULL);
+...
+ECCrefPublicKey eccPubKey;
+memset(&amp;eccPubKey, 0, sizeof(eccPubKey));
+eccPubKey.bits = SM2_KEY_BITS;
+memcpy(eccPubKey.x + ECCref_MAX_LEN - SM2_KEY_BYTES, xBytes, SM2_KEY_BYTES);
+memcpy(eccPubKey.y + ECCref_MAX_LEN - SM2_KEY_BYTES, yBytes, SM2_KEY_BYTES);</pre>
+                <div class="problem"><strong>Issue:</strong> The sm2Verify function (and other SM2 JNI functions) performs memcpy operations on Java byte arrays before checking their actual lengths. If a malicious or buggy caller provides short arrays (publicKeyX, publicKeyY, signature), the code will read past the array boundary, causing memory corruption or crash.</div>
+                <div class="fix-label">Fix:</div><pre>jsize xLen = (*env)-&gt;GetArrayLength(env, publicKeyX);
+jsize yLen = (*env)-&gt;GetArrayLength(env, publicKeyY);
+jsize sigLen = (*env)-&gt;GetArrayLength(env, signature);
+if (xLen != SM2_KEY_BYTES || yLen != SM2_KEY_BYTES || sigLen != SM2_SIGNATURE_BYTES) {
+    throw_exception(env, "java/lang/IllegalArgumentException",
+                    "SM2 public key/signature length is invalid");
+    return JNI_FALSE;
+}
+
+jbyte *xBytes = (*env)-&gt;GetByteArrayElements(env, publicKeyX, NULL);
+jbyte *yBytes = (*env)-&gt;GetByteArrayElements(env, publicKeyY, NULL);
+...
+ECCrefPublicKey eccPubKey;
+memset(&amp;eccPubKey, 0, sizeof(eccPubKey));
+eccPubKey.bits = SM2_KEY_BITS;
+memcpy(eccPubKey.x + ECCref_MAX_LEN - SM2_KEY_BYTES, xBytes, SM2_KEY_BYTES);
+memcpy(eccPubKey.y + ECCref_MAX_LEN - SM2_KEY_BYTES, yBytes, SM2_KEY_BYTES);</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">SM4 JNI functions copy IV without validating length</div>
+                <div class="issue-location">sdf4j-jce/src/main/native/src/sdf_jce_sm4.c:98-100</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CODEX</span>
+                    <span class="confidence-badge trusted">置信度: 可信</span>
+                </div>
+                <pre>if (ivBytes &amp;&amp; mode != SM4_MODE_ECB) {
+    memcpy(ivCopy, ivBytes, SM4_IV_LENGTH);
+}</pre>
+                <div class="problem"><strong>Issue:</strong> The sm4Encrypt and sm4Decrypt functions copy 16 bytes from the IV array using memcpy without first verifying the Java array is actually 16 bytes long. Passing a short IV causes out-of-bounds memory read.</div>
+                <div class="fix-label">Fix:</div><pre>if (iv != NULL) {
+    jsize ivLen = (*env)-&gt;GetArrayLength(env, iv);
+    if (ivLen != SM4_IV_LENGTH) {
+        throw_exception(env, "java/lang/IllegalArgumentException",
+                        "IV must be 16 bytes");
+        goto ERR;
+    }
+}
+
+if (ivBytes &amp;&amp; mode != SM4_MODE_ECB) {
+    memcpy(ivCopy, ivBytes, SM4_IV_LENGTH);
+}</pre>
+            </div>
+</div>
+<div class="section"><div class="section-title high">High</div>
+<div class="issue">
+                <div class="issue-title">SM2PublicKey.getX() and getY() return internal arrays directly</div>
+                <div class="issue-location">sdf4j-jce/src/main/java/org/openhitls/sdf4j/jce/key/SM2PublicKey.java:68-74</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CLAUDE, CODEX</span>
+                    <span class="confidence-badge trusted">置信度: 可信</span>
+                </div>
+                <pre>public byte[] getX() {
+    return x;
+}
+
+public byte[] getY() {
+    return y;
+}</pre>
+                <div class="problem"><strong>Issue:</strong> The getX() and getY() methods return the internal x and y arrays directly instead of defensive copies. This allows callers to modify the public key coordinates externally, which is a security vulnerability.</div>
+                <div class="fix-label">Fix:</div><pre>public byte[] getX() {
+    return x.clone();
+}
+
+public byte[] getY() {
+    return y.clone();
+}</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">SM2PrivateKey constructor stores reference and getEncoded() returns internal array</div>
+                <div class="issue-location">sdf4j-jce/src/main/java/org/openhitls/sdf4j/jce/key/SM2PrivateKey.java:29-34</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CLAUDE, CODEX</span>
+                    <span class="confidence-badge trusted">置信度: 可信</span>
+                </div>
+                <pre>public SM2PrivateKey(byte[] keyBytes) {
+    if (keyBytes == null || keyBytes.length != 32) {
+        throw new IllegalArgumentException("Key must be 32 bytes");
+    }
+    this.keyBytes = keyBytes;
+}
+
+@Override
+public byte[] getEncoded() {
+    return keyBytes;
+}</pre>
+                <div class="problem"><strong>Issue:</strong> The constructor stores the caller's array reference directly (not a copy), and getEncoded() returns the internal array. Callers can modify the private key material, and destroy() will zero the original caller's array unexpectedly.</div>
+                <div class="fix-label">Fix:</div><pre>public SM2PrivateKey(byte[] keyBytes) {
+    if (keyBytes == null || keyBytes.length != 32) {
+        throw new IllegalArgumentException("Key must be 32 bytes");
+    }
+    this.keyBytes = keyBytes.clone();
+}
+
+@Override
+public byte[] getEncoded() {
+    return keyBytes.clone();
+}</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">SM4-MAC uses HMAC API instead of SDF MAC API and ignores IV</div>
+                <div class="issue-location">sdf4j-jce/src/main/native/src/sdf_jce_mac.c:25-88</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CODEX</span>
+                    <span class="confidence-badge trusted">置信度: 可信</span>
+                </div>
+                <pre>CHECK_FUNCTION_RET(SDF_ExternalKeyHMACInit, env, "SDF_ExternalKeyHMACInit", NULL);
+CHECK_FUNCTION_RET(SDF_HMACUpdate, env, "SDF_HMACUpdate", NULL);
+CHECK_FUNCTION_RET(SDF_HMACFinal, env, "SDF_HMACFinal", NULL);
+...
+BYTE ivCopy[SM4_IV_LENGTH] = {0};
+if (ivBytes) {
+    memcpy(ivCopy, ivBytes, SM4_IV_LENGTH);
+}
+LONG ret = g_sdf_functions.SDF_ExternalKeyHMACInit(
+    g_session_handle, SGD_SM4_MAC, (BYTE *)keyBytes, SM4_KEY_LENGTH);</pre>
+                <div class="problem"><strong>Issue:</strong> The sm4Mac function uses SDF_ExternalKeyHMACInit/SDF_HMACUpdate/SDF_HMACFinal instead of the proper SDF MAC APIs (SDF_ImportKey/SDF_CalculateMAC). The IV parameter is copied but never used, meaning SM4-MAC does not perform the advertised SM4 CBC-MAC operation.</div>
+                <div class="fix-label">Fix:</div><pre>CHECK_FUNCTION_RET(SDF_ImportKey, env, "SDF_ImportKey", NULL);
+CHECK_FUNCTION_RET(SDF_CalculateMAC, env, "SDF_CalculateMAC", NULL);
+CHECK_FUNCTION_RET(SDF_DestroyKey, env, "SDF_DestroyKey", NULL);
+...
+HANDLE keyHandle = 0;
+LONG ret = g_sdf_functions.SDF_ImportKey(
+    g_session_handle, (BYTE *)keyBytes, SM4_KEY_LENGTH, &amp;keyHandle);
+if (ret != SDR_OK) {
+    throw_jce_exception(env, (int)ret, "SM4 MAC import key failed");
+    goto ERR;
+}
+
+ret = g_sdf_functions.SDF_CalculateMAC(
+    g_session_handle, keyHandle, SGD_SM4_MAC, ivCopy,
+    (BYTE *)dataBytes, (ULONG)dataLen, mac, &amp;macLen);
+
+g_sdf_functions.SDF_DestroyKey(g_session_handle, keyHandle);</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">Provider uses single global SDF session for all operations</div>
+                <div class="issue-location">sdf4j-jce/src/main/native/src/sdf_jce_init.c:18-21</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CLAUDE, CODEX</span>
+                    <span class="confidence-badge trusted">置信度: 可信</span>
+                </div>
+                <pre>HANDLE g_device_handle = NULL;
+HANDLE g_session_handle = NULL;
+int g_sdf_initialized = 0;
+...
+ret = g_sdf_functions.SDF_OpenSession(g_device_handle, &amp;g_session_handle);</pre>
+                <div class="problem"><strong>Issue:</strong> The JCE provider opens one session (g_session_handle) once and stores it globally for the JVM lifetime. Since SDF hash/MAC/encrypt-init state is session-scoped, concurrent operations will interfere with each other, and stateful operations race on the same hardware session.</div>
+                <div class="fix-label">Fix:</div><pre>HANDLE g_device_handle = NULL;
+int g_sdf_initialized = 0;
+
+int sdf_jce_open_session(HANDLE *session) {
+    return g_sdf_functions.SDF_OpenSession(g_device_handle, session);
+}
+
+void sdf_jce_close_session(HANDLE session) {
+    if (session != NULL &amp;&amp; g_sdf_functions.SDF_CloseSession != NULL) {
+        g_sdf_functions.SDF_CloseSession(session);
+    }
+}
+
+/* Stateful operations (SM3, streaming SM4, MAC) should open their own session
+ * in init and close it in final/free instead of reusing a global session. */</pre>
+            </div>
+</div>
+<div class="section"><div class="section-title medium">Medium</div>
+<div class="issue">
+                <div class="issue-title">sm2SignWithIndex accepts PIN parameter but never uses it</div>
+                <div class="issue-location">sdf4j-jce/src/main/native/src/sdf_jce_sm2.c:151-170</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CLAUDE, CODEX</span>
+                    <span class="confidence-badge trusted">置信度: 可信</span>
+                </div>
+                <pre>if (pin != NULL) {
+    pinLen = (*env)-&gt;GetArrayLength(env, pin);
+    pinStr = (char *)malloc((size_t)(pinLen + 1));
+    ...
+    (*env)-&gt;GetByteArrayRegion(env, pin, 0, pinLen, (jbyte *)pinStr);
+    pinStr[pinLen] = '\0';
+}
+
+ECCSignature signature = {0};
+...
+LONG ret = g_sdf_functions.SDF_InternalSign_ECC(g_session_handle, (ULONG)keyIndex, (BYTE *)dataBytes,
+    (ULONG)dataLen, &amp;signature);</pre>
+                <div class="problem"><strong>Issue:</strong> The sm2SignWithIndex function allocates and copies the PIN parameter, but never uses it for authorization. On devices requiring SDF_GetPrivateKeyAccessRight, this API will fail with access-denied errors while misleading callers into thinking the PIN was honored.</div>
+                <div class="fix-label">Fix:</div><pre>CHECK_FUNCTION_RET(SDF_GetPrivateKeyAccessRight, env,
+                   "SDF_GetPrivateKeyAccessRight", NULL);
+CHECK_FUNCTION_RET(SDF_ReleasePrivateKeyAccessRight, env,
+                   "SDF_ReleasePrivateKeyAccessRight", NULL);
+
+int accessGranted = 0;
+if (pinStr != NULL) {
+    ret = g_sdf_functions.SDF_GetPrivateKeyAccessRight(
+        g_session_handle, (ULONG)keyIndex, pinStr, (ULONG)strlen(pinStr));
+    if (ret != SDR_OK) {
+        throw_jce_exception(env, (int)ret, "Get private key access right failed");
+        goto ERR;
+    }
+    accessGranted = 1;
+}
+
+ret = g_sdf_functions.SDF_InternalSign_ECC(
+    g_session_handle, (ULONG)keyIndex, (BYTE *)dataBytes, (ULONG)dataLen, &amp;signature);
+
+ERR:
+if (accessGranted) {
+    g_sdf_functions.SDF_ReleasePrivateKeyAccessRight(g_session_handle, (ULONG)keyIndex);
+}</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">Streaming SM4 contexts leak imported key handles</div>
+                <div class="issue-location">sdf4j-jce/src/main/native/src/sdf_jce_sm4.c:20-25</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CODEX</span>
+                    <span class="confidence-badge trusted">置信度: 可信</span>
+                </div>
+                <pre>typedef struct {
+    int mode;
+    int encrypt;
+    BYTE iv[SM4_IV_LENGTH];
+    int initialized;
+} SM4Context;
+...
+HANDLE keyHandle = 0;
+LONG ret = g_sdf_functions.SDF_ImportKey(
+    g_session_handle, (BYTE *)keyBytes, SM4_KEY_LENGTH, &amp;keyHandle);
+...
+ctx-&gt;initialized = 1;
+return (jlong)(uintptr_t)ctx;</pre>
+                <div class="problem"><strong>Issue:</strong> sm4EncryptInit and sm4DecryptInit import a device key handle, but the handle is neither stored in SM4Context nor destroyed on success. Every streaming init leaks a device key handle until the session is torn down.</div>
+                <div class="fix-label">Fix:</div><pre>typedef struct {
+    int mode;
+    int encrypt;
+    BYTE iv[SM4_IV_LENGTH];
+    HANDLE keyHandle;
+    int initialized;
+} SM4Context;
+
+ctx-&gt;keyHandle = 0;
+ret = g_sdf_functions.SDF_ImportKey(
+    g_session_handle, (BYTE *)keyBytes, SM4_KEY_LENGTH, &amp;ctx-&gt;keyHandle);
+...
+ret = g_sdf_functions.SDF_EncryptInit(
+    g_session_handle, ctx-&gt;keyHandle, algId, ctx-&gt;iv, SM4_IV_LENGTH);
+
+...
+
+if (ctx-&gt;keyHandle != 0) {
+    g_sdf_functions.SDF_DestroyKey(g_session_handle, ctx-&gt;keyHandle);
+    ctx-&gt;keyHandle = 0;
+}
+free(ctx);</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">Provider shutdown() is no-op and never releases native device/session</div>
+                <div class="issue-location">sdf4j-jce/src/main/java/org/openhitls/sdf4j/jce/SDFProvider.java:84-86</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CODEX</span>
+                    <span class="confidence-badge trusted">置信度: 可信</span>
+                </div>
+                <pre>/**
+ * Shutdown the provider and release resources.
+ * Resources are automatically released when JVM unloads the native library.
+ */
+public void shutdown() {
+    // No-op - resources are cleaned up in JNI_OnUnload
+}</pre>
+                <div class="problem"><strong>Issue:</strong> The shutdown() method is documented as a resource-release hook but is a no-op. The native device and session stay open until the JNI library is unloaded at JVM shutdown, leaking scarce hardware resources in long-running processes.</div>
+                <div class="fix-label">Fix:</div><pre>/**
+ * Shutdown the provider and release resources.
+ */
+public void shutdown() {
+    NativeLoader.shutdown();
+}
+
+final class NativeLoader {
+    private static native void shutdown();
+}</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">CBC/CTR decryption generates random IV when none supplied</div>
+                <div class="issue-location">sdf4j-jce/src/main/java/org/openhitls/sdf4j/jce/cipher/SM4Cipher.java:131-142</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CODEX</span>
+                    <span class="confidence-badge trusted">置信度: 可信</span>
+                </div>
+                <pre>if (params != null) {
+    if (params instanceof IvParameterSpec) {
+        this.iv = ((IvParameterSpec) params).getIV();
+    } else {
+        throw new InvalidAlgorithmParameterException("Unsupported parameter type");
+    }
+} else if (cipherMode != MODE_ECB) {
+    // Generate random IV for non-ECB modes
+    this.iv = new byte[BLOCK_SIZE];
+    SecureRandom rng = (random != null) ? random : new SecureRandom();
+    rng.nextBytes(this.iv);
+}</pre>
+                <div class="problem"><strong>Issue:</strong> For every non-ECB mode, engineInit generates a random IV when params==null, regardless of encryption or decryption mode. A caller who forgets to supply the IV for decryption gets garbage plaintext instead of an immediate error.</div>
+                <div class="fix-label">Fix:</div><pre>if (params != null) {
+    if (!(params instanceof IvParameterSpec)) {
+        throw new InvalidAlgorithmParameterException("Unsupported parameter type");
+    }
+    this.iv = ((IvParameterSpec) params).getIV();
+    if (this.iv == null || this.iv.length != BLOCK_SIZE) {
+        throw new InvalidAlgorithmParameterException("IV must be 16 bytes");
+    }
+} else if (cipherMode != MODE_ECB) {
+    if (opmode == Cipher.DECRYPT_MODE || opmode == Cipher.UNWRAP_MODE) {
+        throw new InvalidAlgorithmParameterException("IV required for decryption");
+    }
+    this.iv = new byte[BLOCK_SIZE];
+    SecureRandom rng = (random != null) ? random : new SecureRandom();
+    rng.nextBytes(this.iv);
+}</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">Integration test helper swallows non-SDF exceptions</div>
+                <div class="issue-location">sdf4j-jce/src/test/java/org/openhitls/sdf4j/jce/SDFJceIntegrationTest.java:75-86</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CODEX</span>
+                    <span class="confidence-badge trusted">置信度: 可信</span>
+                </div>
+                <pre>private void handleSdfException(Exception e, String testName) throws Exception {
+    if (e instanceof SDFJceException) {
+        SDFJceException sdfEx = (SDFJceException) e;
+        if (sdfEx.getErrorCode() == SDFJceErrorCode.SDR_NOTSUPPORT) {
+            System.out.println("[跳过] " + testName + ": 操作不支持");
+            Assume.assumeTrue(testName + " not supported", false);
+            return;
+        }
+        System.err.println("[错误] " + testName + ": " + e.getMessage());
+        throw e;
+    }
+}</pre>
+                <div class="problem"><strong>Issue:</strong> The handleSdfException helper catches Exception but only rethrows SDFJceException. Any AssertionError, SignatureException, ProviderException, or plain RuntimeException is silently ignored, so tests return green even when they actually fail.</div>
+                <div class="fix-label">Fix:</div><pre>private void handleSdfException(Exception e, String testName) throws Exception {
+    if (e instanceof SDFJceException) {
+        SDFJceException sdfEx = (SDFJceException) e;
+        if (sdfEx.getErrorCode() == SDFJceErrorCode.SDR_NOTSUPPORT) {
+            System.out.println("[跳过] " + testName + ": 操作不支持");
+            Assume.assumeTrue(testName + " not supported", false);
+            return;
+        }
+        System.err.println("[错误] " + testName + ": " + e.getMessage());
+    }
+    throw e;
+}</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">Example test helper swallows non-SDF exceptions</div>
+                <div class="issue-location">sdf4j-jce/src/test/java/org/openhitls/sdf4j/jce/SDFJceExamples.java:45-56</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CODEX</span>
+                    <span class="confidence-badge trusted">置信度: 可信</span>
+                </div>
+                <pre>private void handleSdfException(Exception e, String testName) throws Exception {
+    if (e instanceof SDFJceException) {
+        SDFJceException sdfEx = (SDFJceException) e;
+        if (sdfEx.getErrorCode() == SDFJceErrorCode.SDR_NOTSUPPORT) {
+            System.out.println("[跳过] " + testName + ": 操作不支持");
+            Assume.assumeTrue(testName + " not supported", false);
+            return;
+        }
+        System.err.println("[错误] " + testName + ": " + e.getMessage());
+        throw e;
+    }
+}</pre>
+                <div class="problem"><strong>Issue:</strong> The example suite has the same bug as the integration suite: handleSdfException catches Exception but only rethrows SDFJceException. Example regressions can fail internally and still report success.</div>
+                <div class="fix-label">Fix:</div><pre>private void handleSdfException(Exception e, String testName) throws Exception {
+    if (e instanceof SDFJceException) {
+        SDFJceException sdfEx = (SDFJceException) e;
+        if (sdfEx.getErrorCode() == SDFJceErrorCode.SDR_NOTSUPPORT) {
+            System.out.println("[跳过] " + testName + ": 操作不支持");
+            Assume.assumeTrue(testName + " not supported", false);
+            return;
+        }
+        System.err.println("[错误] " + testName + ": " + e.getMessage());
+    }
+    throw e;
+}</pre>
+            </div>
+</div>
+<div class="section"><div class="section-title low">Low</div>
+<div class="issue">
+                <div class="issue-title">Documentation omits required SM2ParameterSpec for signing</div>
+                <div class="issue-location">sdf4j-jce/README.md:61-67</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CODEX</span>
+                    <span class="confidence-badge trusted">置信度: 可信</span>
+                </div>
+                <pre>// SM2 签名（遵循 GM/T 0009-2012 标准）
+KeyPairGenerator kpg = KeyPairGenerator.getInstance("SM2", "SDF");
+KeyPair keyPair = kpg.generateKeyPair();
+Signature signer = Signature.getInstance("SM3withSM2", "SDF");
+signer.initSign(keyPair.getPrivate());
+signer.update("Hello".getBytes());
+byte[] signature = signer.sign();</pre>
+                <div class="problem"><strong>Issue:</strong> The README shows SM3withSM2 signing without setting SM2ParameterSpec. The implementation explicitly requires the public key to compute Z value, so following the documented snippet throws SignatureException at runtime.</div>
+                <div class="fix-label">Fix:</div><pre>// SM2 签名（遵循 GM/T 0009-2012 标准）
+KeyPairGenerator kpg = KeyPairGenerator.getInstance("SM2", "SDF");
+KeyPair keyPair = kpg.generateKeyPair();
+Signature signer = Signature.getInstance("SM3withSM2", "SDF");
+signer.initSign(keyPair.getPrivate());
+signer.setParameter(new SM2ParameterSpec((SM2PublicKey) keyPair.getPublic()));
+signer.update("Hello".getBytes());
+byte[] signature = signer.sign();</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">SM3MessageDigest.engineReset() may free already-freed context</div>
+                <div class="issue-location">sdf4j-jce/src/main/java/org/openhitls/sdf4j/jce/digest/SM3MessageDigest.java:38-44</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CLAUDE</span>
+                    <span class="confidence-badge evaluate">置信度: 需评估</span>
+                </div>
+                <pre>@Override
+protected void engineReset() {
+    if (ctx != 0) {
+        SDFJceNative.sm3Free(ctx);
+        ctx = 0;
+    }
+    initialized = false;
+}</pre>
+                <div class="problem"><strong>Issue:</strong> The engineReset() method calls sm3Free(ctx) and sets ctx=0. While engineDigest() also frees the context and sets ctx=0, if there were an exception path that didn't set ctx=0, double-free could occur. However, the JNI layer should handle this safely.</div>
+                <div class="fix-label">Fix:</div><pre>@Override
+protected void engineReset() {
+    if (ctx != 0) {
+        SDFJceNative.sm3Free(ctx);
+        ctx = 0;
+    }
+    initialized = false;
+}</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">loadLibraryFromResources() always re-extracts and doesn't clean up old temp files</div>
+                <div class="issue-location">sdf4j-jce/src/main/java/org/openhitls/sdf4j/jce/NativeLoader.java:98-102</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CLAUDE</span>
+                    <span class="confidence-badge likely">置信度: 较可信</span>
+                </div>
+                <pre>// Extract the library (always re-extract to ensure using latest version)
+Files.copy(is, tempLib, StandardCopyOption.REPLACE_EXISTING);
+
+// Load the extracted library
+System.load(tempLib.toAbsolutePath().toString());</pre>
+                <div class="problem"><strong>Issue:</strong> The method always re-extracts the library to temp directory. Old temp files remain and could accumulate. Multiple JVMs using this simultaneously could race on the temp file.</div>
+                <div class="fix-label">Fix:</div><pre>// Extract the library (always re-extract to ensure using latest version)
+Files.copy(is, tempLib, StandardCopyOption.REPLACE_EXISTING);
+
+// Load the extracted library
+System.load(tempLib.toAbsolutePath().toString());
+
+// Clean up on JVM exit
+tempLib.toFile().deleteOnExit();</pre>
+            </div>
+</div>
+</div></body></html>
