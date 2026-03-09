@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Code Review: openHiTLS/sdf4j#21 - CODEX</title>
+    <style>
+        :root { --critical: #dc2626; --high: #ea580c; --medium: #ca8a04; --low: #65a30d; }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: system-ui, sans-serif; background: #f8fafc; color: #1e293b; padding: 2rem; line-height: 1.6; }
+        .container { max-width: 900px; margin: 0 auto; }
+        h1 { font-size: 1.5rem; margin-bottom: 0.5rem; }
+        .subtitle { color: #64748b; margin-bottom: 2rem; }
+        .section { margin-bottom: 2rem; }
+        .section-title { font-size: 1.1rem; font-weight: 600; padding: 0.5rem 1rem; border-radius: 0.5rem 0.5rem 0 0; color: white; }
+        .section-title.critical { background: var(--critical); }
+        .section-title.high { background: var(--high); }
+        .section-title.medium { background: var(--medium); }
+        .section-title.low { background: var(--low); }
+        .issue { background: white; border: 1px solid #e2e8f0; border-top: none; padding: 1rem; }
+        .issue:last-child { border-radius: 0 0 0.5rem 0.5rem; }
+        .issue-title { font-weight: 600; margin-bottom: 0.25rem; }
+        .issue-location { font-family: monospace; font-size: 0.875rem; color: #64748b; margin-bottom: 0.75rem; }
+        .issue-source { font-size: 0.75rem; color: #94a3b8; margin-top: 0.5rem; }
+        pre { background: #1e293b; color: #e2e8f0; padding: 0.75rem; border-radius: 0.375rem; overflow-x: auto; font-size: 0.875rem; margin: 0.5rem 0; }
+        .problem { margin: 0.75rem 0; }
+        .fix-label { font-weight: 600; margin-top: 0.75rem; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Code Review: openHiTLS/sdf4j#21 - CODEX</h1>
+        <div class="subtitle"></div>
+<div class="section"><div class="section-title critical">Critical</div>
+<div class="issue">
+                <div class="issue-title">HybridCipher conversion can read past fixed `ct_m` buffer</div>
+                <div class="issue-location">sdf4j/src/main/native/src/type_conversion.c:754-760</div>
+                <pre>jsize ctm_len = (jsize)native_cipher-&gt;L1;
+jbyteArray ctm_array = (*env)-&gt;NewByteArray(env, ctm_len);
+if (ctm_array == NULL) {
+    THROW_SDF_EXCEPTION(env, SDR_INARGERR, "Failed to create ctM array");
+    return NULL;
+}
+(*env)-&gt;SetByteArrayRegion(env, ctm_array, 0, ctm_len, (jbyte*)native_cipher-&gt;ct_m);</pre>
+                <div class="problem"><strong>Issue:</strong> `native_cipher->L1` is used directly as copy length, but `HybridCipher.ct_m` is fixed-size (`HYBRIDENCref_MAX_LEN` = 1576). If a device/library returns `L1 > 1576`, `SetByteArrayRegion` reads out of bounds.</div>
+                <div class="fix-label">Fix:</div><pre>if (native_cipher-&gt;L1 &gt; HYBRIDENCref_MAX_LEN) {
+    THROW_SDF_EXCEPTION(env, SDR_INARGERR, "HybridCipher L1 exceeds buffer");
+    return NULL;
+}
+jsize ctm_len = (jsize)native_cipher-&gt;L1;
+jbyteArray ctm_array = (*env)-&gt;NewByteArray(env, ctm_len);
+if (ctm_array == NULL) {
+    THROW_SDF_EXCEPTION(env, SDR_INARGERR, "Failed to create ctM array");
+    return NULL;
+}
+if (ctm_len &gt; 0) {
+    (*env)-&gt;SetByteArrayRegion(env, ctm_array, 0, ctm_len, (jbyte*)native_cipher-&gt;ct_m);
+}</pre>
+                <div class="issue-source">Reviewer: codex</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">HybridSignature conversion uses unchecked length for fixed `sig_m` buffer</div>
+                <div class="issue-location">sdf4j/src/main/native/src/type_conversion.c:840-848</div>
+                <pre>jbyteArray sig_m_array = NULL;
+if (sig_m_len &gt; 0) {
+    sig_m_array = (*env)-&gt;NewByteArray(env, sig_m_len);
+    if (sig_m_array == NULL) {
+        THROW_SDF_EXCEPTION(env, SDR_INARGERR, "Failed to new byte array");
+        return NULL;
+    }
+    (*env)-&gt;SetByteArrayRegion(env, sig_m_array, 0, sig_m_len, (jbyte*)native_sig-&gt;sig_m);
+}</pre>
+                <div class="problem"><strong>Issue:</strong> `sig_m_len` is copied directly from `native_sig->sig_m` without validating against `HYBRIDSIGref_MAX_LEN` (4636). A malformed `L` can trigger out-of-bounds reads.</div>
+                <div class="fix-label">Fix:</div><pre>if (sig_m_len &gt; HYBRIDSIGref_MAX_LEN) {
+    THROW_SDF_EXCEPTION(env, SDR_INARGERR, "HybridSignature L exceeds buffer");
+    return NULL;
+}
+
+jbyteArray sig_m_array = (*env)-&gt;NewByteArray(env, (jsize)sig_m_len);
+if (sig_m_array == NULL) {
+    THROW_SDF_EXCEPTION(env, SDR_INARGERR, "Failed to create sigM array");
+    return NULL;
+}
+if (sig_m_len &gt; 0) {
+    (*env)-&gt;SetByteArrayRegion(env, sig_m_array, 0, (jsize)sig_m_len, (jbyte*)native_sig-&gt;sig_m);
+}</pre>
+                <div class="issue-source">Reviewer: codex</div>
+            </div>
+</div>
+<div class="section"><div class="section-title high">High</div>
+<div class="issue">
+                <div class="issue-title">RSAPrivateKey constructor now accepts null key components</div>
+                <div class="issue-location">sdf4j/src/main/java/org/openhitls/sdf4j/types/RSAPrivateKey.java:101-113</div>
+                <pre>public RSAPrivateKey(int bits, byte[] m, byte[] e, byte[] d,
+                     byte[][] prime, byte[][] pexp, byte[] coef) {
+    if (bits &lt;= 0 || bits &gt; RSA_MAX_BITS) {
+        throw new IllegalArgumentException("Invalid bits: " + bits);
+    }
+    this.bits = bits;
+    this.m = m;
+    this.e = e;
+    this.d = d;
+    this.prime = prime;
+    this.pexp = pexp;
+    this.coef = coef;
+}</pre>
+                <div class="problem"><strong>Issue:</strong> The constructor assigns key arrays directly with no null/shape validation. Invalid keys can be created and passed to JNI, where missing fields are silently treated as zeroed buffers.</div>
+                <div class="fix-label">Fix:</div><pre>public RSAPrivateKey(int bits, byte[] m, byte[] e, byte[] d,
+                     byte[][] prime, byte[][] pexp, byte[] coef) {
+    if (bits &lt;= 0 || bits &gt; RSA_MAX_BITS) {
+        throw new IllegalArgumentException("Invalid bits: " + bits);
+    }
+    if (m == null || e == null || d == null || coef == null ||
+        prime == null || pexp == null ||
+        prime.length != 2 || pexp.length != 2 ||
+        prime[0] == null || prime[1] == null ||
+        pexp[0] == null || pexp[1] == null) {
+        throw new IllegalArgumentException("RSA private key components cannot be null");
+    }
+
+    this.bits = bits;
+    this.m = Arrays.copyOf(m, RSA_MAX_LEN);
+    this.e = Arrays.copyOf(e, RSA_MAX_LEN);
+    this.d = Arrays.copyOf(d, RSA_MAX_LEN);
+    this.prime = new byte[][] {
+        Arrays.copyOf(prime[0], RSA_MAX_PLEN),
+        Arrays.copyOf(prime[1], RSA_MAX_PLEN)
+    };
+    this.pexp = new byte[][] {
+        Arrays.copyOf(pexp[0], RSA_MAX_PLEN),
+        Arrays.copyOf(pexp[1], RSA_MAX_PLEN)
+    };
+    this.coef = Arrays.copyOf(coef, RSA_MAX_PLEN);
+}</pre>
+                <div class="issue-source">Reviewer: codex</div>
+            </div>
+</div>
+<div class="section"><div class="section-title medium">Medium</div>
+<div class="issue">
+                <div class="issue-title">`setC` no longer keeps `l` in sync with ciphertext bytes</div>
+                <div class="issue-location">sdf4j/src/main/java/org/openhitls/sdf4j/types/ECCCipher.java:135-140</div>
+                <pre>public void setC(byte[] c) {
+    if (c == null || this.l &gt; c.length) {
+        throw new IllegalArgumentException("cipher value is invalid");
+    }
+    this.c = c;
+}</pre>
+                <div class="problem"><strong>Issue:</strong> `setC` now updates only `c`, leaving `l` unchanged. Existing call patterns that set ciphertext via `setC` can now send `L=0` with non-empty `C` to JNI/native code, breaking decrypt/import behavior.</div>
+                <div class="fix-label">Fix:</div><pre>public void setC(byte[] c) {
+    if (c == null) {
+        throw new IllegalArgumentException("cipher value is invalid");
+    }
+    this.c = c;
+    this.l = c.length; // keep C/L consistent for native conversion
+}</pre>
+                <div class="issue-source">Reviewer: codex</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">Public constructor signature change breaks backward compatibility</div>
+                <div class="issue-location">sdf4j/src/main/java/org/openhitls/sdf4j/types/ECCCipher.java:68</div>
+                <pre>public ECCCipher(byte[] x, byte[] y, byte[] m, long l, byte[] c) {</pre>
+                <div class="problem"><strong>Issue:</strong> The previous public constructor `(byte[] x, byte[] y, byte[] m, byte[] c)` was removed and replaced with `(byte[] x, byte[] y, byte[] m, long l, byte[] c)`. Existing client code using the old API will fail to compile.</div>
+                <div class="fix-label">Fix:</div><pre>public ECCCipher(byte[] x, byte[] y, byte[] m, long l, byte[] c) {
+    if (x == null || y == null || m == null || c == null) {
+        throw new IllegalArgumentException("x, y, m, c cannot be null");
+    }
+    if (l &lt; 0 || l &gt; c.length) {
+        throw new IllegalArgumentException("l is invalid");
+    }
+    this.x = x;
+    this.y = y;
+    this.m = m;
+    this.l = l;
+    this.c = c;
+}
+
+// Backward-compatible overload
+public ECCCipher(byte[] x, byte[] y, byte[] m, byte[] c) {
+    this(x, y, m, c == null ? 0 : c.length, c == null ? new byte[0] : c);
+}</pre>
+                <div class="issue-source">Reviewer: codex</div>
+            </div>
+</div>
+</div></body></html>

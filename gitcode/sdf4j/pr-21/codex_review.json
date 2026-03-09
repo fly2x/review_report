@@ -1,0 +1,52 @@
+[
+  {
+    "source": "codex",
+    "file": "sdf4j/src/main/native/src/type_conversion.c",
+    "line": "754-760",
+    "severity": "critical",
+    "title": "HybridCipher conversion can read past fixed `ct_m` buffer",
+    "problem": "`native_cipher->L1` is used directly as copy length, but `HybridCipher.ct_m` is fixed-size (`HYBRIDENCref_MAX_LEN` = 1576). If a device/library returns `L1 > 1576`, `SetByteArrayRegion` reads out of bounds.",
+    "code": "jsize ctm_len = (jsize)native_cipher->L1;\njbyteArray ctm_array = (*env)->NewByteArray(env, ctm_len);\nif (ctm_array == NULL) {\n    THROW_SDF_EXCEPTION(env, SDR_INARGERR, \"Failed to create ctM array\");\n    return NULL;\n}\n(*env)->SetByteArrayRegion(env, ctm_array, 0, ctm_len, (jbyte*)native_cipher->ct_m);",
+    "fix": "if (native_cipher->L1 > HYBRIDENCref_MAX_LEN) {\n    THROW_SDF_EXCEPTION(env, SDR_INARGERR, \"HybridCipher L1 exceeds buffer\");\n    return NULL;\n}\njsize ctm_len = (jsize)native_cipher->L1;\njbyteArray ctm_array = (*env)->NewByteArray(env, ctm_len);\nif (ctm_array == NULL) {\n    THROW_SDF_EXCEPTION(env, SDR_INARGERR, \"Failed to create ctM array\");\n    return NULL;\n}\nif (ctm_len > 0) {\n    (*env)->SetByteArrayRegion(env, ctm_array, 0, ctm_len, (jbyte*)native_cipher->ct_m);\n}"
+  },
+  {
+    "source": "codex",
+    "file": "sdf4j/src/main/native/src/type_conversion.c",
+    "line": "840-848",
+    "severity": "critical",
+    "title": "HybridSignature conversion uses unchecked length for fixed `sig_m` buffer",
+    "problem": "`sig_m_len` is copied directly from `native_sig->sig_m` without validating against `HYBRIDSIGref_MAX_LEN` (4636). A malformed `L` can trigger out-of-bounds reads.",
+    "code": "jbyteArray sig_m_array = NULL;\nif (sig_m_len > 0) {\n    sig_m_array = (*env)->NewByteArray(env, sig_m_len);\n    if (sig_m_array == NULL) {\n        THROW_SDF_EXCEPTION(env, SDR_INARGERR, \"Failed to new byte array\");\n        return NULL;\n    }\n    (*env)->SetByteArrayRegion(env, sig_m_array, 0, sig_m_len, (jbyte*)native_sig->sig_m);\n}",
+    "fix": "if (sig_m_len > HYBRIDSIGref_MAX_LEN) {\n    THROW_SDF_EXCEPTION(env, SDR_INARGERR, \"HybridSignature L exceeds buffer\");\n    return NULL;\n}\n\njbyteArray sig_m_array = (*env)->NewByteArray(env, (jsize)sig_m_len);\nif (sig_m_array == NULL) {\n    THROW_SDF_EXCEPTION(env, SDR_INARGERR, \"Failed to create sigM array\");\n    return NULL;\n}\nif (sig_m_len > 0) {\n    (*env)->SetByteArrayRegion(env, sig_m_array, 0, (jsize)sig_m_len, (jbyte*)native_sig->sig_m);\n}"
+  },
+  {
+    "source": "codex",
+    "file": "sdf4j/src/main/java/org/openhitls/sdf4j/types/RSAPrivateKey.java",
+    "line": "101-113",
+    "severity": "high",
+    "title": "RSAPrivateKey constructor now accepts null key components",
+    "problem": "The constructor assigns key arrays directly with no null/shape validation. Invalid keys can be created and passed to JNI, where missing fields are silently treated as zeroed buffers.",
+    "code": "public RSAPrivateKey(int bits, byte[] m, byte[] e, byte[] d,\n                     byte[][] prime, byte[][] pexp, byte[] coef) {\n    if (bits <= 0 || bits > RSA_MAX_BITS) {\n        throw new IllegalArgumentException(\"Invalid bits: \" + bits);\n    }\n    this.bits = bits;\n    this.m = m;\n    this.e = e;\n    this.d = d;\n    this.prime = prime;\n    this.pexp = pexp;\n    this.coef = coef;\n}",
+    "fix": "public RSAPrivateKey(int bits, byte[] m, byte[] e, byte[] d,\n                     byte[][] prime, byte[][] pexp, byte[] coef) {\n    if (bits <= 0 || bits > RSA_MAX_BITS) {\n        throw new IllegalArgumentException(\"Invalid bits: \" + bits);\n    }\n    if (m == null || e == null || d == null || coef == null ||\n        prime == null || pexp == null ||\n        prime.length != 2 || pexp.length != 2 ||\n        prime[0] == null || prime[1] == null ||\n        pexp[0] == null || pexp[1] == null) {\n        throw new IllegalArgumentException(\"RSA private key components cannot be null\");\n    }\n\n    this.bits = bits;\n    this.m = Arrays.copyOf(m, RSA_MAX_LEN);\n    this.e = Arrays.copyOf(e, RSA_MAX_LEN);\n    this.d = Arrays.copyOf(d, RSA_MAX_LEN);\n    this.prime = new byte[][] {\n        Arrays.copyOf(prime[0], RSA_MAX_PLEN),\n        Arrays.copyOf(prime[1], RSA_MAX_PLEN)\n    };\n    this.pexp = new byte[][] {\n        Arrays.copyOf(pexp[0], RSA_MAX_PLEN),\n        Arrays.copyOf(pexp[1], RSA_MAX_PLEN)\n    };\n    this.coef = Arrays.copyOf(coef, RSA_MAX_PLEN);\n}"
+  },
+  {
+    "source": "codex",
+    "file": "sdf4j/src/main/java/org/openhitls/sdf4j/types/ECCCipher.java",
+    "line": "135-140",
+    "severity": "medium",
+    "title": "`setC` no longer keeps `l` in sync with ciphertext bytes",
+    "problem": "`setC` now updates only `c`, leaving `l` unchanged. Existing call patterns that set ciphertext via `setC` can now send `L=0` with non-empty `C` to JNI/native code, breaking decrypt/import behavior.",
+    "code": "public void setC(byte[] c) {\n    if (c == null || this.l > c.length) {\n        throw new IllegalArgumentException(\"cipher value is invalid\");\n    }\n    this.c = c;\n}",
+    "fix": "public void setC(byte[] c) {\n    if (c == null) {\n        throw new IllegalArgumentException(\"cipher value is invalid\");\n    }\n    this.c = c;\n    this.l = c.length; // keep C/L consistent for native conversion\n}"
+  },
+  {
+    "source": "codex",
+    "file": "sdf4j/src/main/java/org/openhitls/sdf4j/types/ECCCipher.java",
+    "line": "68",
+    "severity": "medium",
+    "title": "Public constructor signature change breaks backward compatibility",
+    "problem": "The previous public constructor `(byte[] x, byte[] y, byte[] m, byte[] c)` was removed and replaced with `(byte[] x, byte[] y, byte[] m, long l, byte[] c)`. Existing client code using the old API will fail to compile.",
+    "code": "public ECCCipher(byte[] x, byte[] y, byte[] m, long l, byte[] c) {",
+    "fix": "public ECCCipher(byte[] x, byte[] y, byte[] m, long l, byte[] c) {\n    if (x == null || y == null || m == null || c == null) {\n        throw new IllegalArgumentException(\"x, y, m, c cannot be null\");\n    }\n    if (l < 0 || l > c.length) {\n        throw new IllegalArgumentException(\"l is invalid\");\n    }\n    this.x = x;\n    this.y = y;\n    this.m = m;\n    this.l = l;\n    this.c = c;\n}\n\n// Backward-compatible overload\npublic ECCCipher(byte[] x, byte[] y, byte[] m, byte[] c) {\n    this(x, y, m, c == null ? 0 : c.length, c == null ? new byte[0] : c);\n}"
+  }
+]

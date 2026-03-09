@@ -1,0 +1,175 @@
+{
+  "context": {
+    "owner": "openHiTLS",
+    "repo": "sdf4j",
+    "pr_id": "21",
+    "title": "",
+    "reviewers": [
+      "claude",
+      "codex"
+    ]
+  },
+  "statistics": {
+    "total": 14,
+    "critical": 2,
+    "high": 5,
+    "medium": 4,
+    "low": 3
+  },
+  "issues": [
+    {
+      "file": "sdf4j/src/main/native/src/type_conversion.c",
+      "line": "750-760",
+      "severity": "critical",
+      "title": "HybridCipher native_to_java can read past fixed ct_m buffer",
+      "reviewers": "CODEX",
+      "confidence": "trusted",
+      "problem": "The code uses `native_cipher->L1` directly as the length for copying from `native_cipher->ct_m`, but `ct_m` is a fixed-size buffer of `HYBRIDENCref_MAX_LEN` (1576 bytes). If a malicious or buggy SDF device returns `L1 > 1576`, `SetByteArrayRegion` will read out of bounds, potentially causing a crash or information disclosure.",
+      "code": "jsize ctm_len = (jsize)native_cipher->L1;\njbyteArray ctm_array = (*env)->NewByteArray(env, ctm_len);\nif (ctm_array == NULL) {\n    THROW_SDF_EXCEPTION(env, SDR_INARGERR, \"Failed to create ctM array\");\n    return NULL;\n}\n(*env)->SetByteArrayRegion(env, ctm_array, 0, ctm_len, (jbyte*)native_cipher->ct_m);",
+      "fix": "if (native_cipher->L1 > HYBRIDENCref_MAX_LEN) {\n    THROW_SDF_EXCEPTION(env, SDR_INARGERR, \"HybridCipher L1 exceeds buffer size\");\n    return NULL;\n}\njsize ctm_len = (jsize)native_cipher->L1;\njbyteArray ctm_array = (*env)->NewByteArray(env, ctm_len);\nif (ctm_array == NULL) {\n    THROW_SDF_EXCEPTION(env, SDR_INARGERR, \"Failed to create ctM array\");\n    return NULL;\n}\nif (ctm_len > 0) {\n    (*env)->SetByteArrayRegion(env, ctm_array, 0, ctm_len, (jbyte*)native_cipher->ct_m);\n}"
+    },
+    {
+      "file": "sdf4j/src/main/native/src/type_conversion.c",
+      "line": "830-848",
+      "severity": "critical",
+      "title": "HybridSignature native_to_java can read past fixed sig_m buffer",
+      "reviewers": "CODEX",
+      "confidence": "trusted",
+      "problem": "The code uses `sig_m_len` directly as the length for copying from `native_sig->sig_m`, but `sig_m` is a fixed-size buffer of `HYBRIDSIGref_MAX_LEN` (4636 bytes). If `sig_m_len` exceeds the buffer size, `SetByteArrayRegion` will read out of bounds.",
+      "code": "jbyteArray sig_m_array = NULL;\nif (sig_m_len > 0) {\n    sig_m_array = (*env)->NewByteArray(env, sig_m_len);\n    if (sig_m_array == NULL) {\n        THROW_SDF_EXCEPTION(env, SDR_INARGERR, \"Failed to new byte array\");\n        return NULL;\n    }\n    (*env)->SetByteArrayRegion(env, sig_m_array, 0, sig_m_len, (jbyte*)native_sig->sig_m);\n}",
+      "fix": "if (sig_m_len > HYBRIDSIGref_MAX_LEN) {\n    THROW_SDF_EXCEPTION(env, SDR_INARGERR, \"HybridSignature sig_m_len exceeds buffer size\");\n    return NULL;\n}\n\njbyteArray sig_m_array = NULL;\nif (sig_m_len > 0) {\n    sig_m_array = (*env)->NewByteArray(env, sig_m_len);\n    if (sig_m_array == NULL) {\n        THROW_SDF_EXCEPTION(env, SDR_INARGERR, \"Failed to create sigM array\");\n        return NULL;\n    }\n    (*env)->SetByteArrayRegion(env, sig_m_array, 0, sig_m_len, (jbyte*)native_sig->sig_m);\n}"
+    },
+    {
+      "file": "sdf4j/src/main/java/org/openhitls/sdf4j/types/DeviceInfo.java",
+      "line": "76-77",
+      "severity": "high",
+      "title": "Default constructor leaves asymAlgAbility null",
+      "reviewers": "CLAUDE",
+      "confidence": "trusted",
+      "problem": "The default constructor does not initialize the `asymAlgAbility` array. When `getAsymAlgAbility()` is called on a default-constructed object, it returns null. The `toString()` method calls `Arrays.toString(asymAlgAbility)` which will handle null gracefully, but other code expecting a non-null array will throw NullPointerException.",
+      "code": "public DeviceInfo() {\n}",
+      "fix": "public DeviceInfo() {\n    this.asymAlgAbility = new long[2];\n}"
+    },
+    {
+      "file": "sdf4j/src/main/java/org/openhitls/sdf4j/types/ECCCipher.java",
+      "line": "135-140",
+      "severity": "high",
+      "title": "setC() validation depends on call order with setL()",
+      "reviewers": "CLAUDE",
+      "confidence": "trusted",
+      "problem": "The validation `this.l > c.length` depends on `l` being set BEFORE `c`. If a caller calls `setC()` first (when `l` defaults to 0), the validation passes even when later `setL()` is called with a larger value. This creates an inconsistent state where `l > c.length`.",
+      "code": "public void setC(byte[] c) {\n    if (c == null || this.l > c.length) {\n        throw new IllegalArgumentException(\"cipher value is invalid\");\n    }\n    this.c = c;\n}\n\npublic void setL(long l) {\n    if (l < 0) {\n        throw new IllegalArgumentException(\"Ciphertext length cannot be negative\");\n    }\n    this.l = l;\n}",
+      "fix": "public void setC(byte[] c) {\n    if (c == null) {\n        throw new IllegalArgumentException(\"cipher value cannot be null\");\n    }\n    this.c = c;\n    if (this.l > c.length) {\n        throw new IllegalArgumentException(\"l cannot exceed c.length\");\n    }\n}\n\npublic void setL(long l) {\n    if (l < 0) {\n        throw new IllegalArgumentException(\"Ciphertext length cannot be negative\");\n    }\n    if (this.c != null && l > this.c.length) {\n        throw new IllegalArgumentException(\"l cannot exceed c.length\");\n    }\n    this.l = l;\n}"
+    },
+    {
+      "file": "sdf4j/src/main/java/org/openhitls/sdf4j/types/HybridCipher.java",
+      "line": "70-75",
+      "severity": "high",
+      "title": "setCtM() validation depends on call order with setL1()",
+      "reviewers": "CLAUDE",
+      "confidence": "trusted",
+      "problem": "The validation `this.l1 > ctM.length` depends on `l1` being set BEFORE `ctM`. Since `l1` defaults to 0, calling `setCtM()` first passes validation even if the array length is invalid.",
+      "code": "public void setCtM(byte[] ctM) {\n    if (ctM == null || this.l1 > ctM.length) {\n        throw new IllegalArgumentException(\"cipher value is invalid\");\n    }\n    this.ctM = ctM;\n}",
+      "fix": "public void setCtM(byte[] ctM) {\n    if (ctM == null) {\n        throw new IllegalArgumentException(\"cipher value cannot be null\");\n    }\n    this.ctM = ctM;\n    if (this.l1 > ctM.length) {\n        throw new IllegalArgumentException(\"l1 cannot exceed ctM.length\");\n    }\n}\n\npublic void setL1(long l1) {\n    if (l1 < 0) {\n        throw new IllegalArgumentException(\"Ciphertext length cannot be negative\");\n    }\n    if (this.ctM != null && l1 > this.ctM.length) {\n        throw new IllegalArgumentException(\"l1 cannot exceed ctM.length\");\n    }\n    this.l1 = l1;\n}"
+    },
+    {
+      "file": "sdf4j/src/main/java/org/openhitls/sdf4j/types/HybridSignature.java",
+      "line": "63-67",
+      "severity": "high",
+      "title": "setSigM() validation depends on call order with setL()",
+      "reviewers": "CLAUDE",
+      "confidence": "trusted",
+      "problem": "The validation `this.l > sigM.length` depends on `l` being set BEFORE `sigM`. Default `l` is 0, so validation is ineffective if `setSigM()` is called first.",
+      "code": "public void setSigM(byte[] sigM) {\n    if (sigM == null || this.l > sigM.length) {\n        throw new IllegalArgumentException(\"signature value is invalid\");\n    }\n    this.sigM = sigM;\n}",
+      "fix": "public void setSigM(byte[] sigM) {\n    if (sigM == null) {\n        throw new IllegalArgumentException(\"signature value cannot be null\");\n    }\n    this.sigM = sigM;\n    if (this.l > sigM.length) {\n        throw new IllegalArgumentException(\"l cannot exceed sigM.length\");\n    }\n}\n\npublic void setL(int l) {\n    if (l < 0) {\n        throw new IllegalArgumentException(\"Signature length cannot be negative\");\n    }\n    if (this.sigM != null && l > this.sigM.length) {\n        throw new IllegalArgumentException(\"l cannot exceed sigM.length\");\n    }\n    this.l = l;\n}"
+    },
+    {
+      "file": "sdf4j/src/main/java/org/openhitls/sdf4j/types/RSAPrivateKey.java",
+      "line": "101-113",
+      "severity": "high",
+      "title": "Constructor accepts null arrays for key components",
+      "reviewers": "CLAUDE, CODEX",
+      "confidence": "trusted",
+      "problem": "The constructor assigns key component arrays directly without validating that they are non-null or have proper dimensions. Invalid keys can be created and passed to JNI code, potentially causing silent failures or crashes.",
+      "code": "public RSAPrivateKey(int bits, byte[] m, byte[] e, byte[] d,\n                     byte[][] prime, byte[][] pexp, byte[] coef) {\n    if (bits <= 0 || bits > RSA_MAX_BITS) {\n        throw new IllegalArgumentException(\"Invalid bits: \" + bits);\n    }\n    this.bits = bits;\n    this.m = m;\n    this.e = e;\n    this.d = d;\n    this.prime = prime;\n    this.pexp = pexp;\n    this.coef = coef;\n}",
+      "fix": "public RSAPrivateKey(int bits, byte[] m, byte[] e, byte[] d,\n                     byte[][] prime, byte[][] pexp, byte[] coef) {\n    if (bits <= 0 || bits > RSA_MAX_BITS) {\n        throw new IllegalArgumentException(\"Invalid bits: \" + bits);\n    }\n    if (m == null || e == null || d == null || coef == null) {\n        throw new IllegalArgumentException(\"Key components cannot be null\");\n    }\n    if (prime == null || prime.length < 2 || prime[0] == null || prime[1] == null) {\n        throw new IllegalArgumentException(\"prime must have at least 2 non-null elements\");\n    }\n    if (pexp == null || pexp.length < 2 || pexp[0] == null || pexp[1] == null) {\n        throw new IllegalArgumentException(\"pexp must have at least 2 non-null elements\");\n    }\n    this.bits = bits;\n    this.m = m;\n    this.e = e;\n    this.d = d;\n    this.prime = prime;\n    this.pexp = pexp;\n    this.coef = coef;\n}"
+    },
+    {
+      "file": "sdf4j/src/main/java/org/openhitls/sdf4j/types/RSAPrivateKey.java",
+      "line": "170-183",
+      "severity": "medium",
+      "title": "setPrime() and setPexp() accept null or invalid arrays",
+      "reviewers": "CLAUDE",
+      "confidence": "trusted",
+      "problem": "The setters do not validate that the arrays are non-null or have the required 2 elements, allowing invalid key state.",
+      "code": "public void setPrime(byte[][] prime) {\n    this.prime = prime;\n}\n\npublic void setPexp(byte[][] pexp) {\n    this.pexp = pexp;\n}",
+      "fix": "public void setPrime(byte[][] prime) {\n    if (prime == null || prime.length < 2) {\n        throw new IllegalArgumentException(\"prime must have at least 2 elements\");\n    }\n    this.prime = prime;\n}\n\npublic void setPexp(byte[][] pexp) {\n    if (pexp == null || pexp.length < 2) {\n        throw new IllegalArgumentException(\"pexp must have at least 2 elements\");\n    }\n    this.pexp = pexp;\n}"
+    },
+    {
+      "file": "sdf4j/src/main/java/org/openhitls/sdf4j/types/ECCCipher.java",
+      "line": "135-140",
+      "severity": "medium",
+      "title": "setC() does not keep l synchronized with c array length",
+      "reviewers": "CODEX",
+      "confidence": "likely",
+      "problem": "When `setC()` is called, only the `c` field is updated but `l` remains unchanged. This can create an inconsistent state where `l` does not match `c.length`, which may be passed to native code expecting consistent values.",
+      "code": "public void setC(byte[] c) {\n    if (c == null || this.l > c.length) {\n        throw new IllegalArgumentException(\"cipher value is invalid\");\n    }\n    this.c = c;\n}",
+      "fix": "public void setC(byte[] c) {\n    if (c == null) {\n        throw new IllegalArgumentException(\"cipher value cannot be null\");\n    }\n    if (this.l > c.length) {\n        throw new IllegalArgumentException(\"l cannot exceed c.length\");\n    }\n    this.c = c;\n    this.l = c.length;  // Keep l in sync with actual array length\n}"
+    },
+    {
+      "file": "sdf4j/src/main/java/org/openhitls/sdf4j/types/DeviceInfo.java",
+      "line": "92-107",
+      "severity": "medium",
+      "title": "Constructor does not validate asymAlgAbility array length",
+      "reviewers": "CLAUDE",
+      "confidence": "trusted",
+      "problem": "The constructor checks for null but does not validate that `asymAlgAbility` has exactly 2 elements as required by the SDF specification. This can cause incorrect behavior.",
+      "code": "public DeviceInfo(String issuerName, String deviceName, String deviceSerial,\n                  long deviceVersion, long standardVersion, long[] asymAlgAbility,\n                  long symAlgAbility, long hashAlgAbility, long bufferSize) {\n    if (issuerName == null || deviceName == null || deviceSerial == null || asymAlgAbility == null) {\n        throw new IllegalArgumentException(\"null input\");\n    }\n    this.asymAlgAbility = asymAlgAbility;",
+      "fix": "public DeviceInfo(String issuerName, String deviceName, String deviceSerial,\n                  long deviceVersion, long standardVersion, long[] asymAlgAbility,\n                  long symAlgAbility, long hashAlgAbility, long bufferSize) {\n    if (issuerName == null || deviceName == null || deviceSerial == null || asymAlgAbility == null) {\n        throw new IllegalArgumentException(\"null input\");\n    }\n    if (asymAlgAbility.length != 2) {\n        throw new IllegalArgumentException(\"asymAlgAbility must have exactly 2 elements\");\n    }\n    this.asymAlgAbility = asymAlgAbility;"
+    },
+    {
+      "file": "sdf4j/src/main/java/org/openhitls/sdf4j/types/ECCCipher.java",
+      "line": "68",
+      "severity": "medium",
+      "title": "Constructor signature change breaks backward compatibility",
+      "reviewers": "CODEX",
+      "confidence": "likely",
+      "problem": "The previous public constructor `ECCCipher(byte[] x, byte[] y, byte[] m, byte[] c)` was removed and replaced with `ECCCipher(byte[] x, byte[] y, byte[] m, long l, byte[] c)`. Existing client code using the old 4-parameter constructor will fail to compile.",
+      "code": "public ECCCipher(byte[] x, byte[] y, byte[] m, long l, byte[] c) {",
+      "fix": "// Keep the new 5-parameter constructor\npublic ECCCipher(byte[] x, byte[] y, byte[] m, long l, byte[] c) {\n    // existing implementation\n}\n\n// Add backward-compatible overload\npublic ECCCipher(byte[] x, byte[] y, byte[] m, byte[] c) {\n    this(x, y, m, c == null ? 0 : c.length, c);\n}"
+    },
+    {
+      "file": "sdf4j/src/main/java/org/openhitls/sdf4j/types/RSAPrivateKey.java",
+      "line": "137-161",
+      "severity": "low",
+      "title": "setM(), setE(), setD() don't validate null or array bounds",
+      "reviewers": "CLAUDE",
+      "confidence": "trusted",
+      "problem": "These setters assign byte arrays directly without null checks or length validation against `RSA_MAX_LEN` (512 bytes).",
+      "code": "public void setM(byte[] m) {\n    this.m = m;\n}\n\npublic void setE(byte[] e) {\n    this.e = e;\n}\n\npublic void setD(byte[] d) {\n    this.d = d;\n}",
+      "fix": "public void setM(byte[] m) {\n    if (m == null) {\n        throw new IllegalArgumentException(\"Modulus cannot be null\");\n    }\n    if (m.length > RSA_MAX_LEN) {\n        throw new IllegalArgumentException(\"Modulus exceeds maximum length of \" + RSA_MAX_LEN + \" bytes\");\n    }\n    this.m = m;\n}\n\npublic void setE(byte[] e) {\n    if (e == null) {\n        throw new IllegalArgumentException(\"Exponent cannot be null\");\n    }\n    if (e.length > RSA_MAX_LEN) {\n        throw new IllegalArgumentException(\"Exponent exceeds maximum length of \" + RSA_MAX_LEN + \" bytes\");\n    }\n    this.e = e;\n}\n\npublic void setD(byte[] d) {\n    if (d == null) {\n        throw new IllegalArgumentException(\"Private exponent cannot be null\");\n    }\n    if (d.length > RSA_MAX_LEN) {\n        throw new IllegalArgumentException(\"Private exponent exceeds maximum length of \" + RSA_MAX_LEN + \" bytes\");\n    }\n    this.d = d;\n}"
+    },
+    {
+      "file": "sdf4j/src/main/java/org/openhitls/sdf4j/types/RSAPrivateKey.java",
+      "line": "192-194",
+      "severity": "low",
+      "title": "setCoef() doesn't validate null or array bounds",
+      "reviewers": "CLAUDE",
+      "confidence": "trusted",
+      "problem": "The setter assigns the coef array without null check or validation against `RSA_MAX_PLEN` (256 bytes).",
+      "code": "public void setCoef(byte[] coef) {\n    this.coef = coef;\n}",
+      "fix": "public void setCoef(byte[] coef) {\n    if (coef == null) {\n        throw new IllegalArgumentException(\"CRT coefficient cannot be null\");\n    }\n    if (coef.length > RSA_MAX_PLEN) {\n        throw new IllegalArgumentException(\"CRT coefficient exceeds maximum length of \" + RSA_MAX_PLEN + \" bytes\");\n    }\n    this.coef = coef;\n}"
+    },
+    {
+      "file": "sdf4j/src/main/java/org/openhitls/sdf4j/types/RSAPublicKey.java",
+      "line": "91-110",
+      "severity": "low",
+      "title": "setM() and setE() don't validate array bounds",
+      "reviewers": "CLAUDE",
+      "confidence": "trusted",
+      "problem": "The setters check for null but don't validate array length against `RSA_MAX_LEN` (512 bytes).",
+      "code": "public void setM(byte[] m) {\n    if (m == null) {\n        throw new IllegalArgumentException(\"Modulus cannot be null\");\n    }\n    this.m = m;\n}\n\npublic void setE(byte[] e) {\n    if (e == null) {\n        throw new IllegalArgumentException(\"Exponent cannot be null\");\n    }\n    this.e = e;\n}",
+      "fix": "public void setM(byte[] m) {\n    if (m == null) {\n        throw new IllegalArgumentException(\"Modulus cannot be null\");\n    }\n    if (m.length > RSA_MAX_LEN) {\n        throw new IllegalArgumentException(\"Modulus exceeds maximum length of \" + RSA_MAX_LEN + \" bytes\");\n    }\n    this.m = m;\n}\n\npublic void setE(byte[] e) {\n    if (e == null) {\n        throw new IllegalArgumentException(\"Exponent cannot be null\");\n    }\n    if (e.length > RSA_MAX_LEN) {\n        throw new IllegalArgumentException(\"Exponent exceeds maximum length of \" + RSA_MAX_LEN + \" bytes\");\n    }\n    this.e = e;\n}"
+    }
+  ]
+}

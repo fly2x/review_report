@@ -1,0 +1,454 @@
+===ISSUE===
+FILE: ngcc_bench/src/cli_parser.c
+LINE: 19-25, 183-205
+SEVERITY: high
+TITLE: Public performance CLI flags were removed without a compatibility path
+PROBLEM: This drops `--iterations`, `--msg-len`, and `--cycles` from the parser, so existing scripts and tests now fail before any benchmark runs. The branch still has callers that invoke those flags, and users also lose the ability to control benchmark size/count from the CLI.
+CODE:
+```c
+void print_usage(const char *prog) {
+    printf("ngcc_bench %s\n\n", NGCC_VERSION);
+    printf("Usage:\n");
+    printf("  %s --lib /path/to/lib.so --test hash|dsa|dsa-keygen|dsa-sig|dsa-verify|kem|kem-keygen|kem-encap|kem-decap|kex|all --mode correctness|performance|memory|stability|all\n", prog);
+    printf("     [--digest-len-bits BITS]\n");
+    printf("     [--duration-hours H] [--stability-max-cases N] [--stability-sample-ms MS]\n");
+    printf("     [--json-out PATH] [--kat FILE]\n");
+    ...
+}
+
+static const struct option long_options[] = {
+    {"lib", required_argument, NULL, 'l'},
+    {"test", required_argument, NULL, 't'},
+    {"mode", required_argument, NULL, 'm'},
+    {"digest-len-bits", required_argument, NULL, 'b'},
+    {"duration-hours", required_argument, NULL, 'd'},
+    {"stability-max-cases", required_argument, NULL, 's'},
+    {"stability-sample-ms", required_argument, NULL, OPT_STABILITY_SAMPLE_MS},
+    {"json-out", required_argument, NULL, 'j'},
+    {"kat", required_argument, NULL, 'k'},
+    ...
+};
+```
+FIX:
+```c
+void print_usage(const char *prog) {
+    printf("ngcc_bench %s\n\n", NGCC_VERSION);
+    printf("Usage:\n");
+    printf("  %s --lib /path/to/lib.so --test hash|dsa|dsa-keygen|dsa-sig|dsa-verify|kem|kem-keygen|kem-encap|kem-decap|kex|all --mode correctness|performance|memory|stability|all\n", prog);
+    printf("     [--iterations N] [--duration-hours H] [--stability-max-cases N] [--stability-sample-ms MS] [--msg-len BYTES]\n");
+    printf("     [--digest-len-bits BITS] [--cycles on|off] [--json-out PATH] [--kat FILE]\n");
+    ...
+}
+
+static const struct option long_options[] = {
+    {"lib", required_argument, NULL, 'l'},
+    {"test", required_argument, NULL, 't'},
+    {"mode", required_argument, NULL, 'm'},
+    {"iterations", required_argument, NULL, 'i'},
+    {"duration-hours", required_argument, NULL, 'd'},
+    {"stability-max-cases", required_argument, NULL, 's'},
+    {"stability-sample-ms", required_argument, NULL, OPT_STABILITY_SAMPLE_MS},
+    {"msg-len", required_argument, NULL, 'g'},
+    {"digest-len-bits", required_argument, NULL, 'b'},
+    {"cycles", required_argument, NULL, 'c'},
+    {"json-out", required_argument, NULL, 'j'},
+    {"kat", required_argument, NULL, 'k'},
+    ...
+};
+
+case 'i':
+    if (parse_unsigned_ll(optarg, &opts->iterations) != 0 || opts->iterations == 0) {
+        fprintf(stderr, "invalid --iterations value: %s\n", optarg);
+        return -1;
+    }
+    break;
+
+case 'g': {
+    unsigned long long msg_len_val;
+    if (parse_unsigned_ll(optarg, &msg_len_val) != 0 || msg_len_val == 0) {
+        fprintf(stderr, "invalid --msg-len value: %s\n", optarg);
+        return -1;
+    }
+    opts->msg_len = (size_t) msg_len_val;
+    break;
+}
+
+case 'c':
+    if (parse_cycles(optarg, &opts->cycles_enabled) != 0) {
+        fprintf(stderr, "invalid --cycles value: %s\n", optarg);
+        return -1;
+    }
+    break;
+```
+===END===
+===ISSUE===
+FILE: ngcc_bench/src/json_report.c
+LINE: 256-281
+SEVERITY: high
+TITLE: JSON writer no longer emits the required v4 option fields
+PROBLEM: The report now omits `options.iterations`, `options.msg_len`, `options.digest_len_bits`, and `options.cycles`, so the bundled validator immediately fails with `missing key 'iterations'`. That makes the generated report incompatible with the schema shipped in this repo.
+CODE:
+```c
+jw_begin_object(&w, "options");
+jw_key_llu(&w, "test_mask", opts->test_mask);
+jw_key_llu(&w, "mode_mask", opts->mode_mask);
+jw_key_double(&w, "duration_hours", opts->duration_hours);
+jw_key_llu(&w, "stability_max_cases", opts->stability_max_cases);
+jw_key_double(&w, "stability_sample_ms", opts->stability_sample_ms);
+
+jw_begin_object(&w, "stability_thresholds");
+...
+if (opts->kat_path != NULL) {
+    jw_key_str(&w, "kat", opts->kat_path);
+} else {
+    jw_key_null(&w, "kat");
+}
+jw_end_object(&w); /* options */
+```
+FIX:
+```c
+jw_begin_object(&w, "options");
+jw_key_llu(&w, "test_mask", opts->test_mask);
+jw_key_llu(&w, "mode_mask", opts->mode_mask);
+jw_key_llu(&w, "iterations", opts->iterations);
+jw_key_double(&w, "duration_hours", opts->duration_hours);
+jw_key_llu(&w, "stability_max_cases", opts->stability_max_cases);
+jw_key_double(&w, "stability_sample_ms", opts->stability_sample_ms);
+jw_key_llu(&w, "msg_len", (unsigned long long) opts->msg_len);
+jw_key_int(&w, "digest_len_bits", opts->digest_len_bits);
+jw_key_str(&w, "cycles", opts->cycles_enabled ? "on" : "off");
+
+jw_begin_object(&w, "stability_thresholds");
+...
+if (opts->kat_path != NULL) {
+    jw_key_str(&w, "kat", opts->kat_path);
+} else {
+    jw_key_null(&w, "kat");
+}
+jw_end_object(&w); /* options */
+```
+===END===
+===ISSUE===
+FILE: ngcc_bench/src/main.c
+LINE: 353-401
+SEVERITY: medium
+TITLE: DSA sign and verify performance only benchmark the first message size
+PROBLEM: The loop is meant to run every `k_msg_lens` entry, but the break condition treats all sub-operations as message-length-independent. `ngcc_dsa_sig_performance()` and `ngcc_dsa_verify_performance()` both take `msg_len` and scale `bytes_per_op` with it, so this now reports only the 1024-byte case for those modes.
+CODE:
+```c
+for (mi = 0; mi < NGCC_NUM_MSG_LENS; ++mi) {
+    size_t msg_len = k_msg_lens[mi];
+
+    rc = dispatch->performance_fn(api, digest_bits, msg_len, &cfg, &result);
+    ...
+    /* KEM/KEX/sub-ops don't depend on msg_len, run once only */
+    if (test->kind != NGCC_TEST_HASH && test->kind != NGCC_TEST_DSA) {
+        break;
+    }
+}
+```
+FIX:
+```c
+static int performance_depends_on_msg_len(ngcc_test_kind_t kind) {
+    return kind == NGCC_TEST_HASH ||
+           kind == NGCC_TEST_DSA ||
+           kind == NGCC_TEST_DSA_SIG ||
+           kind == NGCC_TEST_DSA_VERIFY;
+}
+
+for (mi = 0; mi < NGCC_NUM_MSG_LENS; ++mi) {
+    size_t msg_len = k_msg_lens[mi];
+
+    rc = dispatch->performance_fn(api, digest_bits, msg_len, &cfg, &result);
+    ...
+    if (!performance_depends_on_msg_len(test->kind)) {
+        break;
+    }
+}
+```
+===END===
+===ISSUE===
+FILE: ngcc_bench/src/bench_hash.c
+LINE: 139-143, 445-480, 515-516
+SEVERITY: high
+TITLE: Hash KAT handling now rejects previously supported files and aliases
+PROBLEM: This path now only accepts directory entries named `KAT_2_*`/`KAT_Loop_*` and only looks for `Msg`/`Dst` fields. Previously supported single-file `--kat` inputs and documented aliases like `INPUT` and `MD` are skipped, and because `total == 0` now returns `-1`, correctness hard-fails instead of taking the existing `KAT_NO_VECTOR` fallback.
+CODE:
+```c
+const ngcc_kat_field_t *input = ngcc_kat_get_field(vec, "Msg");
+const ngcc_kat_field_t *output = ngcc_kat_get_field(vec, "Dst");
+...
+if (!path_is_directory(kat_path)) {
+    fprintf(stderr, "[hash][kat] error: --kat path is not a directory: %s\n", kat_path);
+    return -1;
+}
+...
+ftype = classify_kat_file(entry->d_name);
+if (ftype == KAT_TYPE_UNKNOWN) {
+    fprintf(stderr, "[hash][kat] error: unrecognized KAT file format: %s\n", entry->d_name);
+    closedir(dir);
+    rc = -1;
+    goto done;
+}
+...
+rc = (total > 0 && failed_count == 0) ? 0 : -1;
+```
+FIX:
+```c
+static const char *const k_input_alias[] = {"Msg", "INPUT", "MSG", "M", "MESSAGE"};
+static const char *const k_output_alias[] = {"Dst", "OUTPUT", "DIGEST", "MD", "HASH"};
+
+const ngcc_kat_field_t *input =
+    ngcc_kat_get_field_any(vec, k_input_alias, sizeof(k_input_alias) / sizeof(k_input_alias[0]));
+const ngcc_kat_field_t *output =
+    ngcc_kat_get_field_any(vec, k_output_alias, sizeof(k_output_alias) / sizeof(k_output_alias[0]));
+
+if (!path_is_directory(kat_path)) {
+    ngcc_kat_file_t kat = {0};
+    if (ngcc_kat_parse_file(kat_path, &kat) != 0) {
+        return -1;
+    }
+    rc = verify_kat_vectors(api, digest_len_bits, &kat, &total, &passed_count, &failed_count);
+    ngcc_kat_free(&kat);
+    goto done;
+}
+
+ftype = classify_kat_file(entry->d_name);
+if (ftype == KAT_TYPE_UNKNOWN) {
+    continue; /* allow a shared --kat directory and preserve old file names */
+}
+
+rc = (total == 0) ? 1 : ((failed_count == 0) ? 0 : -1);
+```
+===END===
+===ISSUE===
+FILE: ngcc_bench/src/bench_kem.c
+LINE: 197-199, 267-321
+SEVERITY: high
+TITLE: KEM KAT reader no longer accepts legacy alias-based inputs
+PROBLEM: The new implementation only recognises `SK`/`CT`/`SS` fields inside `KAT_KEM_*` files under a directory. Previously supported `SECRETKEY`/`CIPHERTEXT`/`SHAREDSECRET` vectors, arbitrary filenames, and single-file `--kat` inputs are now skipped or rejected; when nothing matches, the function returns `-1` instead of `1`, so correctness fails rather than falling back.
+CODE:
+```c
+const ngcc_kat_field_t *sk = ngcc_kat_get_field(vec, "SK");
+const ngcc_kat_field_t *ct = ngcc_kat_get_field(vec, "CT");
+const ngcc_kat_field_t *ss = ngcc_kat_get_field(vec, "SS");
+...
+if (!path_is_directory_kem(kat_path)) {
+    fprintf(stderr, "[kem][kat] error: --kat path is not a directory: %s\n", kat_path);
+    return -1;
+}
+...
+if (strncmp(entry->d_name, "KAT_KEM_", 8) != 0) {
+    fprintf(stderr, "[kem][kat] error: unrecognized KAT file: %s\n", entry->d_name);
+    closedir(dir);
+    goto done;
+}
+...
+rc = (total > 0 && failed == 0) ? 0 : -1;
+```
+FIX:
+```c
+static const char *const k_sk_alias[] = {"SK", "SECRETKEY"};
+static const char *const k_ct_alias[] = {"CT", "CIPHERTEXT"};
+static const char *const k_ss_alias[] = {"SS", "SHAREDSECRET", "OUTPUT"};
+
+const ngcc_kat_field_t *sk =
+    ngcc_kat_get_field_any(vec, k_sk_alias, sizeof(k_sk_alias) / sizeof(k_sk_alias[0]));
+const ngcc_kat_field_t *ct =
+    ngcc_kat_get_field_any(vec, k_ct_alias, sizeof(k_ct_alias) / sizeof(k_ct_alias[0]));
+const ngcc_kat_field_t *ss =
+    ngcc_kat_get_field_any(vec, k_ss_alias, sizeof(k_ss_alias) / sizeof(k_ss_alias[0]));
+
+if (!path_is_directory_kem(kat_path)) {
+    ngcc_kat_file_t kat = {0};
+    if (ngcc_kat_parse_file(kat_path, &kat) != 0) {
+        return -1;
+    }
+    rc = verify_kem_kat_vectors(api, &kat, &total, &passed, &failed);
+    ngcc_kat_free(&kat);
+    goto done;
+}
+
+if (strncmp(entry->d_name, "KAT_KEM_", 8) != 0) {
+    continue; /* ignore unrelated files in a shared --kat directory */
+}
+
+rc = (total == 0) ? 1 : ((failed == 0) ? 0 : -1);
+```
+===END===
+===ISSUE===
+FILE: ngcc_bench/src/bench_kex.c
+LINE: 313-317, 344-392, 516-570
+SEVERITY: high
+TITLE: KEX KAT parsing dropped the existing underscore and PASS2/PASS3 formats
+PROBLEM: This path now assumes the new multi-pass `Init_Sta`/`M1..Mn`/`SS` layout inside `KAT_KEX_*` directory entries. Existing vectors that use `SK_A`, `PK_B`, `PASS2`, `STATEA`, `SHAREDSECRETA` or the corresponding B-side fields are no longer recognised, so previously valid KATs now fail with `total=0 passed=0 failed=0`.
+CODE:
+```c
+const ngcc_kat_field_t *ska = ngcc_kat_get_field(vec, "SKa");
+const ngcc_kat_field_t *pkb = ngcc_kat_get_field(vec, "PKb");
+const ngcc_kat_field_t *pka = ngcc_kat_get_field(vec, "PKa");
+const ngcc_kat_field_t *skb = ngcc_kat_get_field(vec, "SKb");
+const ngcc_kat_field_t *ss = ngcc_kat_get_field(vec, "SS");
+...
+for (pass = 1; pass <= KEX_MAX_PASS_SCAN; ++pass) {
+    snprintf(m_name, sizeof(m_name), "M%d", pass);
+    msg = ngcc_kat_get_field(vec, m_name);
+    if (!kex_field_populated(msg)) {
+        break;  /* no more passes */
+    }
+    ...
+}
+...
+if (!path_is_directory_kex(kat_path)) {
+    fprintf(stderr, "[kex][kat] error: --kat path is not a directory: %s\n", kat_path);
+    return -1;
+}
+...
+if (strncmp(entry->d_name, "KAT_KEX_", 8) != 0) {
+    fprintf(stderr, "[kex][kat] error: unrecognized KAT file: %s\n", entry->d_name);
+    closedir(dir);
+    goto done;
+}
+```
+FIX:
+```c
+static const char *const k_ska_alias[] = {"SKa", "SK_A"};
+static const char *const k_pkb_alias[] = {"PKb", "PK_B"};
+static const char *const k_skb_alias[] = {"SKb", "SK_B"};
+static const char *const k_pka_alias[] = {"PKa", "PK_A"};
+static const char *const k_m2_alias[] = {"M2", "MSG2", "PASS2"};
+static const char *const k_m3_alias[] = {"M3", "MSG3", "PASS3"};
+static const char *const k_sta_alias[] = {"Init_Sta", "STA", "STATEA", "ST_A"};
+static const char *const k_stb_alias[] = {"Init_Stb", "STB", "STATEB", "ST_B"};
+static const char *const k_ss_alias[] = {
+    "SS", "SSA", "SSA_OUT", "SS_A", "SHAREDSECRETA",
+    "SSB", "SSB_OUT", "SS_B", "SHAREDSECRETB"
+};
+
+const ngcc_kat_field_t *ska =
+    ngcc_kat_get_field_any(vec, k_ska_alias, sizeof(k_ska_alias) / sizeof(k_ska_alias[0]));
+const ngcc_kat_field_t *pkb =
+    ngcc_kat_get_field_any(vec, k_pkb_alias, sizeof(k_pkb_alias) / sizeof(k_pkb_alias[0]));
+const ngcc_kat_field_t *pka =
+    ngcc_kat_get_field_any(vec, k_pka_alias, sizeof(k_pka_alias) / sizeof(k_pka_alias[0]));
+const ngcc_kat_field_t *skb =
+    ngcc_kat_get_field_any(vec, k_skb_alias, sizeof(k_skb_alias) / sizeof(k_skb_alias[0]));
+const ngcc_kat_field_t *ss =
+    ngcc_kat_get_field_any(vec, k_ss_alias, sizeof(k_ss_alias) / sizeof(k_ss_alias[0]));
+
+if (mb_field == NULL) {
+    mb_field = ngcc_kat_get_field_any(vec, k_m2_alias, sizeof(k_m2_alias) / sizeof(k_m2_alias[0]));
+}
+if (ma_field == NULL) {
+    ma_field = ngcc_kat_get_field_any(vec, k_m3_alias, sizeof(k_m3_alias) / sizeof(k_m3_alias[0]));
+}
+if (sta_field == NULL) {
+    sta_field = ngcc_kat_get_field_any(vec, k_sta_alias, sizeof(k_sta_alias) / sizeof(k_sta_alias[0]));
+}
+if (stb_field == NULL) {
+    stb_field = ngcc_kat_get_field_any(vec, k_stb_alias, sizeof(k_stb_alias) / sizeof(k_stb_alias[0]));
+}
+
+if (!path_is_directory_kex(kat_path)) {
+    ngcc_kat_file_t kat = {0};
+    if (ngcc_kat_parse_file(kat_path, &kat) != 0) {
+        return -1;
+    }
+    rc = verify_kex_kat_vectors(api, &kat, &total, &passed, &failed);
+    ngcc_kat_free(&kat);
+    goto done;
+}
+
+if (strncmp(entry->d_name, "KAT_KEX_", 8) != 0) {
+    continue;
+}
+
+rc = (total == 0) ? 1 : ((failed == 0) ? 0 : -1);
+```
+===END===
+===ISSUE===
+FILE: ngcc_bench/src/bench_sig.c
+LINE: 325-327, 386-440
+SEVERITY: high
+TITLE: DSA-verify KAT support no longer matches the documented alias set
+PROBLEM: The reader now only accepts `PK`, `M`, and `SN` fields inside `KAT_SIG_*` directory entries. Previously supported `PUBLICKEY`, `MSG`/`INPUT`/`MESSAGE`, and `SIG`/`SIGNATURE`/`OUTPUT` vectors are silently skipped; because zero matches now return `-1`, correctness reports FAIL instead of falling back.
+CODE:
+```c
+const ngcc_kat_field_t *pk = ngcc_kat_get_field(vec, "PK");
+const ngcc_kat_field_t *msg = ngcc_kat_get_field(vec, "M");
+const ngcc_kat_field_t *sn = ngcc_kat_get_field(vec, "Sn");
+...
+if (!path_is_directory_sig(kat_path)) {
+    fprintf(stderr, "[sig][kat] error: --kat path is not a directory: %s\n", kat_path);
+    return -1;
+}
+...
+if (strncmp(entry->d_name, "KAT_SIG_", 8) != 0) {
+    fprintf(stderr, "[sig][kat] error: unrecognized KAT file: %s\n", entry->d_name);
+    closedir(dir);
+    goto done;
+}
+...
+rc = (total > 0 && failed == 0) ? 0 : -1;
+```
+FIX:
+```c
+static const char *const k_pk_alias[] = {"PK", "PUBLICKEY"};
+static const char *const k_msg_alias[] = {"M", "MSG", "INPUT", "MESSAGE"};
+static const char *const k_sn_alias[] = {"SN", "SIG", "SIGNATURE", "SM", "OUTPUT"};
+
+const ngcc_kat_field_t *pk =
+    ngcc_kat_get_field_any(vec, k_pk_alias, sizeof(k_pk_alias) / sizeof(k_pk_alias[0]));
+const ngcc_kat_field_t *msg =
+    ngcc_kat_get_field_any(vec, k_msg_alias, sizeof(k_msg_alias) / sizeof(k_msg_alias[0]));
+const ngcc_kat_field_t *sn =
+    ngcc_kat_get_field_any(vec, k_sn_alias, sizeof(k_sn_alias) / sizeof(k_sn_alias[0]));
+
+if (!path_is_directory_sig(kat_path)) {
+    ngcc_kat_file_t kat = {0};
+    if (ngcc_kat_parse_file(kat_path, &kat) != 0) {
+        return -1;
+    }
+    rc = verify_sig_kat_vectors(api, &kat, &total, &passed, &failed);
+    ngcc_kat_free(&kat);
+    goto done;
+}
+
+if (strncmp(entry->d_name, "KAT_SIG_", 8) != 0) {
+    continue;
+}
+
+rc = (total == 0) ? 1 : ((failed == 0) ? 0 : -1);
+```
+===END===
+===ISSUE===
+FILE: tests/test_mock_mlkex.c
+LINE: 79-84
+SEVERITY: low
+TITLE: Mock KEX regression test still asserts the removed CLI and old output shape
+PROBLEM: The updated test still invokes `--iterations` and `--cycles`, and it still searches for the old `[kex][performance] ops=` format. Against this branch the command is rejected by the parser, and even after that is fixed the expected strings still do not match the new `[1024B]` output.
+CODE:
+```c
+{
+    char *const cmd[] = {
+        argv[1], "--lib", argv[2], "--test", "kex", "--mode", "performance",
+        "--iterations", "1000", "--cycles", "off", NULL
+    };
+    CHECK(run_expect(cmd, "[kex][performance] ops=", "[kex][performance][throughput]", "[kex][performance][time]") == 0,
+          "performance failed");
+}
+```
+FIX:
+```c
+{
+    char *const cmd[] = {
+        argv[1], "--lib", argv[2], "--test", "kex", "--mode", "performance", NULL
+    };
+    CHECK(run_expect(cmd,
+                     "[kex][performance][1024B] ops=",
+                     "[kex][performance][1024B][throughput]",
+                     "[kex][performance][1024B][time]") == 0,
+          "performance failed");
+}
+```
+===END===

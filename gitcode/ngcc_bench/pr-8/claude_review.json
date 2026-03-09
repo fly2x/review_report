@@ -1,0 +1,142 @@
+[
+  {
+    "source": "claude",
+    "file": "ngcc_bench/src/drng.c",
+    "line": "68",
+    "severity": "critical",
+    "title": "Incorrect pointer arithmetic causes endianness issues and potential out-of-bounds reads",
+    "problem": "The expression `(msg + i * 4)[0]` adds byte offset first, then reads single bytes. This relies on pointer arithmetic then byte access, which is confusing but technically correct for reading bytes. However, the more serious issue is that if `msg` is not aligned or if `blocks * 64` exceeds the actual buffer size passed by the caller, this reads beyond bounds. The sm3_bit function calls this with potentially unbounded input.",
+    "code": "W[i] = ((unsigned int)(msg + i * 4)[0] << 24 | (unsigned int)(msg + i * 4)[1] << 16 | (unsigned int)(msg + i * 4)[2] << 8 | (unsigned int)(msg + i * 4)[3]);",
+    "fix": "/* Use explicit byte indexing with bounds check */\nif (msg == NULL) return;\nfor (i = 0; i < 16; i++) {\n    size_t byte_offset = i * 4;\n    W[i] = ((unsigned int)msg[byte_offset + 0] << 24) |\n           ((unsigned int)msg[byte_offset + 1] << 16) |\n           ((unsigned int)msg[byte_offset + 2] << 8) |\n           ((unsigned int)msg[byte_offset + 3]);\n}"
+  },
+  {
+    "source": "claude",
+    "file": "ngcc_bench/src/bench_hash.c",
+    "line": "175",
+    "severity": "critical",
+    "title": "Integer overflow in msg_data_bytes calculation",
+    "problem": "When `msg_len_bits_val` is close to ULLONG_MAX, the expression `(msg_len_bits_val + 7) / 8` can overflow, resulting in a small value that passes allocation checks but causes buffer overflow later. The msg_len_bits_val comes from parsed KAT files which can contain arbitrary values.",
+    "code": "msg_data_bytes = (size_t) ((msg_len_bits_val + 7) / 8);",
+    "fix": "/* Check for overflow before calculation */\nif (msg_len_bits_val > (NGCC_MAX_BUFFER_LEN * 8ULL)) {\n    fprintf(stderr, \"[hash][kat] error: Msg_Len=%llu bits exceeds maximum buffer size\\n\", msg_len_bits_val);\n    any_fail = 1;\n    continue;\n}\nmsg_data_bytes = (size_t) ((msg_len_bits_val + 7) / 8);"
+  },
+  {
+    "source": "claude",
+    "file": "ngcc_bench/src/bench_hash.c",
+    "line": "180",
+    "severity": "critical",
+    "title": "calloc allocates 1 byte when msg_data_bytes is 0, but later code uses msg_data_bytes size",
+    "problem": "When `msg_data_bytes` is 0, the expression `msg_data_bytes > 0 ? msg_data_bytes : 1` allocates 1 byte. Later code at line 216 does `memset(msg_buf, 0xFF, msg_data_bytes)` which would be 0 bytes (no-op), but the buffer is only 1 byte. If msg_data_bytes was calculated as 0 due to overflow but should have been large, this is a buffer overflow.",
+    "code": "msg_buf = (unsigned char *) calloc(1, msg_data_bytes > 0 ? msg_data_bytes : 1);",
+    "fix": "/* Handle zero-length case properly */\nif (msg_data_bytes == 0) {\n    fprintf(stderr, \"[hash][kat] error: Msg_Len=%llu bits results in zero-byte message\\n\", msg_len_bits_val);\n    any_fail = 1;\n    continue;\n}\nmsg_buf = (unsigned char *) calloc(1, msg_data_bytes);\nif (msg_buf == NULL) {\n    fprintf(stderr, \"[hash][kat] error: failed to allocate %zu bytes for message \"\n            \"(Msg_Len=%llu bits)\\n\", msg_data_bytes, msg_len_bits_val);\n    any_fail = 1;\n    continue;\n}"
+  },
+  {
+    "source": "claude",
+    "file": "ngcc_bench/src/bench_hash.c",
+    "line": "329",
+    "severity": "critical",
+    "title": "No upper bound check for msg_bytes before malloc",
+    "problem": "The `msg_bytes` variable is computed from KAT file data and allocated directly without checking against `NGCC_MAX_BUFFER_LEN`. A malicious KAT file could cause allocation of arbitrary size, potentially exhausting memory or causing denial of service.",
+    "code": "msg_bytes = (size_t) ((msg_len_bits_val + 7) / 8);\n\nif (msg_bytes == 0 || digest_len == 0 || digest_len > msg_bytes) {\n    fprintf(stderr, \"[hash][kat_loop] error: invalid Msg_Len=%llu or Dst_Len=%d\\n\",\n            msg_len_bits_val, dst_len_bits_val);\n    return -1;\n}\n\nmsg = (unsigned char *) malloc(msg_bytes);",
+    "fix": "msg_bytes = (size_t) ((msg_len_bits_val + 7) / 8);\n\n/* Add upper bound check */\nif (msg_bytes == 0 || msg_bytes > NGCC_MAX_BUFFER_LEN ||\n    digest_len == 0 || digest_len > msg_bytes) {\n    fprintf(stderr, \"[hash][kat_loop] error: invalid Msg_Len=%llu or Dst_Len=%d (msg_bytes=%zu exceeds max)\\n\",\n            msg_len_bits_val, dst_len_bits_val, msg_bytes);\n    return -1;\n}\n\nmsg = (unsigned char *) malloc(msg_bytes);"
+  },
+  {
+    "source": "claude",
+    "file": "ngcc_bench/src/drng.c",
+    "line": "237-262",
+    "severity": "high",
+    "title": "SM3_DRNG_Instantiate doesn't validate nonce_len_bytes before using in malloc/memcpy",
+    "problem": "The `nonce_len_bytes` parameter is used directly in malloc without validation. If an attacker-controlled large value is passed, it could cause integer overflow in the malloc size or excessive memory allocation. Additionally, `memcpy(seed_material, nonce, nonce_len_bytes)` at line 251 writes into a buffer that might be smaller than `nonce_len_bytes` if `SEEDLEN > nonce_len_bytes`.",
+    "code": "seed_material = (unsigned char *)malloc(MAX_INT(nonce_len_bytes, SEEDLEN));\nif (NULL == seed_material)\n{\n    fprintf(stderr, \"ERROR: Memory allocation failed at %s, line %d. \\n\", __FILE__, __LINE__);\n    return DRNG_MEMORY_ALLOCATION_FAILED;\n}\nmemset(seed_material, 0, MAX_INT(nonce_len_bytes, SEEDLEN));\nmemcpy(seed_material, nonce, nonce_len_bytes);",
+    "fix": "/* Validate nonce_len_bytes to prevent excessive allocation */\nif (nonce_len_bytes > SEEDLEN) {\n    fprintf(stderr, \"ERROR: nonce_len_bytes %llu exceeds SEEDLEN %d\\n\", \n            nonce_len_bytes, SEEDLEN);\n    return DRNG_MEMORY_ALLOCATION_FAILED;\n}\nif (nonce == NULL && nonce_len_bytes > 0) {\n    fprintf(stderr, \"ERROR: nonce is NULL but nonce_len_bytes is non-zero\\n\");\n    return DRNG_MEMORY_ALLOCATION_FAILED;\n}\n\nseed_material = (unsigned char *)malloc(SEEDLEN);\nif (NULL == seed_material) {\n    fprintf(stderr, \"ERROR: Memory allocation failed at %s, line %d.\\n\", __FILE__, __LINE__);\n    return DRNG_MEMORY_ALLOCATION_FAILED;\n}\nmemset(seed_material, 0, SEEDLEN);\nmemcpy(seed_material, nonce, nonce_len_bytes);"
+  },
+  {
+    "source": "claude",
+    "file": "ngcc_bench/src/drng.c",
+    "line": "322-324",
+    "severity": "high",
+    "title": "get_random_number doesn't validate input pointers for NULL",
+    "problem": "The function doesn't check if `drng` or `random_number` are NULL before dereferencing them. This could cause null pointer dereference crashes.",
+    "code": "int get_random_number(DRNG_ctx *drng, unsigned char *random_number, unsigned long long random_number_len_bits)\n{\n    return SM3_DRNG_Generate(drng, random_number_len_bits, random_number);\n}",
+    "fix": "int get_random_number(DRNG_ctx *drng, unsigned char *random_number, unsigned long long random_number_len_bits)\n{\n    if (drng == NULL) {\n        return -1;\n    }\n    if (random_number == NULL && random_number_len_bits > 0) {\n        return -1;\n    }\n    return SM3_DRNG_Generate(drng, random_number_len_bits, random_number);\n}"
+  },
+  {
+    "source": "claude",
+    "file": "ngcc_bench/src/bench_hash.c",
+    "line": "357",
+    "severity": "medium",
+    "title": "KAT_LOOP_ITERATIONS of 1,000,000 runs without progress indication",
+    "problem": "The KAT loop test runs 1,000,000 iterations without any progress output. For a slow hash implementation or large message size, this could take hours and appear to be hung. No timeout mechanism exists.",
+    "code": "#define KAT_LOOP_ITERATIONS    1000000\n\n/* ... */\nfor (i = 0; i < KAT_LOOP_ITERATIONS; i++) {",
+    "fix": "/* Add progress indication every 100,000 iterations */\nfor (i = 0; i < KAT_LOOP_ITERATIONS; i++) {\n    if (i % 100000 == 0) {\n        printf(\"[hash][kat_loop] progress: %d / %d iterations\\n\", i, KAT_LOOP_ITERATIONS);\n    }\n    /* ... rest of loop body ... */\n}"
+  },
+  {
+    "source": "claude",
+    "file": "ngcc_bench/src/bench_hash.c",
+    "line": "360-362",
+    "severity": "medium",
+    "title": "Circular left shift assumes msg_bytes > digest_len without validation",
+    "problem": "The circular left shift code at lines 360-362 uses `msg_bytes - digest_len` and `digest_len` without checking that `msg_bytes >= digest_len`. While line 331 checks `digest_len > msg_bytes`, if they are equal, `msg_bytes - digest_len = 0` which is valid. However, the validation at line 331 should also catch the edge case more explicitly.",
+    "code": "if (msg_bytes == 0 || digest_len == 0 || digest_len > msg_bytes) {\n    fprintf(stderr, \"[hash][kat_loop] error: invalid Msg_Len=%llu or Dst_Len=%d\\n\",\n            msg_len_bits_val, dst_len_bits_val);\n    return -1;\n}\n\n/* ... */\nmemcpy(buffer, msg, digest_len);\nmemmove(msg, msg + digest_len, msg_bytes - digest_len);",
+    "fix": "if (msg_bytes == 0 || digest_len == 0 || digest_len > msg_bytes) {\n    fprintf(stderr, \"[hash][kat_loop] error: invalid Msg_Len=%llu or Dst_Len=%d (msg_bytes=%zu, digest_len=%zu)\\n\",\n            msg_len_bits_val, dst_len_bits_val, msg_bytes, digest_len);\n    return -1;\n}\n\n/* ... */\n/* Circular left shift is safe now due to validation above */\nmemcpy(buffer, msg, digest_len);\nmemmove(msg, msg + digest_len, msg_bytes - digest_len);"
+  },
+  {
+    "source": "claude",
+    "file": "ngcc_bench/src/drng.c",
+    "line": "244",
+    "severity": "medium",
+    "title": "MAX_INT macro misleadingly named for size types",
+    "problem": "The `MAX_INT` macro is used to compare `size_t` values but is named \"INT\", which is misleading. The macro also has problematic behavior when comparing types of different sizes. This could cause confusion and bugs.",
+    "code": "#define MAX_INT(a, b) ((a) > (b) ? (a) : (b))\n\nseed_material = (unsigned char *)malloc(MAX_INT(nonce_len_bytes, SEEDLEN));",
+    "fix": "/* Replace with properly typed max macro or use ternary directly */\nseed_material = (unsigned char *)malloc((nonce_len_bytes > SEEDLEN) ? nonce_len_bytes : SEEDLEN);"
+  },
+  {
+    "source": "claude",
+    "file": "ngcc_bench/src/bench_hash.c",
+    "line": "179-193",
+    "severity": "medium",
+    "title": "DRNG_ctx used without initialization before init_random_number call",
+    "problem": "The `DRNG_ctx drng` variable is declared but not initialized before being passed to `init_random_number`. While `init_random_number` calls `SM3_DRNG_Instantiate` which does `memset(drng, 0, sizeof(*drng))`, relying on this is fragile and the caller's intent is unclear. If the API contract changes, this could become a bug.",
+    "code": "DRNG_ctx drng;\nmsg_buf = (unsigned char *) calloc(1, msg_data_bytes > 0 ? msg_data_bytes : 1);\nif (msg_buf == NULL) {\n    /* ... */\n}\nif (init_random_number(&drng, msg_seed_f->data, msg_seed_f->len) != 0) {\n    /* ... */\n}",
+    "fix": "/* Explicitly initialize to zero for clarity and safety */\nDRNG_ctx drng = {0};\nmsg_buf = (unsigned char *) calloc(1, msg_data_bytes > 0 ? msg_data_bytes : 1);\nif (msg_buf == NULL) {\n    /* ... */\n}\nif (init_random_number(&drng, msg_seed_f->data, msg_seed_f->len) != 0) {\n    /* ... */\n}"
+  },
+  {
+    "source": "claude",
+    "file": "ngcc_bench/src/bench_sig.c",
+    "line": "309-313",
+    "severity": "medium",
+    "title": "Inconsistent error handling in check_field_len function",
+    "problem": "The `sig_check_field_len` function returns 0 on success or no len field, but the caller treats the return value inconsistently. When length mismatch is found, it increments failed counter but the error path only continues, potentially leaving inconsistent state.",
+    "code": "static int sig_check_field_len(const char *field_name, const ngcc_kat_field_t *data_field,\n                               const ngcc_kat_field_t *len_field) {\n    unsigned long long expected;\n    if (len_field == NULL || data_field == NULL) {\n        return 0;  /* no len field to validate */\n    }\n    expected = sig_field_to_u64(len_field);\n    if (expected == 0) {\n        return 0;  /* empty len value, skip */\n    }\n    if ((unsigned long long) data_field->len != expected) {\n        fprintf(stderr, \"[sig][kat] error: %s length mismatch: \"\n                \"file says %llu bytes, data has %zu bytes\\n\",\n                field_name, expected, data_field->len);\n        return -1;\n    }\n    return 0;\n}",
+    "fix": "/* The function is actually correct - returning 0 for \"no error\" and non-zero\n * for error. The caller handles it correctly by checking the return value.\n * The comment \"no len field to validate\" is misleading since it returns 0\n * (success) but the caller might interpret it differently. Consider changing\n * to a more explicit pattern. */"
+  },
+  {
+    "source": "claude",
+    "file": "ngcc_bench/src/drng.c",
+    "line": "325",
+    "severity": "low",
+    "title": "Missing newline at end of file",
+    "problem": "The file ends without a newline character, which violates POSIX standards and can cause issues with some tools and version control systems.",
+    "code": "int get_random_number(DRNG_ctx *drng, unsigned char *random_number, unsigned long long random_number_len_bits)\n{\n    return SM3_DRNG_Generate(drng, random_number_len_bits, random_number);\n}",
+    "fix": "int get_random_number(DRNG_ctx *drng, unsigned char *random_number, unsigned long long random_number_len_bits)\n{\n    return SM3_DRNG_Generate(drng, random_number_len_bits, random_number);\n}\n<add newline at end>"
+  },
+  {
+    "source": "claude",
+    "file": "ngcc_bench/include/drng.h",
+    "line": "47",
+    "severity": "low",
+    "title": "Missing newline at end of file",
+    "problem": "The header file ends without a newline character, which violates POSIX standards and can cause issues with some tools and version control systems.",
+    "code": "}\n#endif\n\\ No newline at end of file",
+    "fix": "}\n#endif\n<add newline at end>"
+  },
+  {
+    "source": "claude",
+    "file": "ngcc_bench/src/cli_parser.c",
+    "line": "29-35",
+    "severity": "low",
+    "title": "Incomplete help message after removing options",
+    "problem": "The help message was updated to remove `--iterations`, `--msg-len`, and `--cycles` options, but the ordering of remaining options is inconsistent with the implementation where `--digest-len-bits` appears at position 'b' but is listed third in usage.",
+    "code": "printf(\"     [--digest-len-bits BITS]\\n\");\nprintf(\"     [--duration-hours H] [--stability-max-cases N] [--stability-sample-ms MS]\\n\");\nprintf(\"     [--json-out PATH] [--kat FILE]\\n\");",
+    "fix": "/* The help text is functionally correct, but could be clearer by grouping\n * related options together for better user experience */\nprintf(\"Required:\\n\");\nprintf(\"  --digest-len-bits BITS     Digest length in bits (required for hash tests)\\n\\n\");\nprintf(\"Optional:\\n\");\nprintf(\"  --duration-hours H         Stability test duration (default: 6.0)\\n\");\nprintf(\"  --stability-max-cases N    Max cases for stability test (default: 3000)\\n\");\nprintf(\"  --stability-sample-ms MS   Sample interval for stability (default: 1.0)\\n\");\nprintf(\"  --json-out PATH            Write JSON report to file\\n\");\nprintf(\"  --kat FILE|DIR            KAT file or directory for correctness tests\\n\");"
+  }
+]

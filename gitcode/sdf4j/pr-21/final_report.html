@@ -1,0 +1,506 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Final Report: openHiTLS/sdf4j#21</title>
+    <style>
+        :root { --critical: #dc2626; --high: #ea580c; --medium: #ca8a04; --low: #65a30d;
+                 --trusted: #059669; --likely: #0284c7; --evaluate: #7c3aed; }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: system-ui, sans-serif; background: #f8fafc; color: #1e293b; padding: 2rem; line-height: 1.6; }
+        .container { max-width: 900px; margin: 0 auto; }
+        h1 { font-size: 1.75rem; margin-bottom: 0.5rem; }
+        .subtitle { color: #64748b; margin-bottom: 1rem; }
+        .stats { display: flex; gap: 1rem; margin-bottom: 2rem; flex-wrap: wrap; }
+        .stat { background: white; border: 1px solid #e2e8f0; border-radius: 0.5rem; padding: 1rem; min-width: 100px; text-align: center; }
+        .stat-value { font-size: 1.5rem; font-weight: 700; }
+        .stat-label { font-size: 0.875rem; color: #64748b; }
+        .stat.critical .stat-value { color: var(--critical); }
+        .stat.high .stat-value { color: var(--high); }
+        .stat.medium .stat-value { color: var(--medium); }
+        .stat.low .stat-value { color: var(--low); }
+        .reviewers { background: #e0e7ff; color: #3730a3; padding: 0.5rem 1rem; border-radius: 0.5rem; margin-bottom: 2rem; }
+        .section { margin-bottom: 2rem; }
+        .section-title { font-size: 1.1rem; font-weight: 600; padding: 0.5rem 1rem; border-radius: 0.5rem 0.5rem 0 0; color: white; }
+        .section-title.critical { background: var(--critical); }
+        .section-title.high { background: var(--high); }
+        .section-title.medium { background: var(--medium); }
+        .section-title.low { background: var(--low); }
+        .issue { background: white; border: 1px solid #e2e8f0; border-top: none; padding: 1rem; }
+        .issue:last-child { border-radius: 0 0 0.5rem 0.5rem; }
+        .issue-title { font-weight: 600; margin-bottom: 0.25rem; }
+        .issue-location { font-family: monospace; font-size: 0.875rem; color: #64748b; margin-bottom: 0.5rem; }
+        .issue-meta { font-size: 0.75rem; margin-bottom: 0.75rem; display: flex; gap: 0.75rem; align-items: center; }
+        .issue-meta .reviewers { background: #f1f5f9; color: #475569; padding: 0.25rem 0.5rem; border-radius: 0.25rem; margin: 0; }
+        .confidence-badge { padding: 0.25rem 0.5rem; border-radius: 0.25rem; font-weight: 500; }
+        .confidence-badge.trusted { background: #d1fae5; color: #065f46; }
+        .confidence-badge.likely { background: #dbeafe; color: #1e40af; }
+        .confidence-badge.evaluate { background: #ede9fe; color: #5b21b6; }
+        pre { background: #1e293b; color: #e2e8f0; padding: 0.75rem; border-radius: 0.375rem; overflow-x: auto; font-size: 0.875rem; margin: 0.5rem 0; }
+        .problem { margin: 0.75rem 0; }
+        .fix-label { font-weight: 600; margin-top: 0.75rem; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Final Code Review Report</h1>
+        <div class="subtitle">openHiTLS/sdf4j - PR #21</div>
+        <p style="margin-bottom: 1rem;"></p>
+
+        <div class="stats">
+            <div class="stat"><div class="stat-value">14</div><div class="stat-label">Total</div></div>
+            <div class="stat critical"><div class="stat-value">2</div><div class="stat-label">Critical</div></div>
+            <div class="stat high"><div class="stat-value">5</div><div class="stat-label">High</div></div>
+            <div class="stat medium"><div class="stat-value">4</div><div class="stat-label">Medium</div></div>
+            <div class="stat low"><div class="stat-value">3</div><div class="stat-label">Low</div></div>
+        </div>
+
+        <div class="reviewers">Reviewers: claude, codex</div>
+<div class="section"><div class="section-title critical">Critical</div>
+<div class="issue">
+                <div class="issue-title">HybridCipher native_to_java can read past fixed ct_m buffer</div>
+                <div class="issue-location">sdf4j/src/main/native/src/type_conversion.c:750-760</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CODEX</span>
+                    <span class="confidence-badge trusted">置信度: 可信</span>
+                </div>
+                <pre>jsize ctm_len = (jsize)native_cipher-&gt;L1;
+jbyteArray ctm_array = (*env)-&gt;NewByteArray(env, ctm_len);
+if (ctm_array == NULL) {
+    THROW_SDF_EXCEPTION(env, SDR_INARGERR, "Failed to create ctM array");
+    return NULL;
+}
+(*env)-&gt;SetByteArrayRegion(env, ctm_array, 0, ctm_len, (jbyte*)native_cipher-&gt;ct_m);</pre>
+                <div class="problem"><strong>Issue:</strong> The code uses `native_cipher->L1` directly as the length for copying from `native_cipher->ct_m`, but `ct_m` is a fixed-size buffer of `HYBRIDENCref_MAX_LEN` (1576 bytes). If a malicious or buggy SDF device returns `L1 > 1576`, `SetByteArrayRegion` will read out of bounds, potentially causing a crash or information disclosure.</div>
+                <div class="fix-label">Fix:</div><pre>if (native_cipher-&gt;L1 &gt; HYBRIDENCref_MAX_LEN) {
+    THROW_SDF_EXCEPTION(env, SDR_INARGERR, "HybridCipher L1 exceeds buffer size");
+    return NULL;
+}
+jsize ctm_len = (jsize)native_cipher-&gt;L1;
+jbyteArray ctm_array = (*env)-&gt;NewByteArray(env, ctm_len);
+if (ctm_array == NULL) {
+    THROW_SDF_EXCEPTION(env, SDR_INARGERR, "Failed to create ctM array");
+    return NULL;
+}
+if (ctm_len &gt; 0) {
+    (*env)-&gt;SetByteArrayRegion(env, ctm_array, 0, ctm_len, (jbyte*)native_cipher-&gt;ct_m);
+}</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">HybridSignature native_to_java can read past fixed sig_m buffer</div>
+                <div class="issue-location">sdf4j/src/main/native/src/type_conversion.c:830-848</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CODEX</span>
+                    <span class="confidence-badge trusted">置信度: 可信</span>
+                </div>
+                <pre>jbyteArray sig_m_array = NULL;
+if (sig_m_len &gt; 0) {
+    sig_m_array = (*env)-&gt;NewByteArray(env, sig_m_len);
+    if (sig_m_array == NULL) {
+        THROW_SDF_EXCEPTION(env, SDR_INARGERR, "Failed to new byte array");
+        return NULL;
+    }
+    (*env)-&gt;SetByteArrayRegion(env, sig_m_array, 0, sig_m_len, (jbyte*)native_sig-&gt;sig_m);
+}</pre>
+                <div class="problem"><strong>Issue:</strong> The code uses `sig_m_len` directly as the length for copying from `native_sig->sig_m`, but `sig_m` is a fixed-size buffer of `HYBRIDSIGref_MAX_LEN` (4636 bytes). If `sig_m_len` exceeds the buffer size, `SetByteArrayRegion` will read out of bounds.</div>
+                <div class="fix-label">Fix:</div><pre>if (sig_m_len &gt; HYBRIDSIGref_MAX_LEN) {
+    THROW_SDF_EXCEPTION(env, SDR_INARGERR, "HybridSignature sig_m_len exceeds buffer size");
+    return NULL;
+}
+
+jbyteArray sig_m_array = NULL;
+if (sig_m_len &gt; 0) {
+    sig_m_array = (*env)-&gt;NewByteArray(env, sig_m_len);
+    if (sig_m_array == NULL) {
+        THROW_SDF_EXCEPTION(env, SDR_INARGERR, "Failed to create sigM array");
+        return NULL;
+    }
+    (*env)-&gt;SetByteArrayRegion(env, sig_m_array, 0, sig_m_len, (jbyte*)native_sig-&gt;sig_m);
+}</pre>
+            </div>
+</div>
+<div class="section"><div class="section-title high">High</div>
+<div class="issue">
+                <div class="issue-title">Default constructor leaves asymAlgAbility null</div>
+                <div class="issue-location">sdf4j/src/main/java/org/openhitls/sdf4j/types/DeviceInfo.java:76-77</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CLAUDE</span>
+                    <span class="confidence-badge trusted">置信度: 可信</span>
+                </div>
+                <pre>public DeviceInfo() {
+}</pre>
+                <div class="problem"><strong>Issue:</strong> The default constructor does not initialize the `asymAlgAbility` array. When `getAsymAlgAbility()` is called on a default-constructed object, it returns null. The `toString()` method calls `Arrays.toString(asymAlgAbility)` which will handle null gracefully, but other code expecting a non-null array will throw NullPointerException.</div>
+                <div class="fix-label">Fix:</div><pre>public DeviceInfo() {
+    this.asymAlgAbility = new long[2];
+}</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">setC() validation depends on call order with setL()</div>
+                <div class="issue-location">sdf4j/src/main/java/org/openhitls/sdf4j/types/ECCCipher.java:135-140</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CLAUDE</span>
+                    <span class="confidence-badge trusted">置信度: 可信</span>
+                </div>
+                <pre>public void setC(byte[] c) {
+    if (c == null || this.l &gt; c.length) {
+        throw new IllegalArgumentException("cipher value is invalid");
+    }
+    this.c = c;
+}
+
+public void setL(long l) {
+    if (l &lt; 0) {
+        throw new IllegalArgumentException("Ciphertext length cannot be negative");
+    }
+    this.l = l;
+}</pre>
+                <div class="problem"><strong>Issue:</strong> The validation `this.l > c.length` depends on `l` being set BEFORE `c`. If a caller calls `setC()` first (when `l` defaults to 0), the validation passes even when later `setL()` is called with a larger value. This creates an inconsistent state where `l > c.length`.</div>
+                <div class="fix-label">Fix:</div><pre>public void setC(byte[] c) {
+    if (c == null) {
+        throw new IllegalArgumentException("cipher value cannot be null");
+    }
+    this.c = c;
+    if (this.l &gt; c.length) {
+        throw new IllegalArgumentException("l cannot exceed c.length");
+    }
+}
+
+public void setL(long l) {
+    if (l &lt; 0) {
+        throw new IllegalArgumentException("Ciphertext length cannot be negative");
+    }
+    if (this.c != null &amp;&amp; l &gt; this.c.length) {
+        throw new IllegalArgumentException("l cannot exceed c.length");
+    }
+    this.l = l;
+}</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">setCtM() validation depends on call order with setL1()</div>
+                <div class="issue-location">sdf4j/src/main/java/org/openhitls/sdf4j/types/HybridCipher.java:70-75</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CLAUDE</span>
+                    <span class="confidence-badge trusted">置信度: 可信</span>
+                </div>
+                <pre>public void setCtM(byte[] ctM) {
+    if (ctM == null || this.l1 &gt; ctM.length) {
+        throw new IllegalArgumentException("cipher value is invalid");
+    }
+    this.ctM = ctM;
+}</pre>
+                <div class="problem"><strong>Issue:</strong> The validation `this.l1 > ctM.length` depends on `l1` being set BEFORE `ctM`. Since `l1` defaults to 0, calling `setCtM()` first passes validation even if the array length is invalid.</div>
+                <div class="fix-label">Fix:</div><pre>public void setCtM(byte[] ctM) {
+    if (ctM == null) {
+        throw new IllegalArgumentException("cipher value cannot be null");
+    }
+    this.ctM = ctM;
+    if (this.l1 &gt; ctM.length) {
+        throw new IllegalArgumentException("l1 cannot exceed ctM.length");
+    }
+}
+
+public void setL1(long l1) {
+    if (l1 &lt; 0) {
+        throw new IllegalArgumentException("Ciphertext length cannot be negative");
+    }
+    if (this.ctM != null &amp;&amp; l1 &gt; this.ctM.length) {
+        throw new IllegalArgumentException("l1 cannot exceed ctM.length");
+    }
+    this.l1 = l1;
+}</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">setSigM() validation depends on call order with setL()</div>
+                <div class="issue-location">sdf4j/src/main/java/org/openhitls/sdf4j/types/HybridSignature.java:63-67</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CLAUDE</span>
+                    <span class="confidence-badge trusted">置信度: 可信</span>
+                </div>
+                <pre>public void setSigM(byte[] sigM) {
+    if (sigM == null || this.l &gt; sigM.length) {
+        throw new IllegalArgumentException("signature value is invalid");
+    }
+    this.sigM = sigM;
+}</pre>
+                <div class="problem"><strong>Issue:</strong> The validation `this.l > sigM.length` depends on `l` being set BEFORE `sigM`. Default `l` is 0, so validation is ineffective if `setSigM()` is called first.</div>
+                <div class="fix-label">Fix:</div><pre>public void setSigM(byte[] sigM) {
+    if (sigM == null) {
+        throw new IllegalArgumentException("signature value cannot be null");
+    }
+    this.sigM = sigM;
+    if (this.l &gt; sigM.length) {
+        throw new IllegalArgumentException("l cannot exceed sigM.length");
+    }
+}
+
+public void setL(int l) {
+    if (l &lt; 0) {
+        throw new IllegalArgumentException("Signature length cannot be negative");
+    }
+    if (this.sigM != null &amp;&amp; l &gt; this.sigM.length) {
+        throw new IllegalArgumentException("l cannot exceed sigM.length");
+    }
+    this.l = l;
+}</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">Constructor accepts null arrays for key components</div>
+                <div class="issue-location">sdf4j/src/main/java/org/openhitls/sdf4j/types/RSAPrivateKey.java:101-113</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CLAUDE, CODEX</span>
+                    <span class="confidence-badge trusted">置信度: 可信</span>
+                </div>
+                <pre>public RSAPrivateKey(int bits, byte[] m, byte[] e, byte[] d,
+                     byte[][] prime, byte[][] pexp, byte[] coef) {
+    if (bits &lt;= 0 || bits &gt; RSA_MAX_BITS) {
+        throw new IllegalArgumentException("Invalid bits: " + bits);
+    }
+    this.bits = bits;
+    this.m = m;
+    this.e = e;
+    this.d = d;
+    this.prime = prime;
+    this.pexp = pexp;
+    this.coef = coef;
+}</pre>
+                <div class="problem"><strong>Issue:</strong> The constructor assigns key component arrays directly without validating that they are non-null or have proper dimensions. Invalid keys can be created and passed to JNI code, potentially causing silent failures or crashes.</div>
+                <div class="fix-label">Fix:</div><pre>public RSAPrivateKey(int bits, byte[] m, byte[] e, byte[] d,
+                     byte[][] prime, byte[][] pexp, byte[] coef) {
+    if (bits &lt;= 0 || bits &gt; RSA_MAX_BITS) {
+        throw new IllegalArgumentException("Invalid bits: " + bits);
+    }
+    if (m == null || e == null || d == null || coef == null) {
+        throw new IllegalArgumentException("Key components cannot be null");
+    }
+    if (prime == null || prime.length &lt; 2 || prime[0] == null || prime[1] == null) {
+        throw new IllegalArgumentException("prime must have at least 2 non-null elements");
+    }
+    if (pexp == null || pexp.length &lt; 2 || pexp[0] == null || pexp[1] == null) {
+        throw new IllegalArgumentException("pexp must have at least 2 non-null elements");
+    }
+    this.bits = bits;
+    this.m = m;
+    this.e = e;
+    this.d = d;
+    this.prime = prime;
+    this.pexp = pexp;
+    this.coef = coef;
+}</pre>
+            </div>
+</div>
+<div class="section"><div class="section-title medium">Medium</div>
+<div class="issue">
+                <div class="issue-title">setPrime() and setPexp() accept null or invalid arrays</div>
+                <div class="issue-location">sdf4j/src/main/java/org/openhitls/sdf4j/types/RSAPrivateKey.java:170-183</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CLAUDE</span>
+                    <span class="confidence-badge trusted">置信度: 可信</span>
+                </div>
+                <pre>public void setPrime(byte[][] prime) {
+    this.prime = prime;
+}
+
+public void setPexp(byte[][] pexp) {
+    this.pexp = pexp;
+}</pre>
+                <div class="problem"><strong>Issue:</strong> The setters do not validate that the arrays are non-null or have the required 2 elements, allowing invalid key state.</div>
+                <div class="fix-label">Fix:</div><pre>public void setPrime(byte[][] prime) {
+    if (prime == null || prime.length &lt; 2) {
+        throw new IllegalArgumentException("prime must have at least 2 elements");
+    }
+    this.prime = prime;
+}
+
+public void setPexp(byte[][] pexp) {
+    if (pexp == null || pexp.length &lt; 2) {
+        throw new IllegalArgumentException("pexp must have at least 2 elements");
+    }
+    this.pexp = pexp;
+}</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">setC() does not keep l synchronized with c array length</div>
+                <div class="issue-location">sdf4j/src/main/java/org/openhitls/sdf4j/types/ECCCipher.java:135-140</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CODEX</span>
+                    <span class="confidence-badge likely">置信度: 较可信</span>
+                </div>
+                <pre>public void setC(byte[] c) {
+    if (c == null || this.l &gt; c.length) {
+        throw new IllegalArgumentException("cipher value is invalid");
+    }
+    this.c = c;
+}</pre>
+                <div class="problem"><strong>Issue:</strong> When `setC()` is called, only the `c` field is updated but `l` remains unchanged. This can create an inconsistent state where `l` does not match `c.length`, which may be passed to native code expecting consistent values.</div>
+                <div class="fix-label">Fix:</div><pre>public void setC(byte[] c) {
+    if (c == null) {
+        throw new IllegalArgumentException("cipher value cannot be null");
+    }
+    if (this.l &gt; c.length) {
+        throw new IllegalArgumentException("l cannot exceed c.length");
+    }
+    this.c = c;
+    this.l = c.length;  // Keep l in sync with actual array length
+}</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">Constructor does not validate asymAlgAbility array length</div>
+                <div class="issue-location">sdf4j/src/main/java/org/openhitls/sdf4j/types/DeviceInfo.java:92-107</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CLAUDE</span>
+                    <span class="confidence-badge trusted">置信度: 可信</span>
+                </div>
+                <pre>public DeviceInfo(String issuerName, String deviceName, String deviceSerial,
+                  long deviceVersion, long standardVersion, long[] asymAlgAbility,
+                  long symAlgAbility, long hashAlgAbility, long bufferSize) {
+    if (issuerName == null || deviceName == null || deviceSerial == null || asymAlgAbility == null) {
+        throw new IllegalArgumentException("null input");
+    }
+    this.asymAlgAbility = asymAlgAbility;</pre>
+                <div class="problem"><strong>Issue:</strong> The constructor checks for null but does not validate that `asymAlgAbility` has exactly 2 elements as required by the SDF specification. This can cause incorrect behavior.</div>
+                <div class="fix-label">Fix:</div><pre>public DeviceInfo(String issuerName, String deviceName, String deviceSerial,
+                  long deviceVersion, long standardVersion, long[] asymAlgAbility,
+                  long symAlgAbility, long hashAlgAbility, long bufferSize) {
+    if (issuerName == null || deviceName == null || deviceSerial == null || asymAlgAbility == null) {
+        throw new IllegalArgumentException("null input");
+    }
+    if (asymAlgAbility.length != 2) {
+        throw new IllegalArgumentException("asymAlgAbility must have exactly 2 elements");
+    }
+    this.asymAlgAbility = asymAlgAbility;</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">Constructor signature change breaks backward compatibility</div>
+                <div class="issue-location">sdf4j/src/main/java/org/openhitls/sdf4j/types/ECCCipher.java:68</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CODEX</span>
+                    <span class="confidence-badge likely">置信度: 较可信</span>
+                </div>
+                <pre>public ECCCipher(byte[] x, byte[] y, byte[] m, long l, byte[] c) {</pre>
+                <div class="problem"><strong>Issue:</strong> The previous public constructor `ECCCipher(byte[] x, byte[] y, byte[] m, byte[] c)` was removed and replaced with `ECCCipher(byte[] x, byte[] y, byte[] m, long l, byte[] c)`. Existing client code using the old 4-parameter constructor will fail to compile.</div>
+                <div class="fix-label">Fix:</div><pre>// Keep the new 5-parameter constructor
+public ECCCipher(byte[] x, byte[] y, byte[] m, long l, byte[] c) {
+    // existing implementation
+}
+
+// Add backward-compatible overload
+public ECCCipher(byte[] x, byte[] y, byte[] m, byte[] c) {
+    this(x, y, m, c == null ? 0 : c.length, c);
+}</pre>
+            </div>
+</div>
+<div class="section"><div class="section-title low">Low</div>
+<div class="issue">
+                <div class="issue-title">setM(), setE(), setD() don't validate null or array bounds</div>
+                <div class="issue-location">sdf4j/src/main/java/org/openhitls/sdf4j/types/RSAPrivateKey.java:137-161</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CLAUDE</span>
+                    <span class="confidence-badge trusted">置信度: 可信</span>
+                </div>
+                <pre>public void setM(byte[] m) {
+    this.m = m;
+}
+
+public void setE(byte[] e) {
+    this.e = e;
+}
+
+public void setD(byte[] d) {
+    this.d = d;
+}</pre>
+                <div class="problem"><strong>Issue:</strong> These setters assign byte arrays directly without null checks or length validation against `RSA_MAX_LEN` (512 bytes).</div>
+                <div class="fix-label">Fix:</div><pre>public void setM(byte[] m) {
+    if (m == null) {
+        throw new IllegalArgumentException("Modulus cannot be null");
+    }
+    if (m.length &gt; RSA_MAX_LEN) {
+        throw new IllegalArgumentException("Modulus exceeds maximum length of " + RSA_MAX_LEN + " bytes");
+    }
+    this.m = m;
+}
+
+public void setE(byte[] e) {
+    if (e == null) {
+        throw new IllegalArgumentException("Exponent cannot be null");
+    }
+    if (e.length &gt; RSA_MAX_LEN) {
+        throw new IllegalArgumentException("Exponent exceeds maximum length of " + RSA_MAX_LEN + " bytes");
+    }
+    this.e = e;
+}
+
+public void setD(byte[] d) {
+    if (d == null) {
+        throw new IllegalArgumentException("Private exponent cannot be null");
+    }
+    if (d.length &gt; RSA_MAX_LEN) {
+        throw new IllegalArgumentException("Private exponent exceeds maximum length of " + RSA_MAX_LEN + " bytes");
+    }
+    this.d = d;
+}</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">setCoef() doesn't validate null or array bounds</div>
+                <div class="issue-location">sdf4j/src/main/java/org/openhitls/sdf4j/types/RSAPrivateKey.java:192-194</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CLAUDE</span>
+                    <span class="confidence-badge trusted">置信度: 可信</span>
+                </div>
+                <pre>public void setCoef(byte[] coef) {
+    this.coef = coef;
+}</pre>
+                <div class="problem"><strong>Issue:</strong> The setter assigns the coef array without null check or validation against `RSA_MAX_PLEN` (256 bytes).</div>
+                <div class="fix-label">Fix:</div><pre>public void setCoef(byte[] coef) {
+    if (coef == null) {
+        throw new IllegalArgumentException("CRT coefficient cannot be null");
+    }
+    if (coef.length &gt; RSA_MAX_PLEN) {
+        throw new IllegalArgumentException("CRT coefficient exceeds maximum length of " + RSA_MAX_PLEN + " bytes");
+    }
+    this.coef = coef;
+}</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">setM() and setE() don't validate array bounds</div>
+                <div class="issue-location">sdf4j/src/main/java/org/openhitls/sdf4j/types/RSAPublicKey.java:91-110</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CLAUDE</span>
+                    <span class="confidence-badge trusted">置信度: 可信</span>
+                </div>
+                <pre>public void setM(byte[] m) {
+    if (m == null) {
+        throw new IllegalArgumentException("Modulus cannot be null");
+    }
+    this.m = m;
+}
+
+public void setE(byte[] e) {
+    if (e == null) {
+        throw new IllegalArgumentException("Exponent cannot be null");
+    }
+    this.e = e;
+}</pre>
+                <div class="problem"><strong>Issue:</strong> The setters check for null but don't validate array length against `RSA_MAX_LEN` (512 bytes).</div>
+                <div class="fix-label">Fix:</div><pre>public void setM(byte[] m) {
+    if (m == null) {
+        throw new IllegalArgumentException("Modulus cannot be null");
+    }
+    if (m.length &gt; RSA_MAX_LEN) {
+        throw new IllegalArgumentException("Modulus exceeds maximum length of " + RSA_MAX_LEN + " bytes");
+    }
+    this.m = m;
+}
+
+public void setE(byte[] e) {
+    if (e == null) {
+        throw new IllegalArgumentException("Exponent cannot be null");
+    }
+    if (e.length &gt; RSA_MAX_LEN) {
+        throw new IllegalArgumentException("Exponent exceeds maximum length of " + RSA_MAX_LEN + " bytes");
+    }
+    this.e = e;
+}</pre>
+            </div>
+</div>
+</div></body></html>

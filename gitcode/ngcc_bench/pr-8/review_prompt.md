@@ -1,0 +1,93 @@
+# Change Review Task
+
+You are reviewing PR #8 for openHiTLS/ngcc_bench.
+
+
+## Changed Files (17 files)
+
+**Source** (15 files):
+  - ngcc_bench/include/bench_core.h
+  - ngcc_bench/include/cli_types.h
+  - ngcc_bench/include/drng.h
+  - ngcc_bench/src/bench_core.c
+  - ngcc_bench/src/bench_hash.c
+  - ngcc_bench/src/bench_kem.c
+  - ngcc_bench/src/bench_kex.c
+  - ngcc_bench/src/bench_sig.c
+  - ngcc_bench/src/cli_parser.c
+  - ngcc_bench/src/drng.c
+  - ngcc_bench/src/interactive.c
+  - ngcc_bench/src/json_report.c
+  - ngcc_bench/src/kat_parser.c
+  - ngcc_bench/src/loader.c
+  - ngcc_bench/src/main.c
+
+**Test** (1 files):
+  - tests/test_mock_mlkex.c
+
+**Docs** (1 files):
+  - CMakeLists.txt
+
+
+## Your Task
+
+Perform a thorough change review by:
+
+1. **Understand the Change**
+   - Read the diff stats: `git diff --stat 0dc16569abd4154d2347a9ba2626ffeac3e76fc2 mr-8`
+   - Understand what this PR is trying to achieve
+
+2. **Review Each File**
+   - For each changed file, view its diff: `git diff 0dc16569abd4154d2347a9ba2626ffeac3e76fc2 mr-8 -- <file>`
+   - If you need more context, read the full file or search for related code
+   - Look for: security issues, logic errors, edge cases, error handling
+   - For non-code files (docs/config), focus on correctness and safety of the content
+
+3. **Track Dependencies**
+   - When you find a changed function, check its callers
+   - When you see a new API, verify it's used correctly
+   - Use grep/search to find related code
+
+4. **Focus Areas**
+   - Security: injection, auth bypass, data exposure, buffer overflow
+   - Logic: null/nil checks, boundary conditions, error paths
+   - API: breaking changes, compatibility, proper error returns
+   - Resources: leaks, proper cleanup, race conditions
+   - Documentation (Markdown/docs): incorrect or outdated instructions, wrong flags/paths,
+     broken references, misleading examples, missing steps, or unsafe guidance
+   - Config/build/CI: insecure defaults, mismatched versions, missing required keys
+
+## Output Format - CRITICAL
+
+You MUST output each issue in the EXACT format below. Do NOT output summaries, tables, or prose.
+Your ONLY output should be ===ISSUE=== blocks. No introduction, no conclusion.
+
+For each issue found, output EXACTLY:
+
+===ISSUE===
+FILE: <filepath>
+LINE: <line number or range>
+SEVERITY: critical|high|medium|low
+TITLE: <concise title>
+PROBLEM: <what's wrong>
+CODE:
+```
+<problematic code>
+```
+FIX:
+```
+<suggested fix>
+```
+===END===
+
+## Rules
+
+- ONLY output ===ISSUE=== blocks, nothing else
+- Do NOT write summaries or conclusions
+- Do NOT use markdown headers or bullet points outside of issue blocks
+- Only flag issues in CHANGED lines (code or docs, not pre-existing issues)
+- Be specific with line numbers
+- Provide working fixes, not just descriptions
+  - For docs, FIX should be the corrected text/snippet
+
+Start the review now. Output each issue as you find it.

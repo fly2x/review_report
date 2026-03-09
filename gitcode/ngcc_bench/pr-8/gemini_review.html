@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Code Review: openHiTLS/ngcc_bench#8 - GEMINI</title>
+    <style>
+        :root { --critical: #dc2626; --high: #ea580c; --medium: #ca8a04; --low: #65a30d; }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: system-ui, sans-serif; background: #f8fafc; color: #1e293b; padding: 2rem; line-height: 1.6; }
+        .container { max-width: 900px; margin: 0 auto; }
+        h1 { font-size: 1.5rem; margin-bottom: 0.5rem; }
+        .subtitle { color: #64748b; margin-bottom: 2rem; }
+        .section { margin-bottom: 2rem; }
+        .section-title { font-size: 1.1rem; font-weight: 600; padding: 0.5rem 1rem; border-radius: 0.5rem 0.5rem 0 0; color: white; }
+        .section-title.critical { background: var(--critical); }
+        .section-title.high { background: var(--high); }
+        .section-title.medium { background: var(--medium); }
+        .section-title.low { background: var(--low); }
+        .issue { background: white; border: 1px solid #e2e8f0; border-top: none; padding: 1rem; }
+        .issue:last-child { border-radius: 0 0 0.5rem 0.5rem; }
+        .issue-title { font-weight: 600; margin-bottom: 0.25rem; }
+        .issue-location { font-family: monospace; font-size: 0.875rem; color: #64748b; margin-bottom: 0.75rem; }
+        .issue-source { font-size: 0.75rem; color: #94a3b8; margin-top: 0.5rem; }
+        pre { background: #1e293b; color: #e2e8f0; padding: 0.75rem; border-radius: 0.375rem; overflow-x: auto; font-size: 0.875rem; margin: 0.5rem 0; }
+        .problem { margin: 0.75rem 0; }
+        .fix-label { font-weight: 600; margin-top: 0.75rem; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Code Review: openHiTLS/ngcc_bench#8 - GEMINI</h1>
+        <div class="subtitle"></div>
+<div class="section"><div class="section-title medium">Medium</div>
+<div class="issue">
+                <div class="issue-title">Total test count not incremented on validation failure</div>
+                <div class="issue-location">ngcc_bench/src/bench_kem.c:213-221</div>
+                <pre>/* Validate _Len fields match actual data length */
+        if (kem_check_field_len("SK", sk, ngcc_kat_get_field(vec, "SK_Len")) != 0 ||
+            kem_check_field_len("CT", ct, ngcc_kat_get_field(vec, "CT_Len")) != 0 ||
+            kem_check_field_len("SS", ss, ngcc_kat_get_field(vec, "SS_Len")) != 0) {
+            (*io_failed)++;
+            continue;
+        }
+
+        (*io_total)++;</pre>
+                <div class="problem"><strong>Issue:</strong> When a test vector fails the `_Len` field validation, `(*io_failed)` is incremented and the loop continues, but `(*io_total)` is never incremented. This results in inaccurate test statistics where `failed` can exceed `total`, or the failure rate is incorrectly reported.</div>
+                <div class="fix-label">Fix:</div><pre>/* Validate _Len fields match actual data length */
+        if (kem_check_field_len("SK", sk, ngcc_kat_get_field(vec, "SK_Len")) != 0 ||
+            kem_check_field_len("CT", ct, ngcc_kat_get_field(vec, "CT_Len")) != 0 ||
+            kem_check_field_len("SS", ss, ngcc_kat_get_field(vec, "SS_Len")) != 0) {
+            (*io_total)++;
+            (*io_failed)++;
+            continue;
+        }
+
+        (*io_total)++;</pre>
+                <div class="issue-source">Reviewer: gemini</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">Total test count not incremented on validation failure</div>
+                <div class="issue-location">ngcc_bench/src/bench_sig.c:341-349</div>
+                <pre>/* Validate _Len fields match actual data length */
+        if (sig_check_field_len("PK", pk, ngcc_kat_get_field(vec, "PK_Len")) != 0 ||
+            sig_check_field_len("M", msg, ngcc_kat_get_field(vec, "M_Len")) != 0 ||
+            sig_check_field_len("Sn", sn, ngcc_kat_get_field(vec, "Sn_Len")) != 0) {
+            (*io_failed)++;
+            continue;
+        }
+
+        (*io_total)++;</pre>
+                <div class="problem"><strong>Issue:</strong> When a test vector fails the `_Len` field validation, `(*io_failed)` is incremented and the loop continues, but `(*io_total)` is never incremented. This results in inaccurate test statistics where `failed` can exceed `total`.</div>
+                <div class="fix-label">Fix:</div><pre>/* Validate _Len fields match actual data length */
+        if (sig_check_field_len("PK", pk, ngcc_kat_get_field(vec, "PK_Len")) != 0 ||
+            sig_check_field_len("M", msg, ngcc_kat_get_field(vec, "M_Len")) != 0 ||
+            sig_check_field_len("Sn", sn, ngcc_kat_get_field(vec, "Sn_Len")) != 0) {
+            (*io_total)++;
+            (*io_failed)++;
+            continue;
+        }
+
+        (*io_total)++;</pre>
+                <div class="issue-source">Reviewer: gemini</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">Total test count not incremented on validation failures</div>
+                <div class="issue-location">ngcc_bench/src/bench_kex.c:379-411</div>
+                <pre>if (len_failed) {
+            (*io_failed)++;
+            continue;
+        }
+
+        /* Validate Init_Sta_Len / Init_Stb_Len if present */
+        if (kex_field_populated(ngcc_kat_get_field(vec, "Init_Sta"))) {
+            if (kex_check_field_len("Init_Sta",
+                                    ngcc_kat_get_field(vec, "Init_Sta"),
+                                    ngcc_kat_get_field(vec, "Init_Sta_Len")) != 0) {
+                (*io_failed)++;
+                continue;
+            }
+        }
+        if (kex_field_populated(ngcc_kat_get_field(vec, "Init_Stb"))) {
+            if (kex_check_field_len("Init_Stb",
+                                    ngcc_kat_get_field(vec, "Init_Stb"),
+                                    ngcc_kat_get_field(vec, "Init_Stb_Len")) != 0) {
+                (*io_failed)++;
+                continue;
+            }
+        }
+
+        /* Validate key and SS length fields */
+        if (kex_check_field_len("SKa", ska, ngcc_kat_get_field(vec, "SKa_Len")) != 0 ||
+            kex_check_field_len("PKb", pkb, ngcc_kat_get_field(vec, "PKb_Len")) != 0 ||
+            kex_check_field_len("SKb", skb, ngcc_kat_get_field(vec, "SKb_Len")) != 0 ||
+            kex_check_field_len("PKa", pka, ngcc_kat_get_field(vec, "PKa_Len")) != 0 ||
+            kex_check_field_len("SS", ss, ngcc_kat_get_field(vec, "SS_Len")) != 0) {
+            (*io_failed)++;
+            continue;
+        }</pre>
+                <div class="problem"><strong>Issue:</strong> In `verify_kex_kat_vectors`, when length validation fails (such as for keys, states, or messages), `(*io_failed)` is incremented and the vector is skipped. However, `(*io_total)` is not incremented, leading to incorrect statistics where failed vectors are not counted as part of the total cases.</div>
+                <div class="fix-label">Fix:</div><pre>if (len_failed) {
+            (*io_total)++;
+            (*io_failed)++;
+            continue;
+        }
+
+        /* Validate Init_Sta_Len / Init_Stb_Len if present */
+        if (kex_field_populated(ngcc_kat_get_field(vec, "Init_Sta"))) {
+            if (kex_check_field_len("Init_Sta",
+                                    ngcc_kat_get_field(vec, "Init_Sta"),
+                                    ngcc_kat_get_field(vec, "Init_Sta_Len")) != 0) {
+                (*io_total)++;
+                (*io_failed)++;
+                continue;
+            }
+        }
+        if (kex_field_populated(ngcc_kat_get_field(vec, "Init_Stb"))) {
+            if (kex_check_field_len("Init_Stb",
+                                    ngcc_kat_get_field(vec, "Init_Stb"),
+                                    ngcc_kat_get_field(vec, "Init_Stb_Len")) != 0) {
+                (*io_total)++;
+                (*io_failed)++;
+                continue;
+            }
+        }
+
+        /* Validate key and SS length fields */
+        if (kex_check_field_len("SKa", ska, ngcc_kat_get_field(vec, "SKa_Len")) != 0 ||
+            kex_check_field_len("PKb", pkb, ngcc_kat_get_field(vec, "PKb_Len")) != 0 ||
+            kex_check_field_len("SKb", skb, ngcc_kat_get_field(vec, "SKb_Len")) != 0 ||
+            kex_check_field_len("PKa", pka, ngcc_kat_get_field(vec, "PKa_Len")) != 0 ||
+            kex_check_field_len("SS", ss, ngcc_kat_get_field(vec, "SS_Len")) != 0) {
+            (*io_total)++;
+            (*io_failed)++;
+            continue;
+        }</pre>
+                <div class="issue-source">Reviewer: gemini</div>
+            </div>
+</div>
+<div class="section"><div class="section-title low">Low</div>
+<div class="issue">
+                <div class="issue-title">Redundant performance loops for KEM/KEX on failure</div>
+                <div class="issue-location">ngcc_bench/src/main.c:356-368</div>
+                <pre>if (rc != 0) {
+            printf("[%s][performance][%zuB] FAIL\n", test-&gt;name, msg_len);
+            any_fail = 1;
+            continue;
+        }</pre>
+                <div class="problem"><strong>Issue:</strong> When a performance test fails (`rc != 0`), the loop `continue`s. For KEM and KEX tests, which do not depend on message lengths, this skips the `break` statement at the end of the loop. Consequently, the test redundantly repeats the performance execution and failure logging for all remaining `msg_len` values even though they do not apply.</div>
+                <div class="fix-label">Fix:</div><pre>if (rc != 0) {
+            printf("[%s][performance][%zuB] FAIL\n", test-&gt;name, msg_len);
+            any_fail = 1;
+            if (test-&gt;kind != NGCC_TEST_HASH &amp;&amp; test-&gt;kind != NGCC_TEST_DSA) {
+                break;
+            }
+            continue;
+        }</pre>
+                <div class="issue-source">Reviewer: gemini</div>
+            </div>
+</div>
+</div></body></html>

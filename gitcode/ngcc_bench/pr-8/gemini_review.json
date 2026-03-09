@@ -1,0 +1,42 @@
+[
+  {
+    "source": "gemini",
+    "file": "ngcc_bench/src/bench_kem.c",
+    "line": "213-221",
+    "severity": "medium",
+    "title": "Total test count not incremented on validation failure",
+    "problem": "When a test vector fails the `_Len` field validation, `(*io_failed)` is incremented and the loop continues, but `(*io_total)` is never incremented. This results in inaccurate test statistics where `failed` can exceed `total`, or the failure rate is incorrectly reported.",
+    "code": "/* Validate _Len fields match actual data length */\n        if (kem_check_field_len(\"SK\", sk, ngcc_kat_get_field(vec, \"SK_Len\")) != 0 ||\n            kem_check_field_len(\"CT\", ct, ngcc_kat_get_field(vec, \"CT_Len\")) != 0 ||\n            kem_check_field_len(\"SS\", ss, ngcc_kat_get_field(vec, \"SS_Len\")) != 0) {\n            (*io_failed)++;\n            continue;\n        }\n\n        (*io_total)++;",
+    "fix": "/* Validate _Len fields match actual data length */\n        if (kem_check_field_len(\"SK\", sk, ngcc_kat_get_field(vec, \"SK_Len\")) != 0 ||\n            kem_check_field_len(\"CT\", ct, ngcc_kat_get_field(vec, \"CT_Len\")) != 0 ||\n            kem_check_field_len(\"SS\", ss, ngcc_kat_get_field(vec, \"SS_Len\")) != 0) {\n            (*io_total)++;\n            (*io_failed)++;\n            continue;\n        }\n\n        (*io_total)++;"
+  },
+  {
+    "source": "gemini",
+    "file": "ngcc_bench/src/bench_sig.c",
+    "line": "341-349",
+    "severity": "medium",
+    "title": "Total test count not incremented on validation failure",
+    "problem": "When a test vector fails the `_Len` field validation, `(*io_failed)` is incremented and the loop continues, but `(*io_total)` is never incremented. This results in inaccurate test statistics where `failed` can exceed `total`.",
+    "code": "/* Validate _Len fields match actual data length */\n        if (sig_check_field_len(\"PK\", pk, ngcc_kat_get_field(vec, \"PK_Len\")) != 0 ||\n            sig_check_field_len(\"M\", msg, ngcc_kat_get_field(vec, \"M_Len\")) != 0 ||\n            sig_check_field_len(\"Sn\", sn, ngcc_kat_get_field(vec, \"Sn_Len\")) != 0) {\n            (*io_failed)++;\n            continue;\n        }\n\n        (*io_total)++;",
+    "fix": "/* Validate _Len fields match actual data length */\n        if (sig_check_field_len(\"PK\", pk, ngcc_kat_get_field(vec, \"PK_Len\")) != 0 ||\n            sig_check_field_len(\"M\", msg, ngcc_kat_get_field(vec, \"M_Len\")) != 0 ||\n            sig_check_field_len(\"Sn\", sn, ngcc_kat_get_field(vec, \"Sn_Len\")) != 0) {\n            (*io_total)++;\n            (*io_failed)++;\n            continue;\n        }\n\n        (*io_total)++;"
+  },
+  {
+    "source": "gemini",
+    "file": "ngcc_bench/src/bench_kex.c",
+    "line": "379-411",
+    "severity": "medium",
+    "title": "Total test count not incremented on validation failures",
+    "problem": "In `verify_kex_kat_vectors`, when length validation fails (such as for keys, states, or messages), `(*io_failed)` is incremented and the vector is skipped. However, `(*io_total)` is not incremented, leading to incorrect statistics where failed vectors are not counted as part of the total cases.",
+    "code": "if (len_failed) {\n            (*io_failed)++;\n            continue;\n        }\n\n        /* Validate Init_Sta_Len / Init_Stb_Len if present */\n        if (kex_field_populated(ngcc_kat_get_field(vec, \"Init_Sta\"))) {\n            if (kex_check_field_len(\"Init_Sta\",\n                                    ngcc_kat_get_field(vec, \"Init_Sta\"),\n                                    ngcc_kat_get_field(vec, \"Init_Sta_Len\")) != 0) {\n                (*io_failed)++;\n                continue;\n            }\n        }\n        if (kex_field_populated(ngcc_kat_get_field(vec, \"Init_Stb\"))) {\n            if (kex_check_field_len(\"Init_Stb\",\n                                    ngcc_kat_get_field(vec, \"Init_Stb\"),\n                                    ngcc_kat_get_field(vec, \"Init_Stb_Len\")) != 0) {\n                (*io_failed)++;\n                continue;\n            }\n        }\n\n        /* Validate key and SS length fields */\n        if (kex_check_field_len(\"SKa\", ska, ngcc_kat_get_field(vec, \"SKa_Len\")) != 0 ||\n            kex_check_field_len(\"PKb\", pkb, ngcc_kat_get_field(vec, \"PKb_Len\")) != 0 ||\n            kex_check_field_len(\"SKb\", skb, ngcc_kat_get_field(vec, \"SKb_Len\")) != 0 ||\n            kex_check_field_len(\"PKa\", pka, ngcc_kat_get_field(vec, \"PKa_Len\")) != 0 ||\n            kex_check_field_len(\"SS\", ss, ngcc_kat_get_field(vec, \"SS_Len\")) != 0) {\n            (*io_failed)++;\n            continue;\n        }",
+    "fix": "if (len_failed) {\n            (*io_total)++;\n            (*io_failed)++;\n            continue;\n        }\n\n        /* Validate Init_Sta_Len / Init_Stb_Len if present */\n        if (kex_field_populated(ngcc_kat_get_field(vec, \"Init_Sta\"))) {\n            if (kex_check_field_len(\"Init_Sta\",\n                                    ngcc_kat_get_field(vec, \"Init_Sta\"),\n                                    ngcc_kat_get_field(vec, \"Init_Sta_Len\")) != 0) {\n                (*io_total)++;\n                (*io_failed)++;\n                continue;\n            }\n        }\n        if (kex_field_populated(ngcc_kat_get_field(vec, \"Init_Stb\"))) {\n            if (kex_check_field_len(\"Init_Stb\",\n                                    ngcc_kat_get_field(vec, \"Init_Stb\"),\n                                    ngcc_kat_get_field(vec, \"Init_Stb_Len\")) != 0) {\n                (*io_total)++;\n                (*io_failed)++;\n                continue;\n            }\n        }\n\n        /* Validate key and SS length fields */\n        if (kex_check_field_len(\"SKa\", ska, ngcc_kat_get_field(vec, \"SKa_Len\")) != 0 ||\n            kex_check_field_len(\"PKb\", pkb, ngcc_kat_get_field(vec, \"PKb_Len\")) != 0 ||\n            kex_check_field_len(\"SKb\", skb, ngcc_kat_get_field(vec, \"SKb_Len\")) != 0 ||\n            kex_check_field_len(\"PKa\", pka, ngcc_kat_get_field(vec, \"PKa_Len\")) != 0 ||\n            kex_check_field_len(\"SS\", ss, ngcc_kat_get_field(vec, \"SS_Len\")) != 0) {\n            (*io_total)++;\n            (*io_failed)++;\n            continue;\n        }"
+  },
+  {
+    "source": "gemini",
+    "file": "ngcc_bench/src/main.c",
+    "line": "356-368",
+    "severity": "low",
+    "title": "Redundant performance loops for KEM/KEX on failure",
+    "problem": "When a performance test fails (`rc != 0`), the loop `continue`s. For KEM and KEX tests, which do not depend on message lengths, this skips the `break` statement at the end of the loop. Consequently, the test redundantly repeats the performance execution and failure logging for all remaining `msg_len` values even though they do not apply.",
+    "code": "if (rc != 0) {\n            printf(\"[%s][performance][%zuB] FAIL\\n\", test->name, msg_len);\n            any_fail = 1;\n            continue;\n        }",
+    "fix": "if (rc != 0) {\n            printf(\"[%s][performance][%zuB] FAIL\\n\", test->name, msg_len);\n            any_fail = 1;\n            if (test->kind != NGCC_TEST_HASH && test->kind != NGCC_TEST_DSA) {\n                break;\n            }\n            continue;\n        }"
+  }
+]

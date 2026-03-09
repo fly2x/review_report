@@ -1,0 +1,175 @@
+{
+  "context": {
+    "owner": "openHiTLS",
+    "repo": "ngcc_bench",
+    "pr_id": "8",
+    "title": "",
+    "reviewers": [
+      "claude",
+      "gemini",
+      "codex"
+    ]
+  },
+  "statistics": {
+    "total": 14,
+    "critical": 2,
+    "high": 4,
+    "medium": 6,
+    "low": 2
+  },
+  "issues": [
+    {
+      "file": "ngcc_bench/src/bench_hash.c",
+      "line": "175",
+      "severity": "critical",
+      "title": "Integer overflow in msg_data_bytes calculation from KAT file",
+      "reviewers": "CLAUDE",
+      "confidence": "likely",
+      "problem": "When msg_len_bits_val from a KAT file is close to ULLONG_MAX, the expression (msg_len_bits_val + 7) / 8 can overflow, resulting in a small value that passes allocation checks but causes buffer overflow later.",
+      "code": "msg_data_bytes = (size_t) ((msg_len_bits_val + 7) / 8);",
+      "fix": "/* Check for overflow before calculation */\nif (msg_len_bits_val > (NGCC_MAX_BUFFER_LEN * 8ULL)) {\n    fprintf(stderr, \"[hash][kat] error: Msg_Len=%llu bits exceeds maximum buffer size\\n\", msg_len_bits_val);\n    any_fail = 1;\n    continue;\n}\nmsg_data_bytes = (size_t) ((msg_len_bits_val + 7) / 8);"
+    },
+    {
+      "file": "ngcc_bench/src/bench_hash.c",
+      "line": "329",
+      "severity": "critical",
+      "title": "No upper bound check for msg_bytes before malloc",
+      "reviewers": "CLAUDE",
+      "confidence": "trusted",
+      "problem": "msg_bytes is computed from KAT file data and allocated directly without checking against NGCC_MAX_BUFFER_LEN. A malicious KAT file could cause allocation of arbitrary size, potentially exhausting memory or causing denial of service.",
+      "code": "msg_bytes = (size_t) ((msg_len_bits_val + 7) / 8);\n\nif (msg_bytes == 0 || digest_len == 0 || digest_len > msg_bytes) {\n    fprintf(stderr, \"[hash][kat_loop] error: invalid Msg_Len=%llu or Dst_Len=%d\\n\",\n            msg_len_bits_val, dst_len_bits_val);\n    return -1;\n}\n\nmsg = (unsigned char *) malloc(msg_bytes);",
+      "fix": "msg_bytes = (size_t) ((msg_len_bits_val + 7) / 8);\n\n/* Add upper bound check */\nif (msg_bytes == 0 || msg_bytes > NGCC_MAX_BUFFER_LEN ||\n    digest_len == 0 || digest_len > msg_bytes) {\n    fprintf(stderr, \"[hash][kat_loop] error: invalid Msg_Len=%llu or Dst_Len=%d (msg_bytes=%zu exceeds max)\\n\",\n            msg_len_bits_val, dst_len_bits_val, msg_bytes);\n    return -1;\n}\n\nmsg = (unsigned char *) malloc(msg_bytes);"
+    },
+    {
+      "file": "ngcc_bench/src/drng.c",
+      "line": "244",
+      "severity": "high",
+      "title": "SM3_DRNG_Instantiate doesn't validate nonce_len_bytes before using in malloc/memcpy",
+      "reviewers": "CLAUDE",
+      "confidence": "trusted",
+      "problem": "nonce_len_bytes is used directly in malloc without validation. If an attacker-controlled large value is passed, it could cause integer overflow in the malloc size or excessive memory allocation. Additionally, memcpy at line 251 writes into a buffer that might be smaller than nonce_len_bytes if SEEDLEN > nonce_len_bytes.",
+      "code": "seed_material = (unsigned char *)malloc(MAX_INT(nonce_len_bytes, SEEDLEN));\nif (NULL == seed_material)\n{\n    fprintf(stderr, \"ERROR: Memory allocation failed at %s, line %d. \\n\", __FILE__, __LINE__);\n    return DRNG_MEMORY_ALLOCATION_FAILED;\n}\nmemset(seed_material, 0, MAX_INT(nonce_len_bytes, SEEDLEN));\nmemcpy(seed_material, nonce, nonce_len_bytes);",
+      "fix": "/* Validate nonce_len_bytes to prevent excessive allocation */\nif (nonce_len_bytes > SEEDLEN) {\n    fprintf(stderr, \"ERROR: nonce_len_bytes %llu exceeds SEEDLEN %d\\n\", \n            nonce_len_bytes, SEEDLEN);\n    return DRNG_MEMORY_ALLOCATION_FAILED;\n}\nif (nonce == NULL && nonce_len_bytes > 0) {\n    fprintf(stderr, \"ERROR: nonce is NULL but nonce_len_bytes is non-zero\\n\");\n    return DRNG_MEMORY_ALLOCATION_FAILED;\n}\n\nseed_material = (unsigned char *)malloc(SEEDLEN);\nif (NULL == seed_material) {\n    fprintf(stderr, \"ERROR: Memory allocation failed at %s, line %d.\\n\", __FILE__, __LINE__);\n    return DRNG_MEMORY_ALLOCATION_FAILED;\n}\nmemset(seed_material, 0, SEEDLEN);\nif (nonce != NULL && nonce_len_bytes > 0) {\n    memcpy(seed_material, nonce, nonce_len_bytes);\n}"
+    },
+    {
+      "file": "ngcc_bench/src/bench_hash.c, ngcc_bench/src/bench_sig.c, ngcc_bench/src/bench_kem.c, ngcc_bench/src/bench_kex.c",
+      "severity": "high",
+      "title": "KAT parser now rejects previously supported field names and single-file inputs",
+      "reviewers": "CODEX",
+      "confidence": "trusted",
+      "problem": "The new implementation only recognizes specific field names (Msg/Dst, PK/M/Sn, SK/CT/SS, SKa/PKb/PKa/SKb/SS, Init_Sta/Init_Stb) inside files with specific prefixes (KAT_HASH_, KAT_SIG_, KAT_KEM_, KAT_KEX_) under a directory. Previously supported aliases (INPUT/OUTPUT/MSG/DIGEST/PUBLICKEY/SECRETKEY/etc.) and single-file --kat inputs are now rejected or skipped.",
+      "code": "/* bench_hash.c - only accepts Msg/Dst fields */\nconst ngcc_kat_field_t *input = ngcc_kat_get_field(vec, \"Msg\");\nconst ngcc_kat_field_t *output = ngcc_kat_get_field(vec, \"Dst\");\n\nif (!path_is_directory(kat_path)) {\n    fprintf(stderr, \"[hash][kat] error: --kat path is not a directory: %s\\n\", kat_path);\n    return -1;\n}\n\nif (strncmp(entry->d_name, \"KAT_2_\") != 0 && strncmp(entry->d_name, \"KAT_Loop_\") != 0) {\n    fprintf(stderr, \"[hash][kat] error: unrecognized KAT file format: %s\\n\", entry->d_name);\n    closedir(dir);\n    rc = -1;\n    goto done;\n}",
+      "fix": "static const char *const k_input_alias[] = {\"Msg\", \"INPUT\", \"MSG\", \"M\", \"MESSAGE\"};\nstatic const char *const k_output_alias[] = {\"Dst\", \"OUTPUT\", \"DIGEST\", \"MD\", \"HASH\"};\n\nconst ngcc_kat_field_t *input =\n    ngcc_kat_get_field_any(vec, k_input_alias, sizeof(k_input_alias) / sizeof(k_input_alias[0]));\nconst ngcc_kat_field_t *output =\n    ngcc_kat_get_field_any(vec, k_output_alias, sizeof(k_output_alias) / sizeof(k_output_alias[0]));\n\nif (!path_is_directory(kat_path)) {\n    ngcc_kat_file_t kat = {0};\n    if (ngcc_kat_parse_file(kat_path, &kat) != 0) {\n        return -1;\n    }\n    rc = verify_kat_vectors(api, digest_len_bits, &kat, &total, &passed_count, &failed_count);\n    ngcc_kat_free(&kat);\n    goto done;\n}\n\nftype = classify_kat_file(entry->d_name);\nif (ftype == KAT_TYPE_UNKNOWN) {\n    continue; /* allow a shared --kat directory and preserve old file names */\n}"
+    },
+    {
+      "file": "ngcc_bench/src/cli_parser.c",
+      "line": "19-35",
+      "severity": "high",
+      "title": "Public performance CLI flags removed without compatibility path",
+      "reviewers": "CODEX",
+      "confidence": "trusted",
+      "problem": "This removes --iterations, --msg-len, and --cycles from the parser, so existing scripts and tests now fail before any benchmark runs. The branch still has callers that invoke those flags, and users lose the ability to control benchmark size/count from CLI.",
+      "code": "static const struct option long_options[] = {\n    {\"lib\", required_argument, NULL, 'l'},\n    {\"test\", required_argument, NULL, 't'},\n    {\"mode\", required_argument, NULL, 'm'},\n    {\"digest-len-bits\", required_argument, NULL, 'b'},\n    {\"duration-hours\", required_argument, NULL, 'd'},\n    {\"stability-max-cases\", required_argument, NULL, 's'},\n    {\"stability-sample-ms\", required_argument, NULL, OPT_STABILITY_SAMPLE_MS},\n    {\"json-out\", required_argument, NULL, 'j'},\n    {\"kat\", required_argument, NULL, 'k'},\n    ...\n};",
+      "fix": "static const struct option long_options[] = {\n    {\"lib\", required_argument, NULL, 'l'},\n    {\"test\", required_argument, NULL, 't'},\n    {\"mode\", required_argument, NULL, 'm'},\n    {\"iterations\", required_argument, NULL, 'i'},\n    {\"duration-hours\", required_argument, NULL, 'd'},\n    {\"stability-max-cases\", required_argument, NULL, 's'},\n    {\"stability-sample-ms\", required_argument, NULL, OPT_STABILITY_SAMPLE_MS},\n    {\"msg-len\", required_argument, NULL, 'g'},\n    {\"digest-len-bits\", required_argument, NULL, 'b'},\n    {\"cycles\", required_argument, NULL, 'c'},\n    {\"json-out\", required_argument, NULL, 'j'},\n    {\"kat\", required_argument, NULL, 'k'},\n    ...\n};\n\ncase 'i':\n    if (parse_unsigned_ll(optarg, &opts->iterations) != 0 || opts->iterations == 0) {\n        fprintf(stderr, \"invalid --iterations value: %s\\n\", optarg);\n        return -1;\n    }\n    break;\n\ncase 'g': {\n    unsigned long long msg_len_val;\n    if (parse_unsigned_ll(optarg, &msg_len_val) != 0 || msg_len_val == 0) {\n        fprintf(stderr, \"invalid --msg-len value: %s\\n\", optarg);\n        return -1;\n    }\n    opts->msg_len = (size_t) msg_len_val;\n    break;\n}\n\ncase 'c':\n    if (parse_cycles(optarg, &opts->cycles_enabled) != 0) {\n        fprintf(stderr, \"invalid --cycles value: %s\\n\", optarg);\n        return -1;\n    }\n    break;"
+    },
+    {
+      "file": "ngcc_bench/src/json_report.c",
+      "line": "256-281",
+      "severity": "high",
+      "title": "JSON writer no longer emits the required v4 option fields",
+      "reviewers": "CODEX",
+      "confidence": "trusted",
+      "problem": "The report now omits options.iterations, options.msg_len, options.digest_len_bits, and options.cycles, so the bundled validator immediately fails with missing key 'iterations'. The generated report is incompatible with the schema shipped in this repo.",
+      "code": "jw_begin_object(&w, \"options\");\njw_key_llu(&w, \"test_mask\", opts->test_mask);\njw_key_llu(&w, \"mode_mask\", opts->mode_mask);\njw_key_double(&w, \"duration_hours\", opts->duration_hours);\njw_key_llu(&w, \"stability_max_cases\", opts->stability_max_cases);\njw_key_double(&w, \"stability_sample_ms\", opts->stability_sample_ms);",
+      "fix": "jw_begin_object(&w, \"options\");\njw_key_llu(&w, \"test_mask\", opts->test_mask);\njw_key_llu(&w, \"mode_mask\", opts->mode_mask);\njw_key_llu(&w, \"iterations\", opts->iterations);\njw_key_double(&w, \"duration_hours\", opts->duration_hours);\njw_key_llu(&w, \"stability_max_cases\", opts->stability_max_cases);\njw_key_double(&w, \"stability_sample_ms\", opts->stability_sample_ms);\njw_key_llu(&w, \"msg_len\", (unsigned long long) opts->msg_len);\njw_key_int(&w, \"digest_len_bits\", opts->digest_len_bits);\njw_key_str(&w, \"cycles\", opts->cycles_enabled ? \"on\" : \"off\");"
+    },
+    {
+      "file": "ngcc_bench/src/bench_kem.c",
+      "line": "213-221",
+      "severity": "medium",
+      "title": "Total test count not incremented on validation failure",
+      "reviewers": "GEMINI",
+      "confidence": "trusted",
+      "problem": "When a test vector fails the _Len field validation, (*io_failed) is incremented but (*io_total) is never incremented. This results in inaccurate test statistics where failed can exceed total.",
+      "code": "/* Validate _Len fields match actual data length */\nif (kem_check_field_len(\"SK\", sk, ngcc_kat_get_field(vec, \"SK_Len\")) != 0 ||\n    kem_check_field_len(\"CT\", ct, ngcc_kat_get_field(vec, \"CT_Len\")) != 0 ||\n    kem_check_field_len(\"SS\", ss, ngcc_kat_get_field(vec, \"SS_Len\")) != 0) {\n    (*io_failed)++;\n    continue;\n}\n\n(*io_total)++;",
+      "fix": "/* Validate _Len fields match actual data length */\nif (kem_check_field_len(\"SK\", sk, ngcc_kat_get_field(vec, \"SK_Len\")) != 0 ||\n    kem_check_field_len(\"CT\", ct, ngcc_kat_get_field(vec, \"CT_Len\")) != 0 ||\n    kem_check_field_len(\"SS\", ss, ngcc_kat_get_field(vec, \"SS_Len\")) != 0) {\n    (*io_total)++;\n    (*io_failed)++;\n    continue;\n}\n\n(*io_total)++;"
+    },
+    {
+      "file": "ngcc_bench/src/bench_sig.c",
+      "line": "341-349",
+      "severity": "medium",
+      "title": "Total test count not incremented on validation failure",
+      "reviewers": "GEMINI",
+      "confidence": "trusted",
+      "problem": "When a test vector fails the _Len field validation, (*io_failed) is incremented but (*io_total) is never incremented. This results in inaccurate test statistics where failed can exceed total.",
+      "code": "/* Validate _Len fields match actual data length */\nif (sig_check_field_len(\"PK\", pk, ngcc_kat_get_field(vec, \"PK_Len\")) != 0 ||\n    sig_check_field_len(\"M\", msg, ngcc_kat_get_field(vec, \"M_Len\")) != 0 ||\n    sig_check_field_len(\"Sn\", sn, ngcc_kat_get_field(vec, \"Sn_Len\")) != 0) {\n    (*io_failed)++;\n    continue;\n}\n\n(*io_total)++;",
+      "fix": "/* Validate _Len fields match actual data length */\nif (sig_check_field_len(\"PK\", pk, ngcc_kat_get_field(vec, \"PK_Len\")) != 0 ||\n    sig_check_field_len(\"M\", msg, ngcc_kat_get_field(vec, \"M_Len\")) != 0 ||\n    sig_check_field_len(\"Sn\", sn, ngcc_kat_get_field(vec, \"Sn_Len\")) != 0) {\n    (*io_total)++;\n    (*io_failed)++;\n    continue;\n}\n\n(*io_total)++;"
+    },
+    {
+      "file": "ngcc_bench/src/bench_kex.c",
+      "line": "379-411",
+      "severity": "medium",
+      "title": "Total test count not incremented on validation failures",
+      "reviewers": "GEMINI",
+      "confidence": "trusted",
+      "problem": "In verify_kex_kat_vectors, when length validation fails, (*io_failed) is incremented but (*io_total) is not, leading to incorrect statistics where failed vectors are not counted as part of the total cases.",
+      "code": "if (len_failed) {\n    (*io_failed)++;\n    continue;\n}\n\n/* Validate Init_Sta_Len / Init_Stb_Len if present */\nif (kex_field_populated(ngcc_kat_get_field(vec, \"Init_Sta\"))) {\n    if (kex_check_field_len(\"Init_Sta\",\n                            ngcc_kat_get_field(vec, \"Init_Sta\"),\n                            ngcc_kat_get_field(vec, \"Init_Sta_Len\")) != 0) {\n        (*io_failed)++;\n        continue;\n    }\n}",
+      "fix": "if (len_failed) {\n    (*io_total)++;\n    (*io_failed)++;\n    continue;\n}\n\n/* Validate Init_Sta_Len / Init_Stb_Len if present */\nif (kex_field_populated(ngcc_kat_get_field(vec, \"Init_Sta\"))) {\n    if (kex_check_field_len(\"Init_Sta\",\n                            ngcc_kat_get_field(vec, \"Init_Sta\"),\n                            ngcc_kat_get_field(vec, \"Init_Sta_Len\")) != 0) {\n        (*io_total)++;\n        (*io_failed)++;\n        continue;\n    }\n}"
+    },
+    {
+      "file": "ngcc_bench/src/main.c",
+      "line": "399-402",
+      "severity": "medium",
+      "title": "DSA sign and verify sub-operations only benchmark first message size",
+      "reviewers": "CODEX",
+      "confidence": "trusted",
+      "problem": "The loop break condition treats all sub-operations as message-length-independent, but ngcc_dsa_sig_performance() and ngcc_dsa_verify_performance() both take msg_len and scale bytes_per_op with it. DSA_KEYGEN, DSA_SIG, and DSA_VERIFY only run the 1024-byte case.",
+      "code": "/* KEM/KEX/sub-ops don't depend on msg_len, run once only */\nif (test->kind != NGCC_TEST_HASH && test->kind != NGCC_TEST_DSA) {\n    break;\n}",
+      "fix": "/* KEM/KEX don't depend on msg_len, but DSA sub-operations (sig/verify) do */\nstatic int performance_depends_on_msg_len(ngcc_test_kind_t kind) {\n    return kind == NGCC_TEST_HASH ||\n           kind == NGCC_TEST_DSA ||\n           kind == NGCC_TEST_DSA_SIG ||\n           kind == NGCC_TEST_DSA_VERIFY;\n}\n\nif (!performance_depends_on_msg_len(test->kind)) {\n    break;\n}"
+    },
+    {
+      "file": "ngcc_bench/src/bench_hash.c",
+      "line": "357",
+      "severity": "medium",
+      "title": "KAT_LOOP_ITERATIONS runs 1,000,000 times without progress indication",
+      "reviewers": "CLAUDE",
+      "confidence": "likely",
+      "problem": "The KAT loop test runs 1,000,000 iterations without any progress output. For a slow hash implementation or large message size, this could take hours and appear to be hung. No timeout mechanism exists.",
+      "code": "#define KAT_LOOP_ITERATIONS    1000000\n\n/* ... */\nfor (i = 0; i < KAT_LOOP_ITERATIONS; i++) {",
+      "fix": "/* Add progress indication every 100,000 iterations */\nfor (i = 0; i < KAT_LOOP_ITERATIONS; i++) {\n    if (i % 100000 == 0) {\n        printf(\"[hash][kat_loop] progress: %d / %d iterations\\n\", i, KAT_LOOP_ITERATIONS);\n    }\n    /* ... rest of loop body ... */\n}"
+    },
+    {
+      "file": "ngcc_bench/src/drng.c",
+      "line": "322-324",
+      "severity": "medium",
+      "title": "get_random_number doesn't validate input pointers for NULL",
+      "reviewers": "CLAUDE",
+      "confidence": "trusted",
+      "problem": "The function doesn't check if drng or random_number are NULL before dereferencing them. This could cause null pointer dereference crashes.",
+      "code": "int get_random_number(DRNG_ctx *drng, unsigned char *random_number, unsigned long long random_number_len_bits)\n{\n    return SM3_DRNG_Generate(drng, random_number_len_bits, random_number);\n}",
+      "fix": "int get_random_number(DRNG_ctx *drng, unsigned char *random_number, unsigned long long random_number_len_bits)\n{\n    if (drng == NULL) {\n        return -1;\n    }\n    if (random_number == NULL && random_number_len_bits > 0) {\n        return -1;\n    }\n    return SM3_DRNG_Generate(drng, random_number_len_bits, random_number);\n}"
+    },
+    {
+      "file": "ngcc_bench/src/drng.c",
+      "line": "325",
+      "severity": "low",
+      "title": "Missing newline at end of file",
+      "reviewers": "CLAUDE",
+      "confidence": "trusted",
+      "problem": "The file ends without a newline character, which violates POSIX standards and can cause issues with some tools and version control systems.",
+      "code": "int get_random_number(DRNG_ctx *drng, unsigned char *random_number, unsigned long long random_number_len_bits)\n{\n    return SM3_DRNG_Generate(drng, random_number_len_bits, random_number);\n}",
+      "fix": "int get_random_number(DRNG_ctx *drng, unsigned char *random_number, unsigned long long random_number_len_bits)\n{\n    return SM3_DRNG_Generate(drng, random_number_len_bits, random_number);\n}\n<add newline at end>"
+    },
+    {
+      "file": "ngcc_bench/include/drng.h",
+      "line": "47",
+      "severity": "low",
+      "title": "Missing newline at end of file",
+      "reviewers": "CLAUDE",
+      "confidence": "trusted",
+      "problem": "The header file ends without a newline character, which violates POSIX standards and can cause issues with some tools and version control systems.",
+      "code": "}\n#endif\n\\ No newline at end of file",
+      "fix": "}\n#endif\n<add newline at end>"
+    }
+  ]
+}

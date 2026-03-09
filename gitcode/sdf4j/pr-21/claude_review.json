@@ -1,0 +1,162 @@
+[
+  {
+    "source": "claude",
+    "file": "sdf4j/src/main/java/org/openhitls/sdf4j/types/DeviceInfo.java",
+    "line": "38-40",
+    "severity": "high",
+    "title": "Default constructor doesn't initialize asymAlgAbility array",
+    "problem": "The default constructor no longer initializes the asymAlgAbility array to a 2-element array. This will cause NullPointerException when getAsymAlgAbility() is called on a default-constructed object, or when setAsymAlgAbility() checks for null but other code expects a non-null array.",
+    "code": "public DeviceInfo() {\n    // asymAlgAbility not initialized - will be null\n}",
+    "fix": "public DeviceInfo() {\n    this.asymAlgAbility = new long[2];\n}"
+  },
+  {
+    "source": "claude",
+    "file": "sdf4j/src/main/java/org/openhitls/sdf4j/types/ECCCipher.java",
+    "line": "104-108",
+    "severity": "high",
+    "title": "setC() validation depends on call order of setL()",
+    "problem": "The validation `this.l > c.length` in setC() depends on l being set BEFORE c. If a caller calls setC() first, then setL() with a larger value, the object will be in an invalid state. The validation is ineffective.",
+    "code": "public void setC(byte[] c) {\n    if (c == null || this.l > c.length) {\n        throw new IllegalArgumentException(\"cipher value is invalid\");\n    }\n    this.c = c;\n}",
+    "fix": "public void setC(byte[] c) {\n    if (c == null) {\n        throw new IllegalArgumentException(\"cipher value cannot be null\");\n    }\n    this.c = c;\n    // Validate l matches c.length\n    if (this.l > c.length) {\n        throw new IllegalArgumentException(\"l cannot exceed c.length\");\n    }\n}\n\n// Also update setL() to validate against existing c\npublic void setL(long l) {\n    if (l < 0) {\n        throw new IllegalArgumentException(\"Ciphertext length cannot be negative\");\n    }\n    if (this.c != null && l > this.c.length) {\n        throw new IllegalArgumentException(\"Ciphertext length cannot exceed c.length\");\n    }\n    this.l = l;\n}"
+  },
+  {
+    "source": "claude",
+    "file": "sdf4j/src/main/java/org/openhitls/sdf4j/types/HybridCipher.java",
+    "line": "72-76",
+    "severity": "high",
+    "title": "setCtM() validation has call order dependency",
+    "problem": "Similar to ECCCipher issue - validation `this.l1 > ctM.length` depends on l1 being set before ctM. Default l1 is 0, so validation passes even for invalid arrays.",
+    "code": "public void setCtM(byte[] ctM) {\n    if (ctM == null || this.l1 > ctM.length) {\n        throw new IllegalArgumentException(\"cipher value is invalid\");\n    }\n    this.ctM = ctM;\n}",
+    "fix": "public void setCtM(byte[] ctM) {\n    if (ctM == null) {\n        throw new IllegalArgumentException(\"cipher value cannot be null\");\n    }\n    this.ctM = ctM;\n}\n\npublic void setL1(long l1) {\n    if (l1 < 0) {\n        throw new IllegalArgumentException(\"Ciphertext length cannot be negative\");\n    }\n    if (this.ctM != null && l1 > this.ctM.length) {\n        throw new IllegalArgumentException(\"l1 cannot exceed ctM.length\");\n    }\n    this.l1 = l1;\n}"
+  },
+  {
+    "source": "claude",
+    "file": "sdf4j/src/main/java/org/openhitls/sdf4j/types/HybridSignature.java",
+    "line": "61-65",
+    "severity": "high",
+    "title": "setSigM() validation has call order dependency",
+    "problem": "Same validation order issue - depends on l being set before sigM.",
+    "code": "public void setSigM(byte[] sigM) {\n    if (sigM == null || this.l > sigM.length) {\n        throw new IllegalArgumentException(\"signature value is invalid\");\n    }\n    this.sigM = sigM;\n}",
+    "fix": "public void setSigM(byte[] sigM) {\n    if (sigM == null) {\n        throw new IllegalArgumentException(\"signature value cannot be null\");\n    }\n    this.sigM = sigM;\n}\n\npublic void setL(int l) {\n    if (l < 0) {\n        throw new IllegalArgumentException(\"Signature length cannot be negative\");\n    }\n    if (this.sigM != null && l > this.sigM.length) {\n        throw new IllegalArgumentException(\"l cannot exceed sigM.length\");\n    }\n    this.l = l;\n}"
+  },
+  {
+    "source": "claude",
+    "file": "sdf4j/src/main/java/org/openhitls/sdf4j/types/DeviceInfo.java",
+    "line": "49-59",
+    "severity": "medium",
+    "title": "Constructor doesn't validate asymAlgAbility length",
+    "problem": "The constructor checks for null but doesn't validate that asymAlgAbility has exactly 2 elements as documented. This can cause ArrayIndexOutOfBoundsException or incorrect behavior when the array is used.",
+    "code": "public DeviceInfo(String issuerName, String deviceName, String deviceSerial,\n                  long deviceVersion, long standardVersion, long[] asymAlgAbility,\n                  long symAlgAbility, long hashAlgAbility, long bufferSize) {\n    if (issuerName == null || deviceName == null || deviceSerial == null || asymAlgAbility == null) {\n        throw new IllegalArgumentException(\"null input\");\n    }\n    this.asymAlgAbility = asymAlgAbility;  // No length validation",
+    "fix": "public DeviceInfo(String issuerName, String deviceName, String deviceSerial,\n                  long deviceVersion, long standardVersion, long[] asymAlgAbility,\n                  long symAlgAbility, long hashAlgAbility, long bufferSize) {\n    if (issuerName == null || deviceName == null || deviceSerial == null || asymAlgAbility == null) {\n        throw new IllegalArgumentException(\"null input\");\n    }\n    if (asymAlgAbility.length != 2) {\n        throw new IllegalArgumentException(\"asymAlgAbility must have exactly 2 elements\");\n    }\n    this.asymAlgAbility = asymAlgAbility;"
+  },
+  {
+    "source": "claude",
+    "file": "sdf4j/src/main/java/org/openhitls/sdf4j/types/RSAPrivateKey.java",
+    "line": "62-72",
+    "severity": "medium",
+    "title": "Constructor accepts null for prime and pexp arrays",
+    "problem": "The constructor no longer validates that prime and pexp arrays are non-null or have exactly 2 elements. This can cause NullPointerException when these fields are accessed.",
+    "code": "public RSAPrivateKey(int bits, byte[] m, byte[] e, byte[] d,\n                     byte[][] prime, byte[][] pexp, byte[] coef) {\n    // ...\n    this.prime = prime;  // No null or length check\n    this.pexp = pexp;    // No null or length check\n    this.coef = coef;\n}",
+    "fix": "public RSAPrivateKey(int bits, byte[] m, byte[] e, byte[] d,\n                     byte[][] prime, byte[][] pexp, byte[] coef) {\n    if (bits <= 0) {\n        throw new IllegalArgumentException(\"Invalid bits: \" + bits);\n    }\n    if (m == null || e == null || d == null || coef == null) {\n        throw new IllegalArgumentException(\"Key components cannot be null\");\n    }\n    if (prime == null || prime.length < 2) {\n        throw new IllegalArgumentException(\"prime must have at least 2 elements\");\n    }\n    if (pexp == null || pexp.length < 2) {\n        throw new IllegalArgumentException(\"pexp must have at least 2 elements\");\n    }\n    this.bits = bits;\n    this.m = m;\n    this.e = e;\n    this.d = d;\n    this.prime = prime;\n    this.pexp = pexp;\n    this.coef = coef;\n}"
+  },
+  {
+    "source": "claude",
+    "file": "sdf4j/src/main/java/org/openhitls/sdf4j/types/RSAPrivateKey.java",
+    "line": "157-167",
+    "severity": "medium",
+    "title": "setPrime() and setPexp() accept null or invalid arrays",
+    "problem": "The setters no longer validate null or array dimensions, allowing invalid state.",
+    "code": "public void setPrime(byte[][] prime) {\n    this.prime = prime;\n}\n\npublic void setPexp(byte[][] pexp) {\n    this.pexp = pexp;\n}",
+    "fix": "public void setPrime(byte[][] prime) {\n    if (prime == null || prime.length < 2) {\n        throw new IllegalArgumentException(\"prime must have at least 2 elements\");\n    }\n    this.prime = prime;\n}\n\npublic void setPexp(byte[][] pexp) {\n    if (pexp == null || pexp.length < 2) {\n        throw new IllegalArgumentException(\"pexp must have at least 2 elements\");\n    }\n    this.pexp = pexp;\n}"
+  },
+  {
+    "source": "claude",
+    "file": "sdf4j/src/main/java/org/openhitls/sdf4j/types/ECCPublicKey.java",
+    "line": "89-93",
+    "severity": "medium",
+    "title": "setX() and setY() don't validate array bounds",
+    "problem": "Setters don't validate that coordinate arrays don't exceed ECC_MAX_LEN (64 bytes for 512-bit keys), allowing invalid state.",
+    "code": "public void setX(byte[] x) {\n    if (x == null) {\n        throw new IllegalArgumentException(\"X coordinate cannot be null\");\n    }\n    this.x = x;\n}\n\npublic void setY(byte[] y) {\n    if (y == null) {\n        throw new IllegalArgumentException(\"Y coordinate cannot be null\");\n    }\n    this.y = y;\n}",
+    "fix": "private static final int ECC_MAX_BITS = 512;\nprivate static final int ECC_MAX_LEN = (ECC_MAX_BITS + 7) / 8;\n\npublic void setX(byte[] x) {\n    if (x == null) {\n        throw new IllegalArgumentException(\"X coordinate cannot be null\");\n    }\n    if (x.length > ECC_MAX_LEN) {\n        throw new IllegalArgumentException(\"X coordinate exceeds maximum length of \" + ECC_MAX_LEN + \" bytes\");\n    }\n    this.x = x;\n}\n\npublic void setY(byte[] y) {\n    if (y == null) {\n        throw new IllegalArgumentException(\"Y coordinate cannot be null\");\n    }\n    if (y.length > ECC_MAX_LEN) {\n        throw new IllegalArgumentException(\"Y coordinate exceeds maximum length of \" + ECC_MAX_LEN + \" bytes\");\n    }\n    this.y = y;\n}"
+  },
+  {
+    "source": "claude",
+    "file": "sdf4j/src/main/java/org/openhitls/sdf4j/types/ECCPrivateKey.java",
+    "line": "75-80",
+    "severity": "medium",
+    "title": "setK() doesn't validate array bounds",
+    "problem": "Setter doesn't validate that K array doesn't exceed ECC_MAX_LEN (64 bytes).",
+    "code": "public void setK(byte[] k) {\n    if (k == null) {\n        throw new IllegalArgumentException(\"Private key value cannot be null\");\n    }\n    this.k = k;\n}",
+    "fix": "private static final int ECC_MAX_BITS = 512;\nprivate static final int ECC_MAX_LEN = (ECC_MAX_BITS + 7) / 8;\n\npublic void setK(byte[] k) {\n    if (k == null) {\n        throw new IllegalArgumentException(\"Private key value cannot be null\");\n    }\n    if (k.length > ECC_MAX_LEN) {\n        throw new IllegalArgumentException(\"Private key K exceeds maximum length of \" + ECC_MAX_LEN + \" bytes\");\n    }\n    this.k = k;\n}"
+  },
+  {
+    "source": "claude",
+    "file": "sdf4j/src/main/java/org/openhitls/sdf4j/types/ECCSignature.java",
+    "line": "50-58",
+    "severity": "medium",
+    "title": "setR() and setS() don't validate array bounds",
+    "problem": "Setters don't validate that signature value arrays don't exceed ECC_MAX_LEN (64 bytes).",
+    "code": "public void setR(byte[] r) {\n    if (r == null) {\n        throw new IllegalArgumentException(\"Signature r cannot be null\");\n    }\n    this.r = r;\n}\n\npublic void setS(byte[] s) {\n    if (s == null) {\n        throw new IllegalArgumentException(\"Signature s cannot be null\");\n    }\n    this.s = s;\n}",
+    "fix": "private static final int ECC_MAX_BITS = 512;\nprivate static final int ECC_MAX_LEN = (ECC_MAX_BITS + 7) / 8;\n\npublic void setR(byte[] r) {\n    if (r == null) {\n        throw new IllegalArgumentException(\"Signature r cannot be null\");\n    }\n    if (r.length > ECC_MAX_LEN) {\n        throw new IllegalArgumentException(\"Signature r exceeds maximum length of \" + ECC_MAX_LEN + \" bytes\");\n    }\n    this.r = r;\n}\n\npublic void setS(byte[] s) {\n    if (s == null) {\n        throw new IllegalArgumentException(\"Signature s cannot be null\");\n    }\n    if (s.length > ECC_MAX_LEN) {\n        throw new IllegalArgumentException(\"Signature s exceeds maximum length of \" + ECC_MAX_LEN + \" bytes\");\n    }\n    this.s = s;\n}"
+  },
+  {
+    "source": "claude",
+    "file": "sdf4j/src/main/java/org/openhitls/sdf4j/types/ECCCipher.java",
+    "line": "54-60",
+    "severity": "medium",
+    "title": "setX(), setY(), setM() don't validate array bounds",
+    "problem": "Setters don't validate that coordinate/hash arrays don't exceed expected lengths.",
+    "code": "public void setX(byte[] x) {\n    if (x == null) {\n        throw new IllegalArgumentException(\"X coordinate cannot be null\");\n    }\n    this.x = x;\n}",
+    "fix": "private static final int ECC_MAX_BITS = 512;\nprivate static final int ECC_MAX_LEN = (ECC_MAX_BITS + 7) / 8;\nprivate static final int HASH_LEN = 32;\n\npublic void setX(byte[] x) {\n    if (x == null) {\n        throw new IllegalArgumentException(\"X coordinate cannot be null\");\n    }\n    if (x.length > ECC_MAX_LEN) {\n        throw new IllegalArgumentException(\"X coordinate exceeds maximum length\");\n    }\n    this.x = x;\n}"
+  },
+  {
+    "source": "claude",
+    "file": "sdf4j/src/main/java/org/openhitls/sdf4j/types/RSAPublicKey.java",
+    "line": "89-97",
+    "severity": "medium",
+    "title": "setM() and setE() don't validate array bounds",
+    "problem": "Setters don't validate that modulus/exponent arrays don't exceed RSA_MAX_LEN (512 bytes).",
+    "code": "public void setM(byte[] m) {\n    if (m == null) {\n        throw new IllegalArgumentException(\"Modulus cannot be null\");\n    }\n    this.m = m;\n}\n\npublic void setE(byte[] e) {\n    if (e == null) {\n        throw new IllegalArgumentException(\"Exponent cannot be null\");\n    }\n    this.e = e;\n}",
+    "fix": "private static final int RSA_MAX_BITS = 4096;\nprivate static final int RSA_MAX_LEN = (RSA_MAX_BITS + 7) / 8;\n\npublic void setM(byte[] m) {\n    if (m == null) {\n        throw new IllegalArgumentException(\"Modulus cannot be null\");\n    }\n    if (m.length > RSA_MAX_LEN) {\n        throw new IllegalArgumentException(\"Modulus exceeds maximum length of \" + RSA_MAX_LEN + \" bytes\");\n    }\n    this.m = m;\n}\n\npublic void setE(byte[] e) {\n    if (e == null) {\n        throw new IllegalArgumentException(\"Exponent cannot be null\");\n    }\n    if (e.length > RSA_MAX_LEN) {\n        throw new IllegalArgumentException(\"Exponent exceeds maximum length of \" + RSA_MAX_LEN + \" bytes\");\n    }\n    this.e = e;\n}"
+  },
+  {
+    "source": "claude",
+    "file": "sdf4j/src/main/java/org/openhitls/sdf4j/types/ECCPublicKey.java",
+    "line": "148-156",
+    "severity": "low",
+    "title": "bytesToHex() outputs entire array without truncation",
+    "problem": "For large arrays (e.g., RSA 512-byte keys), the toString() method will generate very long hex strings (1024+ hex characters). This was previously truncated for readability.",
+    "code": "private static String bytesToHex(byte[] bytes) {\n    if (bytes == null) {\n        return \"\";\n    }\n    StringBuilder sb = new StringBuilder();\n    for (int i = 0; i < bytes.length; i++) {\n        sb.append(String.format(\"%02X\", bytes[i]));\n    }\n    return sb.toString();\n}",
+    "fix": "private static String bytesToHex(byte[] bytes) {\n    if (bytes == null) {\n        return \"\";\n    }\n    int limit = Math.min(bytes.length, 32);\n    StringBuilder sb = new StringBuilder();\n    for (int i = 0; i < limit; i++) {\n        sb.append(String.format(\"%02X\", bytes[i]));\n    }\n    if (bytes.length > limit) {\n        sb.append(\"...(\").append(bytes.length).append(\" bytes)\");\n    }\n    return sb.toString();\n}"
+  },
+  {
+    "source": "claude",
+    "file": "sdf4j/src/main/native/src/type_conversion.c",
+    "line": "141-147",
+    "severity": "low",
+    "title": "RSA array length check throws exception but documentation unclear",
+    "problem": "The code throws an exception if array exceeds RSAref_MAX_LEN (512), but the Java layer constructors no longer enforce this limit. Users may create valid Java objects that fail at JNI boundary with unclear error message.",
+    "code": "if (len > RSAref_MAX_LEN) {\n    THROW_SDF_EXCEPTION(env, SDR_INARGERR, \"RSA modulus array exceeds 512\");\n    return false;\n}",
+    "fix": "if (len > RSAref_MAX_LEN) {\n    THROW_SDF_EXCEPTION(env, SDR_INARGERR, \"RSA modulus array exceeds maximum length of 512 bytes\");\n    return false;\n}"
+  },
+  {
+    "source": "claude",
+    "file": "sdf4j/src/main/java/org/openhitls/sdf4j/types/RSAPrivateKey.java",
+    "line": "44-48",
+    "severity": "low",
+    "title": "setM(), setE(), setD() don't validate array bounds",
+    "problem": "Setters don't validate that byte arrays don't exceed RSA_MAX_LEN (512 bytes), allowing invalid state that will fail at JNI boundary.",
+    "code": "public void setM(byte[] m) {\n    this.m = m;\n}\n\npublic void setE(byte[] e) {\n    this.e = e;\n}\n\npublic void setD(byte[] d) {\n    this.d = d;\n}",
+    "fix": "public void setM(byte[] m) {\n    if (m == null) {\n        throw new IllegalArgumentException(\"Modulus cannot be null\");\n    }\n    if (m.length > RSA_MAX_LEN) {\n        throw new IllegalArgumentException(\"Modulus exceeds maximum length of \" + RSA_MAX_LEN + \" bytes\");\n    }\n    this.m = m;\n}\n\npublic void setE(byte[] e) {\n    if (e == null) {\n        throw new IllegalArgumentException(\"Exponent cannot be null\");\n    }\n    if (e.length > RSA_MAX_LEN) {\n        throw new IllegalArgumentException(\"Exponent exceeds maximum length of \" + RSA_MAX_LEN + \" bytes\");\n    }\n    this.e = e;\n}\n\npublic void setD(byte[] d) {\n    if (d == null) {\n        throw new IllegalArgumentException(\"Private exponent cannot be null\");\n    }\n    if (d.length > RSA_MAX_LEN) {\n        throw new IllegalArgumentException(\"Private exponent exceeds maximum length of \" + RSA_MAX_LEN + \" bytes\");\n    }\n    this.d = d;\n}"
+  },
+  {
+    "source": "claude",
+    "file": "sdf4j/src/main/java/org/openhitls/sdf4j/types/RSAPrivateKey.java",
+    "line": "172-176",
+    "severity": "low",
+    "title": "setCoef() doesn't validate array bounds",
+    "problem": "Setter doesn't validate that coef array doesn't exceed RSA_MAX_PLEN (256 bytes).",
+    "code": "public void setCoef(byte[] coef) {\n    this.coef = coef;\n}",
+    "fix": "public void setCoef(byte[] coef) {\n    if (coef == null) {\n        throw new IllegalArgumentException(\"CRT coefficient cannot be null\");\n    }\n    if (coef.length > RSA_MAX_PLEN) {\n        throw new IllegalArgumentException(\"CRT coefficient exceeds maximum length of \" + RSA_MAX_PLEN + \" bytes\");\n    }\n    this.coef = coef;\n}"
+  }
+]

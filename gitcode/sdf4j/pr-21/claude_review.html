@@ -1,0 +1,505 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Code Review: openHiTLS/sdf4j#21 - CLAUDE</title>
+    <style>
+        :root { --critical: #dc2626; --high: #ea580c; --medium: #ca8a04; --low: #65a30d; }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: system-ui, sans-serif; background: #f8fafc; color: #1e293b; padding: 2rem; line-height: 1.6; }
+        .container { max-width: 900px; margin: 0 auto; }
+        h1 { font-size: 1.5rem; margin-bottom: 0.5rem; }
+        .subtitle { color: #64748b; margin-bottom: 2rem; }
+        .section { margin-bottom: 2rem; }
+        .section-title { font-size: 1.1rem; font-weight: 600; padding: 0.5rem 1rem; border-radius: 0.5rem 0.5rem 0 0; color: white; }
+        .section-title.critical { background: var(--critical); }
+        .section-title.high { background: var(--high); }
+        .section-title.medium { background: var(--medium); }
+        .section-title.low { background: var(--low); }
+        .issue { background: white; border: 1px solid #e2e8f0; border-top: none; padding: 1rem; }
+        .issue:last-child { border-radius: 0 0 0.5rem 0.5rem; }
+        .issue-title { font-weight: 600; margin-bottom: 0.25rem; }
+        .issue-location { font-family: monospace; font-size: 0.875rem; color: #64748b; margin-bottom: 0.75rem; }
+        .issue-source { font-size: 0.75rem; color: #94a3b8; margin-top: 0.5rem; }
+        pre { background: #1e293b; color: #e2e8f0; padding: 0.75rem; border-radius: 0.375rem; overflow-x: auto; font-size: 0.875rem; margin: 0.5rem 0; }
+        .problem { margin: 0.75rem 0; }
+        .fix-label { font-weight: 600; margin-top: 0.75rem; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Code Review: openHiTLS/sdf4j#21 - CLAUDE</h1>
+        <div class="subtitle"></div>
+<div class="section"><div class="section-title high">High</div>
+<div class="issue">
+                <div class="issue-title">Default constructor doesn't initialize asymAlgAbility array</div>
+                <div class="issue-location">sdf4j/src/main/java/org/openhitls/sdf4j/types/DeviceInfo.java:38-40</div>
+                <pre>public DeviceInfo() {
+    // asymAlgAbility not initialized - will be null
+}</pre>
+                <div class="problem"><strong>Issue:</strong> The default constructor no longer initializes the asymAlgAbility array to a 2-element array. This will cause NullPointerException when getAsymAlgAbility() is called on a default-constructed object, or when setAsymAlgAbility() checks for null but other code expects a non-null array.</div>
+                <div class="fix-label">Fix:</div><pre>public DeviceInfo() {
+    this.asymAlgAbility = new long[2];
+}</pre>
+                <div class="issue-source">Reviewer: claude</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">setC() validation depends on call order of setL()</div>
+                <div class="issue-location">sdf4j/src/main/java/org/openhitls/sdf4j/types/ECCCipher.java:104-108</div>
+                <pre>public void setC(byte[] c) {
+    if (c == null || this.l &gt; c.length) {
+        throw new IllegalArgumentException("cipher value is invalid");
+    }
+    this.c = c;
+}</pre>
+                <div class="problem"><strong>Issue:</strong> The validation `this.l > c.length` in setC() depends on l being set BEFORE c. If a caller calls setC() first, then setL() with a larger value, the object will be in an invalid state. The validation is ineffective.</div>
+                <div class="fix-label">Fix:</div><pre>public void setC(byte[] c) {
+    if (c == null) {
+        throw new IllegalArgumentException("cipher value cannot be null");
+    }
+    this.c = c;
+    // Validate l matches c.length
+    if (this.l &gt; c.length) {
+        throw new IllegalArgumentException("l cannot exceed c.length");
+    }
+}
+
+// Also update setL() to validate against existing c
+public void setL(long l) {
+    if (l &lt; 0) {
+        throw new IllegalArgumentException("Ciphertext length cannot be negative");
+    }
+    if (this.c != null &amp;&amp; l &gt; this.c.length) {
+        throw new IllegalArgumentException("Ciphertext length cannot exceed c.length");
+    }
+    this.l = l;
+}</pre>
+                <div class="issue-source">Reviewer: claude</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">setCtM() validation has call order dependency</div>
+                <div class="issue-location">sdf4j/src/main/java/org/openhitls/sdf4j/types/HybridCipher.java:72-76</div>
+                <pre>public void setCtM(byte[] ctM) {
+    if (ctM == null || this.l1 &gt; ctM.length) {
+        throw new IllegalArgumentException("cipher value is invalid");
+    }
+    this.ctM = ctM;
+}</pre>
+                <div class="problem"><strong>Issue:</strong> Similar to ECCCipher issue - validation `this.l1 > ctM.length` depends on l1 being set before ctM. Default l1 is 0, so validation passes even for invalid arrays.</div>
+                <div class="fix-label">Fix:</div><pre>public void setCtM(byte[] ctM) {
+    if (ctM == null) {
+        throw new IllegalArgumentException("cipher value cannot be null");
+    }
+    this.ctM = ctM;
+}
+
+public void setL1(long l1) {
+    if (l1 &lt; 0) {
+        throw new IllegalArgumentException("Ciphertext length cannot be negative");
+    }
+    if (this.ctM != null &amp;&amp; l1 &gt; this.ctM.length) {
+        throw new IllegalArgumentException("l1 cannot exceed ctM.length");
+    }
+    this.l1 = l1;
+}</pre>
+                <div class="issue-source">Reviewer: claude</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">setSigM() validation has call order dependency</div>
+                <div class="issue-location">sdf4j/src/main/java/org/openhitls/sdf4j/types/HybridSignature.java:61-65</div>
+                <pre>public void setSigM(byte[] sigM) {
+    if (sigM == null || this.l &gt; sigM.length) {
+        throw new IllegalArgumentException("signature value is invalid");
+    }
+    this.sigM = sigM;
+}</pre>
+                <div class="problem"><strong>Issue:</strong> Same validation order issue - depends on l being set before sigM.</div>
+                <div class="fix-label">Fix:</div><pre>public void setSigM(byte[] sigM) {
+    if (sigM == null) {
+        throw new IllegalArgumentException("signature value cannot be null");
+    }
+    this.sigM = sigM;
+}
+
+public void setL(int l) {
+    if (l &lt; 0) {
+        throw new IllegalArgumentException("Signature length cannot be negative");
+    }
+    if (this.sigM != null &amp;&amp; l &gt; this.sigM.length) {
+        throw new IllegalArgumentException("l cannot exceed sigM.length");
+    }
+    this.l = l;
+}</pre>
+                <div class="issue-source">Reviewer: claude</div>
+            </div>
+</div>
+<div class="section"><div class="section-title medium">Medium</div>
+<div class="issue">
+                <div class="issue-title">Constructor doesn't validate asymAlgAbility length</div>
+                <div class="issue-location">sdf4j/src/main/java/org/openhitls/sdf4j/types/DeviceInfo.java:49-59</div>
+                <pre>public DeviceInfo(String issuerName, String deviceName, String deviceSerial,
+                  long deviceVersion, long standardVersion, long[] asymAlgAbility,
+                  long symAlgAbility, long hashAlgAbility, long bufferSize) {
+    if (issuerName == null || deviceName == null || deviceSerial == null || asymAlgAbility == null) {
+        throw new IllegalArgumentException("null input");
+    }
+    this.asymAlgAbility = asymAlgAbility;  // No length validation</pre>
+                <div class="problem"><strong>Issue:</strong> The constructor checks for null but doesn't validate that asymAlgAbility has exactly 2 elements as documented. This can cause ArrayIndexOutOfBoundsException or incorrect behavior when the array is used.</div>
+                <div class="fix-label">Fix:</div><pre>public DeviceInfo(String issuerName, String deviceName, String deviceSerial,
+                  long deviceVersion, long standardVersion, long[] asymAlgAbility,
+                  long symAlgAbility, long hashAlgAbility, long bufferSize) {
+    if (issuerName == null || deviceName == null || deviceSerial == null || asymAlgAbility == null) {
+        throw new IllegalArgumentException("null input");
+    }
+    if (asymAlgAbility.length != 2) {
+        throw new IllegalArgumentException("asymAlgAbility must have exactly 2 elements");
+    }
+    this.asymAlgAbility = asymAlgAbility;</pre>
+                <div class="issue-source">Reviewer: claude</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">Constructor accepts null for prime and pexp arrays</div>
+                <div class="issue-location">sdf4j/src/main/java/org/openhitls/sdf4j/types/RSAPrivateKey.java:62-72</div>
+                <pre>public RSAPrivateKey(int bits, byte[] m, byte[] e, byte[] d,
+                     byte[][] prime, byte[][] pexp, byte[] coef) {
+    // ...
+    this.prime = prime;  // No null or length check
+    this.pexp = pexp;    // No null or length check
+    this.coef = coef;
+}</pre>
+                <div class="problem"><strong>Issue:</strong> The constructor no longer validates that prime and pexp arrays are non-null or have exactly 2 elements. This can cause NullPointerException when these fields are accessed.</div>
+                <div class="fix-label">Fix:</div><pre>public RSAPrivateKey(int bits, byte[] m, byte[] e, byte[] d,
+                     byte[][] prime, byte[][] pexp, byte[] coef) {
+    if (bits &lt;= 0) {
+        throw new IllegalArgumentException("Invalid bits: " + bits);
+    }
+    if (m == null || e == null || d == null || coef == null) {
+        throw new IllegalArgumentException("Key components cannot be null");
+    }
+    if (prime == null || prime.length &lt; 2) {
+        throw new IllegalArgumentException("prime must have at least 2 elements");
+    }
+    if (pexp == null || pexp.length &lt; 2) {
+        throw new IllegalArgumentException("pexp must have at least 2 elements");
+    }
+    this.bits = bits;
+    this.m = m;
+    this.e = e;
+    this.d = d;
+    this.prime = prime;
+    this.pexp = pexp;
+    this.coef = coef;
+}</pre>
+                <div class="issue-source">Reviewer: claude</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">setPrime() and setPexp() accept null or invalid arrays</div>
+                <div class="issue-location">sdf4j/src/main/java/org/openhitls/sdf4j/types/RSAPrivateKey.java:157-167</div>
+                <pre>public void setPrime(byte[][] prime) {
+    this.prime = prime;
+}
+
+public void setPexp(byte[][] pexp) {
+    this.pexp = pexp;
+}</pre>
+                <div class="problem"><strong>Issue:</strong> The setters no longer validate null or array dimensions, allowing invalid state.</div>
+                <div class="fix-label">Fix:</div><pre>public void setPrime(byte[][] prime) {
+    if (prime == null || prime.length &lt; 2) {
+        throw new IllegalArgumentException("prime must have at least 2 elements");
+    }
+    this.prime = prime;
+}
+
+public void setPexp(byte[][] pexp) {
+    if (pexp == null || pexp.length &lt; 2) {
+        throw new IllegalArgumentException("pexp must have at least 2 elements");
+    }
+    this.pexp = pexp;
+}</pre>
+                <div class="issue-source">Reviewer: claude</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">setX() and setY() don't validate array bounds</div>
+                <div class="issue-location">sdf4j/src/main/java/org/openhitls/sdf4j/types/ECCPublicKey.java:89-93</div>
+                <pre>public void setX(byte[] x) {
+    if (x == null) {
+        throw new IllegalArgumentException("X coordinate cannot be null");
+    }
+    this.x = x;
+}
+
+public void setY(byte[] y) {
+    if (y == null) {
+        throw new IllegalArgumentException("Y coordinate cannot be null");
+    }
+    this.y = y;
+}</pre>
+                <div class="problem"><strong>Issue:</strong> Setters don't validate that coordinate arrays don't exceed ECC_MAX_LEN (64 bytes for 512-bit keys), allowing invalid state.</div>
+                <div class="fix-label">Fix:</div><pre>private static final int ECC_MAX_BITS = 512;
+private static final int ECC_MAX_LEN = (ECC_MAX_BITS + 7) / 8;
+
+public void setX(byte[] x) {
+    if (x == null) {
+        throw new IllegalArgumentException("X coordinate cannot be null");
+    }
+    if (x.length &gt; ECC_MAX_LEN) {
+        throw new IllegalArgumentException("X coordinate exceeds maximum length of " + ECC_MAX_LEN + " bytes");
+    }
+    this.x = x;
+}
+
+public void setY(byte[] y) {
+    if (y == null) {
+        throw new IllegalArgumentException("Y coordinate cannot be null");
+    }
+    if (y.length &gt; ECC_MAX_LEN) {
+        throw new IllegalArgumentException("Y coordinate exceeds maximum length of " + ECC_MAX_LEN + " bytes");
+    }
+    this.y = y;
+}</pre>
+                <div class="issue-source">Reviewer: claude</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">setK() doesn't validate array bounds</div>
+                <div class="issue-location">sdf4j/src/main/java/org/openhitls/sdf4j/types/ECCPrivateKey.java:75-80</div>
+                <pre>public void setK(byte[] k) {
+    if (k == null) {
+        throw new IllegalArgumentException("Private key value cannot be null");
+    }
+    this.k = k;
+}</pre>
+                <div class="problem"><strong>Issue:</strong> Setter doesn't validate that K array doesn't exceed ECC_MAX_LEN (64 bytes).</div>
+                <div class="fix-label">Fix:</div><pre>private static final int ECC_MAX_BITS = 512;
+private static final int ECC_MAX_LEN = (ECC_MAX_BITS + 7) / 8;
+
+public void setK(byte[] k) {
+    if (k == null) {
+        throw new IllegalArgumentException("Private key value cannot be null");
+    }
+    if (k.length &gt; ECC_MAX_LEN) {
+        throw new IllegalArgumentException("Private key K exceeds maximum length of " + ECC_MAX_LEN + " bytes");
+    }
+    this.k = k;
+}</pre>
+                <div class="issue-source">Reviewer: claude</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">setR() and setS() don't validate array bounds</div>
+                <div class="issue-location">sdf4j/src/main/java/org/openhitls/sdf4j/types/ECCSignature.java:50-58</div>
+                <pre>public void setR(byte[] r) {
+    if (r == null) {
+        throw new IllegalArgumentException("Signature r cannot be null");
+    }
+    this.r = r;
+}
+
+public void setS(byte[] s) {
+    if (s == null) {
+        throw new IllegalArgumentException("Signature s cannot be null");
+    }
+    this.s = s;
+}</pre>
+                <div class="problem"><strong>Issue:</strong> Setters don't validate that signature value arrays don't exceed ECC_MAX_LEN (64 bytes).</div>
+                <div class="fix-label">Fix:</div><pre>private static final int ECC_MAX_BITS = 512;
+private static final int ECC_MAX_LEN = (ECC_MAX_BITS + 7) / 8;
+
+public void setR(byte[] r) {
+    if (r == null) {
+        throw new IllegalArgumentException("Signature r cannot be null");
+    }
+    if (r.length &gt; ECC_MAX_LEN) {
+        throw new IllegalArgumentException("Signature r exceeds maximum length of " + ECC_MAX_LEN + " bytes");
+    }
+    this.r = r;
+}
+
+public void setS(byte[] s) {
+    if (s == null) {
+        throw new IllegalArgumentException("Signature s cannot be null");
+    }
+    if (s.length &gt; ECC_MAX_LEN) {
+        throw new IllegalArgumentException("Signature s exceeds maximum length of " + ECC_MAX_LEN + " bytes");
+    }
+    this.s = s;
+}</pre>
+                <div class="issue-source">Reviewer: claude</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">setX(), setY(), setM() don't validate array bounds</div>
+                <div class="issue-location">sdf4j/src/main/java/org/openhitls/sdf4j/types/ECCCipher.java:54-60</div>
+                <pre>public void setX(byte[] x) {
+    if (x == null) {
+        throw new IllegalArgumentException("X coordinate cannot be null");
+    }
+    this.x = x;
+}</pre>
+                <div class="problem"><strong>Issue:</strong> Setters don't validate that coordinate/hash arrays don't exceed expected lengths.</div>
+                <div class="fix-label">Fix:</div><pre>private static final int ECC_MAX_BITS = 512;
+private static final int ECC_MAX_LEN = (ECC_MAX_BITS + 7) / 8;
+private static final int HASH_LEN = 32;
+
+public void setX(byte[] x) {
+    if (x == null) {
+        throw new IllegalArgumentException("X coordinate cannot be null");
+    }
+    if (x.length &gt; ECC_MAX_LEN) {
+        throw new IllegalArgumentException("X coordinate exceeds maximum length");
+    }
+    this.x = x;
+}</pre>
+                <div class="issue-source">Reviewer: claude</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">setM() and setE() don't validate array bounds</div>
+                <div class="issue-location">sdf4j/src/main/java/org/openhitls/sdf4j/types/RSAPublicKey.java:89-97</div>
+                <pre>public void setM(byte[] m) {
+    if (m == null) {
+        throw new IllegalArgumentException("Modulus cannot be null");
+    }
+    this.m = m;
+}
+
+public void setE(byte[] e) {
+    if (e == null) {
+        throw new IllegalArgumentException("Exponent cannot be null");
+    }
+    this.e = e;
+}</pre>
+                <div class="problem"><strong>Issue:</strong> Setters don't validate that modulus/exponent arrays don't exceed RSA_MAX_LEN (512 bytes).</div>
+                <div class="fix-label">Fix:</div><pre>private static final int RSA_MAX_BITS = 4096;
+private static final int RSA_MAX_LEN = (RSA_MAX_BITS + 7) / 8;
+
+public void setM(byte[] m) {
+    if (m == null) {
+        throw new IllegalArgumentException("Modulus cannot be null");
+    }
+    if (m.length &gt; RSA_MAX_LEN) {
+        throw new IllegalArgumentException("Modulus exceeds maximum length of " + RSA_MAX_LEN + " bytes");
+    }
+    this.m = m;
+}
+
+public void setE(byte[] e) {
+    if (e == null) {
+        throw new IllegalArgumentException("Exponent cannot be null");
+    }
+    if (e.length &gt; RSA_MAX_LEN) {
+        throw new IllegalArgumentException("Exponent exceeds maximum length of " + RSA_MAX_LEN + " bytes");
+    }
+    this.e = e;
+}</pre>
+                <div class="issue-source">Reviewer: claude</div>
+            </div>
+</div>
+<div class="section"><div class="section-title low">Low</div>
+<div class="issue">
+                <div class="issue-title">bytesToHex() outputs entire array without truncation</div>
+                <div class="issue-location">sdf4j/src/main/java/org/openhitls/sdf4j/types/ECCPublicKey.java:148-156</div>
+                <pre>private static String bytesToHex(byte[] bytes) {
+    if (bytes == null) {
+        return "";
+    }
+    StringBuilder sb = new StringBuilder();
+    for (int i = 0; i &lt; bytes.length; i++) {
+        sb.append(String.format("%02X", bytes[i]));
+    }
+    return sb.toString();
+}</pre>
+                <div class="problem"><strong>Issue:</strong> For large arrays (e.g., RSA 512-byte keys), the toString() method will generate very long hex strings (1024+ hex characters). This was previously truncated for readability.</div>
+                <div class="fix-label">Fix:</div><pre>private static String bytesToHex(byte[] bytes) {
+    if (bytes == null) {
+        return "";
+    }
+    int limit = Math.min(bytes.length, 32);
+    StringBuilder sb = new StringBuilder();
+    for (int i = 0; i &lt; limit; i++) {
+        sb.append(String.format("%02X", bytes[i]));
+    }
+    if (bytes.length &gt; limit) {
+        sb.append("...(").append(bytes.length).append(" bytes)");
+    }
+    return sb.toString();
+}</pre>
+                <div class="issue-source">Reviewer: claude</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">RSA array length check throws exception but documentation unclear</div>
+                <div class="issue-location">sdf4j/src/main/native/src/type_conversion.c:141-147</div>
+                <pre>if (len &gt; RSAref_MAX_LEN) {
+    THROW_SDF_EXCEPTION(env, SDR_INARGERR, "RSA modulus array exceeds 512");
+    return false;
+}</pre>
+                <div class="problem"><strong>Issue:</strong> The code throws an exception if array exceeds RSAref_MAX_LEN (512), but the Java layer constructors no longer enforce this limit. Users may create valid Java objects that fail at JNI boundary with unclear error message.</div>
+                <div class="fix-label">Fix:</div><pre>if (len &gt; RSAref_MAX_LEN) {
+    THROW_SDF_EXCEPTION(env, SDR_INARGERR, "RSA modulus array exceeds maximum length of 512 bytes");
+    return false;
+}</pre>
+                <div class="issue-source">Reviewer: claude</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">setM(), setE(), setD() don't validate array bounds</div>
+                <div class="issue-location">sdf4j/src/main/java/org/openhitls/sdf4j/types/RSAPrivateKey.java:44-48</div>
+                <pre>public void setM(byte[] m) {
+    this.m = m;
+}
+
+public void setE(byte[] e) {
+    this.e = e;
+}
+
+public void setD(byte[] d) {
+    this.d = d;
+}</pre>
+                <div class="problem"><strong>Issue:</strong> Setters don't validate that byte arrays don't exceed RSA_MAX_LEN (512 bytes), allowing invalid state that will fail at JNI boundary.</div>
+                <div class="fix-label">Fix:</div><pre>public void setM(byte[] m) {
+    if (m == null) {
+        throw new IllegalArgumentException("Modulus cannot be null");
+    }
+    if (m.length &gt; RSA_MAX_LEN) {
+        throw new IllegalArgumentException("Modulus exceeds maximum length of " + RSA_MAX_LEN + " bytes");
+    }
+    this.m = m;
+}
+
+public void setE(byte[] e) {
+    if (e == null) {
+        throw new IllegalArgumentException("Exponent cannot be null");
+    }
+    if (e.length &gt; RSA_MAX_LEN) {
+        throw new IllegalArgumentException("Exponent exceeds maximum length of " + RSA_MAX_LEN + " bytes");
+    }
+    this.e = e;
+}
+
+public void setD(byte[] d) {
+    if (d == null) {
+        throw new IllegalArgumentException("Private exponent cannot be null");
+    }
+    if (d.length &gt; RSA_MAX_LEN) {
+        throw new IllegalArgumentException("Private exponent exceeds maximum length of " + RSA_MAX_LEN + " bytes");
+    }
+    this.d = d;
+}</pre>
+                <div class="issue-source">Reviewer: claude</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">setCoef() doesn't validate array bounds</div>
+                <div class="issue-location">sdf4j/src/main/java/org/openhitls/sdf4j/types/RSAPrivateKey.java:172-176</div>
+                <pre>public void setCoef(byte[] coef) {
+    this.coef = coef;
+}</pre>
+                <div class="problem"><strong>Issue:</strong> Setter doesn't validate that coef array doesn't exceed RSA_MAX_PLEN (256 bytes).</div>
+                <div class="fix-label">Fix:</div><pre>public void setCoef(byte[] coef) {
+    if (coef == null) {
+        throw new IllegalArgumentException("CRT coefficient cannot be null");
+    }
+    if (coef.length &gt; RSA_MAX_PLEN) {
+        throw new IllegalArgumentException("CRT coefficient exceeds maximum length of " + RSA_MAX_PLEN + " bytes");
+    }
+    this.coef = coef;
+}</pre>
+                <div class="issue-source">Reviewer: claude</div>
+            </div>
+</div>
+</div></body></html>
