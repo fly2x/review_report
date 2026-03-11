@@ -1,0 +1,309 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Final Report: openHiTLS/pqcp#38</title>
+    <style>
+        :root { --critical: #dc2626; --high: #ea580c; --medium: #ca8a04; --low: #65a30d;
+                 --trusted: #059669; --likely: #0284c7; --evaluate: #7c3aed; }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: system-ui, sans-serif; background: #f8fafc; color: #1e293b; padding: 2rem; line-height: 1.6; }
+        .container { max-width: 900px; margin: 0 auto; }
+        h1 { font-size: 1.75rem; margin-bottom: 0.5rem; }
+        .subtitle { color: #64748b; margin-bottom: 1rem; }
+        .stats { display: flex; gap: 1rem; margin-bottom: 2rem; flex-wrap: wrap; }
+        .stat { background: white; border: 1px solid #e2e8f0; border-radius: 0.5rem; padding: 1rem; min-width: 100px; text-align: center; }
+        .stat-value { font-size: 1.5rem; font-weight: 700; }
+        .stat-label { font-size: 0.875rem; color: #64748b; }
+        .stat.critical .stat-value { color: var(--critical); }
+        .stat.high .stat-value { color: var(--high); }
+        .stat.medium .stat-value { color: var(--medium); }
+        .stat.low .stat-value { color: var(--low); }
+        .reviewers { background: #e0e7ff; color: #3730a3; padding: 0.5rem 1rem; border-radius: 0.5rem; margin-bottom: 2rem; }
+        .section { margin-bottom: 2rem; }
+        .section-title { font-size: 1.1rem; font-weight: 600; padding: 0.5rem 1rem; border-radius: 0.5rem 0.5rem 0 0; color: white; }
+        .section-title.critical { background: var(--critical); }
+        .section-title.high { background: var(--high); }
+        .section-title.medium { background: var(--medium); }
+        .section-title.low { background: var(--low); }
+        .issue { background: white; border: 1px solid #e2e8f0; border-top: none; padding: 1rem; }
+        .issue:last-child { border-radius: 0 0 0.5rem 0.5rem; }
+        .issue-title { font-weight: 600; margin-bottom: 0.25rem; }
+        .issue-location { font-family: monospace; font-size: 0.875rem; color: #64748b; margin-bottom: 0.5rem; }
+        .issue-meta { font-size: 0.75rem; margin-bottom: 0.75rem; display: flex; gap: 0.75rem; align-items: center; }
+        .issue-meta .reviewers { background: #f1f5f9; color: #475569; padding: 0.25rem 0.5rem; border-radius: 0.25rem; margin: 0; }
+        .confidence-badge { padding: 0.25rem 0.5rem; border-radius: 0.25rem; font-weight: 500; }
+        .confidence-badge.trusted { background: #d1fae5; color: #065f46; }
+        .confidence-badge.likely { background: #dbeafe; color: #1e40af; }
+        .confidence-badge.evaluate { background: #ede9fe; color: #5b21b6; }
+        pre { background: #1e293b; color: #e2e8f0; padding: 0.75rem; border-radius: 0.375rem; overflow-x: auto; font-size: 0.875rem; margin: 0.5rem 0; }
+        .problem { margin: 0.75rem 0; }
+        .fix-label { font-weight: 600; margin-top: 0.75rem; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Final Code Review Report</h1>
+        <div class="subtitle">openHiTLS/pqcp - PR #38</div>
+        <p style="margin-bottom: 1rem;"></p>
+
+        <div class="stats">
+            <div class="stat"><div class="stat-value">12</div><div class="stat-label">Total</div></div>
+            <div class="stat critical"><div class="stat-value">0</div><div class="stat-label">Critical</div></div>
+            <div class="stat high"><div class="stat-value">2</div><div class="stat-label">High</div></div>
+            <div class="stat medium"><div class="stat-value">6</div><div class="stat-label">Medium</div></div>
+            <div class="stat low"><div class="stat-value">4</div><div class="stat-label">Low</div></div>
+        </div>
+
+        <div class="reviewers">Reviewers: claude, gemini, codex</div>
+<div class="section"><div class="section-title high">High</div>
+<div class="issue">
+                <div class="issue-title">KEM compare callback dropped from provider dispatch tables</div>
+                <div class="issue-location">src/provider/pqcp_pkey.c:52-84</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CODEX</span>
+                    <span class="confidence-badge trusted">置信度: 可信</span>
+                </div>
+                <pre>const CRYPT_EAL_Func g_pqcpKeyMgmtScloudPlus[] = {
+    {CRYPT_EAL_IMPLPKEYMGMT_NEWCTX, (CRYPT_EAL_ImplPkeyMgmtNewCtx)CRYPT_PQCP_PkeyMgmtNewCtx},
+    {CRYPT_EAL_IMPLPKEYMGMT_GENKEY, (CRYPT_EAL_ImplPkeyMgmtGenKey)PQCP_SCLOUDPLUS_Gen},
+    {CRYPT_EAL_IMPLPKEYMGMT_SETPRV, (CRYPT_EAL_ImplPkeyMgmtSetPrv)PQCP_SCLOUDPLUS_SetPrvKey},
+    {CRYPT_EAL_IMPLPKEYMGMT_SETPUB, (CRYPT_EAL_ImplPkeyMgmtSetPub)PQCP_SCLOUDPLUS_SetPubKey},
+    {CRYPT_EAL_IMPLPKEYMGMT_GETPRV, (CRYPT_EAL_ImplPkeyMgmtGetPrv)PQCP_SCLOUDPLUS_GetPrvKey},
+    {CRYPT_EAL_IMPLPKEYMGMT_GETPUB, (CRYPT_EAL_ImplPkeyMgmtGetPub)PQCP_SCLOUDPLUS_GetPubKey},
+    {CRYPT_EAL_IMPLPKEYMGMT_DUPCTX, (CRYPT_EAL_ImplPkeyMgmtDupCtx)PQCP_SCLOUDPLUS_DupCtx},
+    {CRYPT_EAL_IMPLPKEYMGMT_CTRL, (CRYPT_EAL_ImplPkeyMgmtCtrl)PQCP_SCLOUDPLUS_Ctrl},
+    {CRYPT_EAL_IMPLPKEYMGMT_FREECTX, (CRYPT_EAL_ImplPkeyMgmtFreeCtx)PQCP_SCLOUDPLUS_FreeCtx},
+    CRYPT_EAL_FUNC_END,
+};</pre>
+                <div class="problem"><strong>Issue:</strong> The SCloud+ and PolarLAC key-management tables no longer register CRYPT_EAL_IMPLPKEYMGMT_COMPARE. The testcode/demo/polarlac_demo.c still calls CRYPT_EAL_PkeyCmp() on lines 154 and 161, which will now fail with NOT_SUPPORT error even though the API was previously available.</div>
+                <div class="fix-label">Fix:</div><pre>const CRYPT_EAL_Func g_pqcpKeyMgmtScloudPlus[] = {
+    {CRYPT_EAL_IMPLPKEYMGMT_NEWCTX, (CRYPT_EAL_ImplPkeyMgmtNewCtx)CRYPT_PQCP_PkeyMgmtNewCtx},
+    {CRYPT_EAL_IMPLPKEYMGMT_GENKEY, (CRYPT_EAL_ImplPkeyMgmtGenKey)PQCP_SCLOUDPLUS_Gen},
+    {CRYPT_EAL_IMPLPKEYMGMT_SETPRV, (CRYPT_EAL_ImplPkeyMgmtSetPrv)PQCP_SCLOUDPLUS_SetPrvKey},
+    {CRYPT_EAL_IMPLPKEYMGMT_SETPUB, (CRYPT_EAL_ImplPkeyMgmtSetPub)PQCP_SCLOUDPLUS_SetPubKey},
+    {CRYPT_EAL_IMPLPKEYMGMT_GETPRV, (CRYPT_EAL_ImplPkeyMgmtGetPrv)PQCP_SCLOUDPLUS_GetPrvKey},
+    {CRYPT_EAL_IMPLPKEYMGMT_GETPUB, (CRYPT_EAL_ImplPkeyMgmtGetPub)PQCP_SCLOUDPLUS_GetPubKey},
+    {CRYPT_EAL_IMPLPKEYMGMT_DUPCTX, (CRYPT_EAL_ImplPkeyMgmtDupCtx)PQCP_SCLOUDPLUS_DupCtx},
+    {CRYPT_EAL_IMPLPKEYMGMT_COMPARE, (CRYPT_EAL_ImplPkeyMgmtCompare)PQCP_SCLOUDPLUS_Cmp},
+    {CRYPT_EAL_IMPLPKEYMGMT_CTRL, (CRYPT_EAL_ImplPkeyMgmtCtrl)PQCP_SCLOUDPLUS_Ctrl},
+    {CRYPT_EAL_IMPLPKEYMGMT_FREECTX, (CRYPT_EAL_ImplPkeyMgmtFreeCtx)PQCP_SCLOUDPLUS_FreeCtx},
+    CRYPT_EAL_FUNC_END,
+};
+
+const CRYPT_EAL_Func g_pqcpKeyMgmtPolarLac[] = {
+    {CRYPT_EAL_IMPLPKEYMGMT_NEWCTX, (CRYPT_EAL_ImplPkeyMgmtNewCtx)CRYPT_PQCP_PkeyMgmtNewCtx},
+    {CRYPT_EAL_IMPLPKEYMGMT_GENKEY, (CRYPT_EAL_ImplPkeyMgmtGenKey)PQCP_LAC2_Gen},
+    {CRYPT_EAL_IMPLPKEYMGMT_SETPRV, (CRYPT_EAL_ImplPkeyMgmtSetPrv)PQCP_LAC2_SetPrvKey},
+    {CRYPT_EAL_IMPLPKEYMGMT_SETPUB, (CRYPT_EAL_ImplPkeyMgmtSetPub)PQCP_LAC2_SetPubKey},
+    {CRYPT_EAL_IMPLPKEYMGMT_GETPRV, (CRYPT_EAL_ImplPkeyMgmtGetPrv)PQCP_LAC2_GetPrvKey},
+    {CRYPT_EAL_IMPLPKEYMGMT_GETPUB, (CRYPT_EAL_ImplPkeyMgmtGetPub)PQCP_LAC2_GetPubKey},
+    {CRYPT_EAL_IMPLPKEYMGMT_DUPCTX, (CRYPT_EAL_ImplPkeyMgmtDupCtx)PQCP_LAC2_DupCtx},
+    {CRYPT_EAL_IMPLPKEYMGMT_COMPARE, (CRYPT_EAL_ImplPkeyMgmtCompare)PQCP_LAC2_Cmp},
+    {CRYPT_EAL_IMPLPKEYMGMT_CTRL, (CRYPT_EAL_ImplPkeyMgmtCtrl)PQCP_LAC2_Ctrl},
+    {CRYPT_EAL_IMPLPKEYMGMT_FREECTX, (CRYPT_EAL_ImplPkeyMgmtFreeCtx)PQCP_LAC2_FreeCtx},
+    CRYPT_EAL_FUNC_END,
+};</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">SCloud+ demo passes invalid parameter ID to CRYPT_CTRL_SET_PARA_BY_ID</div>
+                <div class="issue-location">testcode/demo/scloudplus_demo.c:53</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CODEX</span>
+                    <span class="confidence-badge trusted">置信度: 可信</span>
+                </div>
+                <pre>int32_t val = 256;
+ret = CRYPT_EAL_PkeyCtrl(ctx, CRYPT_CTRL_SET_PARA_BY_ID, &amp;val, sizeof(val));</pre>
+                <div class="problem"><strong>Issue:</strong> The demo passes raw integer 256 to CRYPT_CTRL_SET_PARA_BY_ID, but the Ctrl function in scloudplus.c only accepts PQCP_SCLOUDPLUS_128/192/256 (defined as 6000/6001/6002). Passing 256 triggers the else case returning PQCP_SCLOUDPLUS_INVALID_ARG.</div>
+                <div class="fix-label">Fix:</div><pre>int32_t val = PQCP_SCLOUDPLUS_256;
+ret = CRYPT_EAL_PkeyCtrl(ctx, CRYPT_CTRL_SET_PARA_BY_ID, &amp;val, sizeof(val));</pre>
+            </div>
+</div>
+<div class="section"><div class="section-title medium">Medium</div>
+<div class="issue">
+                <div class="issue-title">Incorrect enum name CRYPT_ERROR instead of PQCP_ERROR</div>
+                <div class="issue-location">include/pqcp_err.h:46</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CLAUDE</span>
+                    <span class="confidence-badge trusted">置信度: 可信</span>
+                </div>
+                <pre>PQCP_COMPOSITE_LEN_NOT_ENOUGH
+} CRYPT_ERROR;</pre>
+                <div class="problem"><strong>Issue:</strong> The enum is named CRYPT_ERROR but should be PQCP_ERROR to match the header file name (pqcp_err.h) and the PQCP_ prefix used by all error codes in the enum. This appears to be a copy-paste error from crypt_errno.h.</div>
+                <div class="fix-label">Fix:</div><pre>PQCP_COMPOSITE_LEN_NOT_ENOUGH
+} PQCP_ERROR;</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">SDV build ignores saved external OpenHiTLS path</div>
+                <div class="issue-location">testcode/script/build_pqcp_sdv.sh:42-45</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CODEX</span>
+                    <span class="confidence-badge trusted">置信度: 可信</span>
+                </div>
+                <pre>if [ -f ${PQCP_ROOT_DIR}/build/macro.txt ];then
+    HITLS_ROOT_DIR=$(cat ${PQCP_ROOT_DIR}/build/base_path.txt)
+else
+    HITLS_ROOT_DIR=${PQCP_ROOT_DIR}/platform/openhitls
+fi</pre>
+                <div class="problem"><strong>Issue:</strong> The script checks for build/macro.txt before reading build/base_path.txt. If PQCP was built with --hitls_dir but macro.txt is missing, SDV falls back to platform/openhitls instead of using the saved HiTLS path from base_path.txt.</div>
+                <div class="fix-label">Fix:</div><pre>if [ -f "${PQCP_ROOT_DIR}/build/base_path.txt" ]; then
+    HITLS_ROOT_DIR="$(cat "${PQCP_ROOT_DIR}/build/base_path.txt")"
+else
+    HITLS_ROOT_DIR="${PQCP_ROOT_DIR}/platform/openhitls"
+fi
+export HITLS_ROOT_DIR</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">Runtime library path points to non-existent Secure_C directory</div>
+                <div class="issue-location">testcode/script/execute_sdv.sh:35-36</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CODEX</span>
+                    <span class="confidence-badge trusted">置信度: 可信</span>
+                </div>
+                <pre>LIB_PATHS="$(realpath ${PQCP_ROOT_DIR}/build)"
+LIB_PATHS="${LIB_PATHS}:$(realpath ${PQCP_ROOT_DIR}/platform/Secure_C/lib)"</pre>
+                <div class="problem"><strong>Issue:</strong> The script adds PQCP_ROOT_DIR/platform/Secure_C/lib to LD_LIBRARY_PATH, but the actual path is PQCP_ROOT_DIR/platform/openhitls/platform/Secure_C/lib (or under an external HiTLS root from base_path.txt). The realpath will fail or resolve nothing useful.</div>
+                <div class="fix-label">Fix:</div><pre>if [ -f "${PQCP_ROOT_DIR}/build/base_path.txt" ]; then
+    HITLS_ROOT_DIR="$(cat "${PQCP_ROOT_DIR}/build/base_path.txt")"
+else
+    HITLS_ROOT_DIR="${PQCP_ROOT_DIR}/platform/openhitls"
+fi
+
+LIB_PATHS="$(realpath "${PQCP_ROOT_DIR}/build")"
+LIB_PATHS="${LIB_PATHS}:$(realpath "${HITLS_ROOT_DIR}/platform/Secure_C/lib")"</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">Invalid CMake logical negation causes dead fallback code</div>
+                <div class="issue-location">testcode/sdv/CMakeLists.txt:81-82</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CODEX</span>
+                    <span class="confidence-badge trusted">置信度: 可信</span>
+                </div>
+                <pre>if(!MACROS)
+    target_link_libraries(${sdv_exe} PRIVATE SHARED_COMPILE_DEFS)
+endif()</pre>
+                <div class="problem"><strong>Issue:</strong> The condition uses if(!MACROS) which is not valid CMake syntax. This evaluates to false, so the SHARED_COMPILE_DEFS fallback is never applied to generated test executables when macro.txt is absent.</div>
+                <div class="fix-label">Fix:</div><pre>if(NOT MACROS)
+    target_link_libraries(${sdv_exe} PRIVATE SHARED_COMPILE_DEFS)
+endif()</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">Bash 4.0+ specific syntax reduces portability</div>
+                <div class="issue-location">build_pqcp.sh:40</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CLAUDE</span>
+                    <span class="confidence-badge trusted">置信度: 可信</span>
+                </div>
+                <pre>algo_to_macro()
+{
+    local algo="$1"
+    echo "PQCP_${algo^^}"
+}</pre>
+                <div class="problem"><strong>Issue:</strong> The ${algo^^} uppercase conversion syntax requires Bash 4.0+. This will fail on macOS (default bash 3.2) and older systems. The shebang specifies bash but does not enforce version 4+.</div>
+                <div class="fix-label">Fix:</div><pre>algo_to_macro()
+{
+    local algo="$1"
+    local upper=$(echo "$algo" | tr '[:lower:]' '[:upper:]')
+    echo "PQCP_${upper}"
+}</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">Shallow copy of para pointer in DupCtx without documentation</div>
+                <div class="issue-location">src/scloudplus/src/scloudplus.c:391-392</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CLAUDE</span>
+                    <span class="confidence-badge evaluate">置信度: 需评估</span>
+                </div>
+                <pre>if (src-&gt;para != NULL) {
+    ctx-&gt;para = src-&gt;para;
+}</pre>
+                <div class="problem"><strong>Issue:</strong> DupCtx assigns ctx->para = src->para directly without allocation. Both contexts share the same pointer to static PRESET_PARAS. While currently safe (para always points to static data), this could become a use-after-free bug if para is ever changed to point to dynamically allocated memory.</div>
+                <div class="fix-label">Fix:</div><pre>if (src-&gt;para != NULL) {
+    /* Safe: para always points to static PRESET_PARAS array */
+    ctx-&gt;para = src-&gt;para;
+}</pre>
+            </div>
+</div>
+<div class="section"><div class="section-title low">Low</div>
+<div class="issue">
+                <div class="issue-title">Dead code after RETURN_RET_IF macro</div>
+                <div class="issue-location">src/polarlac/src/polarlac_rand.c:133-136</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CLAUDE</span>
+                    <span class="confidence-badge trusted">置信度: 可信</span>
+                </div>
+                <pre>RETURN_RET_IF(CRYPT_EAL_MdSqueeze(mdCtx, r, 64), ret);
+if (ret != PQCP_SUCCESS) {
+    return ret;
+}</pre>
+                <div class="problem"><strong>Issue:</strong> The error check after RETURN_RET_IF is unreachable. RETURN_RET_IF returns immediately on failure, so the subsequent if (ret != PQCP_SUCCESS) block can never execute with a failure condition.</div>
+                <div class="fix-label">Fix:</div><pre>RETURN_RET_IF(CRYPT_EAL_MdSqueeze(mdCtx, r, 64), ret);</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">Inconsistent return value using literal 0 instead of PQCP_SUCCESS</div>
+                <div class="issue-location">src/polarlac/src/polarlac_rand.c:233</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CLAUDE</span>
+                    <span class="confidence-badge trusted">置信度: 可信</span>
+                </div>
+                <pre>return 0;</pre>
+                <div class="problem"><strong>Issue:</strong> The function returns literal 0 instead of using the PQCP_SUCCESS macro. While PQCP_SUCCESS is defined as 0, this is inconsistent with the rest of the codebase and reduces code readability.</div>
+                <div class="fix-label">Fix:</div><pre>return PQCP_SUCCESS;</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">SDV build only accepts Linux shared-object provider</div>
+                <div class="issue-location">testcode/script/build_pqcp_sdv.sh:76-79</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CODEX</span>
+                    <span class="confidence-badge trusted">置信度: 可信</span>
+                </div>
+                <pre>if [ ! -f "${PQCP_PROVIDER_DIR}/libpqcp_provider.so" ]; then
+    echo "[WARNING] PQCP provider not found: ${PQCP_PROVIDER_DIR}/libpqcp_provider.so"
+    echo "[INFO] Please build PQCP first: ./build_pqcp.sh"
+    exit 1
+fi</pre>
+                <div class="problem"><strong>Issue:</strong> The dependency check hardcodes libpqcp_provider.so, rejecting supported configurations like static builds or macOS builds. The script will exit incorrectly when the provider library exists but with a different extension.</div>
+                <div class="fix-label">Fix:</div><pre># Check for any supported PQCP provider library
+PROVIDER_FOUND=0
+for ext in .so .dylib .a; do
+    if [ -f "${PQCP_PROVIDER_DIR}/libpqcp_provider${ext}" ]; then
+        PROVIDER_FOUND=1
+        break
+    fi
+done
+if [ ${PROVIDER_FOUND} -eq 0 ]; then
+    echo "[WARNING] PQCP provider not found under ${PQCP_PROVIDER_DIR}"
+    echo "[INFO] Please build PQCP first: ./build_pqcp.sh"
+    exit 1
+fi</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">Unused parameters in PQCP_ProviderCtrl</div>
+                <div class="issue-location">src/provider/pqcp_provider.c:91-96</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CLAUDE</span>
+                    <span class="confidence-badge evaluate">置信度: 需评估</span>
+                </div>
+                <pre>static int32_t PQCP_ProviderCtrl(void *provCtx, int32_t cmd, void *val, uint32_t valLen)
+{
+    (void) provCtx;
+    (void) cmd;
+    (void) val;
+    (void) valLen;
+    /* Add provider control operations if needed */
+    return PQCP_SUCCESS;
+}</pre>
+                <div class="problem"><strong>Issue:</strong> The function explicitly casts all parameters to void to silence unused warnings, but still accepts these parameters in its signature. This suggests either incomplete implementation or unnecessary parameters.</div>
+                <div class="fix-label">Fix:</div><pre>/* Provider control operations not yet implemented */
+static int32_t PQCP_ProviderCtrl(void *provCtx, int32_t cmd, void *val, uint32_t valLen)
+{
+    (void) provCtx;
+    (void) cmd;
+    (void) val;
+    (void) valLen;
+    return PQCP_SUCCESS;
+}</pre>
+            </div>
+</div>
+</div></body></html>

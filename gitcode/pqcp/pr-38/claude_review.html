@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Code Review: openHiTLS/pqcp#38 - CLAUDE</title>
+    <style>
+        :root { --critical: #dc2626; --high: #ea580c; --medium: #ca8a04; --low: #65a30d; }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: system-ui, sans-serif; background: #f8fafc; color: #1e293b; padding: 2rem; line-height: 1.6; }
+        .container { max-width: 900px; margin: 0 auto; }
+        h1 { font-size: 1.5rem; margin-bottom: 0.5rem; }
+        .subtitle { color: #64748b; margin-bottom: 2rem; }
+        .section { margin-bottom: 2rem; }
+        .section-title { font-size: 1.1rem; font-weight: 600; padding: 0.5rem 1rem; border-radius: 0.5rem 0.5rem 0 0; color: white; }
+        .section-title.critical { background: var(--critical); }
+        .section-title.high { background: var(--high); }
+        .section-title.medium { background: var(--medium); }
+        .section-title.low { background: var(--low); }
+        .issue { background: white; border: 1px solid #e2e8f0; border-top: none; padding: 1rem; }
+        .issue:last-child { border-radius: 0 0 0.5rem 0.5rem; }
+        .issue-title { font-weight: 600; margin-bottom: 0.25rem; }
+        .issue-location { font-family: monospace; font-size: 0.875rem; color: #64748b; margin-bottom: 0.75rem; }
+        .issue-source { font-size: 0.75rem; color: #94a3b8; margin-top: 0.5rem; }
+        pre { background: #1e293b; color: #e2e8f0; padding: 0.75rem; border-radius: 0.375rem; overflow-x: auto; font-size: 0.875rem; margin: 0.5rem 0; }
+        .problem { margin: 0.75rem 0; }
+        .fix-label { font-weight: 600; margin-top: 0.75rem; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Code Review: openHiTLS/pqcp#38 - CLAUDE</h1>
+        <div class="subtitle"></div>
+<div class="section"><div class="section-title medium">Medium</div>
+<div class="issue">
+                <div class="issue-title">Incorrect enum name in pqcp_err.h</div>
+                <div class="issue-location">include/pqcp_err.h:46</div>
+                <pre>} CRYPT_ERROR;</pre>
+                <div class="problem"><strong>Issue:</strong> The enum is named `CRYPT_ERROR` but should be `PQCP_ERROR` to match the header file name and error code prefixes. This appears to be a copy-paste error from the original crypt_errno.h.</div>
+                <div class="fix-label">Fix:</div><pre>} PQCP_ERROR;</pre>
+                <div class="issue-source">Reviewer: claude</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">Bash 4.0+ specific syntax reduces portability</div>
+                <div class="issue-location">build_pqcp.sh:40</div>
+                <pre>algo_to_macro()
+{
+    local algo="$1"
+    echo "PQCP_${algo^^}"
+}</pre>
+                <div class="problem"><strong>Issue:</strong> The `${algo^^}` syntax for uppercase conversion is specific to Bash 4.0+. This script may fail on systems with older bash versions (e.g., macOS default bash 3.2). The script doesn't have a shebang to enforce bash 4+.</div>
+                <div class="fix-label">Fix:</div><pre>#!/usr/bin/env bash
+# Add at top of file, or use portable alternative:
+algo_to_macro()
+{
+    local algo="$1"
+    local upper=$(echo "$algo" | tr '[:lower:]' '[:upper:]')
+    echo "PQCP_${upper}"
+}</pre>
+                <div class="issue-source">Reviewer: claude</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">Shallow copy of para pointer in PQCP_SCLOUDPLUS_DupCtx</div>
+                <div class="issue-location">src/scloudplus/src/scloudplus.c:389-393</div>
+                <pre>if (src-&gt;para != NULL) {
+        ctx-&gt;para = src-&gt;para;
+    }</pre>
+                <div class="problem"><strong>Issue:</strong> The DupCtx function assigns `ctx->para = src->para` instead of allocating a new copy. This means both contexts share the same parameter structure pointer. If src->para points to a stack-allocated PRESET_PARAS entry (which it does), this is safe. However, if para could ever be dynamically allocated in the future, this would be a use-after-free bug.</div>
+                <div class="fix-label">Fix:</div><pre>if (src-&gt;para != NULL) {
+        ctx-&gt;para = src-&gt;para;  // Safe because para always points to static PRESET_PARAS
+        // Add comment to clarify this is intentional
+    }</pre>
+                <div class="issue-source">Reviewer: claude</div>
+            </div>
+</div>
+<div class="section"><div class="section-title low">Low</div>
+<div class="issue">
+                <div class="issue-title">Inconsistent return value in SampleSparseTernaryVector256</div>
+                <div class="issue-location">src/polarlac/src/polarlac_rand.c:233</div>
+                <pre>return 0;
+}</pre>
+                <div class="problem"><strong>Issue:</strong> The function returns `0` directly instead of using the `PQCP_SUCCESS` macro. While PQCP_SUCCESS is defined as 0, this is inconsistent with the rest of the codebase and reduces code readability.</div>
+                <div class="fix-label">Fix:</div><pre>return PQCP_SUCCESS;
+}</pre>
+                <div class="issue-source">Reviewer: claude</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">Dead code after RETURN_RET_IF macro</div>
+                <div class="issue-location">src/polarlac/src/polarlac_rand.c:133-136</div>
+                <pre>RETURN_RET_IF(CRYPT_EAL_MdSqueeze(mdCtx, r, 64), ret);
+    if (ret != PQCP_SUCCESS) {
+        return ret;
+    }</pre>
+                <div class="problem"><strong>Issue:</strong> The error checks after `RETURN_RET_IF` are unreachable. The RETURN_RET_IF macro returns immediately if the function fails, so the subsequent `if (ret != PQCP_SUCCESS)` checks can never execute with a failure condition.</div>
+                <div class="fix-label">Fix:</div><pre>RETURN_RET_IF(CRYPT_EAL_MdSqueeze(mdCtx, r, 64), ret);</pre>
+                <div class="issue-source">Reviewer: claude</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">Dead code after RETURN_RET_IF in SampleSparseTernaryVector256</div>
+                <div class="issue-location">src/polarlac/src/polarlac_rand.c:193</div>
+                <pre>RETURN_RET_IF(CRYPT_EAL_MdSqueeze(mdCtx, r, SHAKE256_RATE * 2), ret);
+    t = 0;</pre>
+                <div class="problem"><strong>Issue:</strong> Similar to SampleSparseTernaryVector128, there's a RETURN_RET_IF followed by code, but in this case the error check was removed. However, the variable `t` is used immediately after which is correct - just noting this pattern differs from the function above it.</div>
+                
+                <div class="issue-source">Reviewer: claude</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">Unused parameters in PQCP_ProviderCtrl</div>
+                <div class="issue-location">src/provider/pqcp_provider.c:90-93</div>
+                <pre>static int32_t PQCP_ProviderCtrl(void *provCtx, int32_t cmd, void *val, uint32_t valLen)
+{
+    (void) provCtx;
+    (void) cmd;
+    (void) val;
+    (void) valLen;
+    /* Add provider control operations if needed */
+    return PQCP_SUCCESS;
+}</pre>
+                <div class="problem"><strong>Issue:</strong> The function explicitly casts parameters to void to silence unused warnings, but the function accepts these parameters without using them. This suggests either incomplete implementation or unnecessary parameters.</div>
+                
+                <div class="issue-source">Reviewer: claude</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">Use of GLOB_RECURSE for source files</div>
+                <div class="issue-location">CMakeLists.txt:54-59</div>
+                <pre>file(GLOB_RECURSE PROVIDER_SOURCES
+    src/provider/*.c
+    src/scloudplus/src/*.c
+    src/polarlac/src/*.c
+    src/composite_sign/src/*.c
+)</pre>
+                <div class="problem"><strong>Issue:</strong> Using `file(GLOB_RECURSE ...)` automatically picks up all source files. If a new source file is added, it's automatically included. However, this behavior is not recommended by CMake documentation as it doesn't detect changes to the filesystem when re-running cmake.</div>
+                
+                <div class="issue-source">Reviewer: claude</div>
+            </div>
+</div>
+</div></body></html>

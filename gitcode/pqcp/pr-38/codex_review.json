@@ -1,0 +1,62 @@
+[
+  {
+    "source": "codex",
+    "file": "src/provider/pqcp_pkey.c",
+    "line": "52-84",
+    "severity": "medium",
+    "title": "KEM compare callback was dropped from the provider dispatch tables",
+    "problem": "The SCloud+ and PolarLAC key-management tables no longer register `CRYPT_EAL_IMPLPKEYMGMT_COMPARE`. Any caller that still uses `CRYPT_EAL_PkeyCmp()` now regresses from success to `NOT_SUPPORT`/failure even though the API was previously available; the new `testcode/demo/polarlac_demo.c` still calls it.",
+    "code": "const CRYPT_EAL_Func g_pqcpKeyMgmtScloudPlus[] = {\n    {CRYPT_EAL_IMPLPKEYMGMT_NEWCTX, (CRYPT_EAL_ImplPkeyMgmtNewCtx)CRYPT_PQCP_PkeyMgmtNewCtx},\n    {CRYPT_EAL_IMPLPKEYMGMT_GENKEY, (CRYPT_EAL_ImplPkeyMgmtGenKey)PQCP_SCLOUDPLUS_Gen},\n    {CRYPT_EAL_IMPLPKEYMGMT_SETPRV, (CRYPT_EAL_ImplPkeyMgmtSetPrv)PQCP_SCLOUDPLUS_SetPrvKey},\n    {CRYPT_EAL_IMPLPKEYMGMT_SETPUB, (CRYPT_EAL_ImplPkeyMgmtSetPub)PQCP_SCLOUDPLUS_SetPubKey},\n    {CRYPT_EAL_IMPLPKEYMGMT_GETPRV, (CRYPT_EAL_ImplPkeyMgmtGetPrv)PQCP_SCLOUDPLUS_GetPrvKey},\n    {CRYPT_EAL_IMPLPKEYMGMT_GETPUB, (CRYPT_EAL_ImplPkeyMgmtGetPub)PQCP_SCLOUDPLUS_GetPubKey},\n    {CRYPT_EAL_IMPLPKEYMGMT_DUPCTX, (CRYPT_EAL_ImplPkeyMgmtDupCtx)PQCP_SCLOUDPLUS_DupCtx},\n    {CRYPT_EAL_IMPLPKEYMGMT_CTRL, (CRYPT_EAL_ImplPkeyMgmtCtrl)PQCP_SCLOUDPLUS_Ctrl},\n    {CRYPT_EAL_IMPLPKEYMGMT_FREECTX, (CRYPT_EAL_ImplPkeyMgmtFreeCtx)PQCP_SCLOUDPLUS_FreeCtx},\n    CRYPT_EAL_FUNC_END,\n};\n\nconst CRYPT_EAL_Func g_pqcpKeyMgmtPolarLac[] = {\n    {CRYPT_EAL_IMPLPKEYMGMT_NEWCTX, (CRYPT_EAL_ImplPkeyMgmtNewCtx)CRYPT_PQCP_PkeyMgmtNewCtx},\n    {CRYPT_EAL_IMPLPKEYMGMT_GENKEY, (CRYPT_EAL_ImplPkeyMgmtGenKey)PQCP_LAC2_Gen},\n    {CRYPT_EAL_IMPLPKEYMGMT_SETPRV, (CRYPT_EAL_ImplPkeyMgmtSetPrv)PQCP_LAC2_SetPrvKey},\n    {CRYPT_EAL_IMPLPKEYMGMT_SETPUB, (CRYPT_EAL_ImplPkeyMgmtSetPub)PQCP_LAC2_SetPubKey},\n    {CRYPT_EAL_IMPLPKEYMGMT_GETPRV, (CRYPT_EAL_ImplPkeyMgmtGetPrv)PQCP_LAC2_GetPrvKey},\n    {CRYPT_EAL_IMPLPKEYMGMT_GETPUB, (CRYPT_EAL_ImplPkeyMgmtGetPub)PQCP_LAC2_GetPubKey},\n    {CRYPT_EAL_IMPLPKEYMGMT_DUPCTX, (CRYPT_EAL_ImplPkeyMgmtDupCtx)PQCP_LAC2_DupCtx},\n    {CRYPT_EAL_IMPLPKEYMGMT_CTRL, (CRYPT_EAL_ImplPkeyMgmtCtrl)PQCP_LAC2_Ctrl},\n    {CRYPT_EAL_IMPLPKEYMGMT_FREECTX, (CRYPT_EAL_ImplPkeyMgmtFreeCtx)PQCP_LAC2_FreeCtx},\n    CRYPT_EAL_FUNC_END,\n};",
+    "fix": "const CRYPT_EAL_Func g_pqcpKeyMgmtScloudPlus[] = {\n    {CRYPT_EAL_IMPLPKEYMGMT_NEWCTX, (CRYPT_EAL_ImplPkeyMgmtNewCtx)CRYPT_PQCP_PkeyMgmtNewCtx},\n    {CRYPT_EAL_IMPLPKEYMGMT_GENKEY, (CRYPT_EAL_ImplPkeyMgmtGenKey)PQCP_SCLOUDPLUS_Gen},\n    {CRYPT_EAL_IMPLPKEYMGMT_SETPRV, (CRYPT_EAL_ImplPkeyMgmtSetPrv)PQCP_SCLOUDPLUS_SetPrvKey},\n    {CRYPT_EAL_IMPLPKEYMGMT_SETPUB, (CRYPT_EAL_ImplPkeyMgmtSetPub)PQCP_SCLOUDPLUS_SetPubKey},\n    {CRYPT_EAL_IMPLPKEYMGMT_GETPRV, (CRYPT_EAL_ImplPkeyMgmtGetPrv)PQCP_SCLOUDPLUS_GetPrvKey},\n    {CRYPT_EAL_IMPLPKEYMGMT_GETPUB, (CRYPT_EAL_ImplPkeyMgmtGetPub)PQCP_SCLOUDPLUS_GetPubKey},\n    {CRYPT_EAL_IMPLPKEYMGMT_DUPCTX, (CRYPT_EAL_ImplPkeyMgmtDupCtx)PQCP_SCLOUDPLUS_DupCtx},\n    {CRYPT_EAL_IMPLPKEYMGMT_COMPARE, (CRYPT_EAL_ImplPkeyMgmtCompare)PQCP_SCLOUDPLUS_Cmp},\n    {CRYPT_EAL_IMPLPKEYMGMT_CTRL, (CRYPT_EAL_ImplPkeyMgmtCtrl)PQCP_SCLOUDPLUS_Ctrl},\n    {CRYPT_EAL_IMPLPKEYMGMT_FREECTX, (CRYPT_EAL_ImplPkeyMgmtFreeCtx)PQCP_SCLOUDPLUS_FreeCtx},\n    CRYPT_EAL_FUNC_END,\n};\n\nconst CRYPT_EAL_Func g_pqcpKeyMgmtPolarLac[] = {\n    {CRYPT_EAL_IMPLPKEYMGMT_NEWCTX, (CRYPT_EAL_ImplPkeyMgmtNewCtx)CRYPT_PQCP_PkeyMgmtNewCtx},\n    {CRYPT_EAL_IMPLPKEYMGMT_GENKEY, (CRYPT_EAL_ImplPkeyMgmtGenKey)PQCP_LAC2_Gen},\n    {CRYPT_EAL_IMPLPKEYMGMT_SETPRV, (CRYPT_EAL_ImplPkeyMgmtSetPrv)PQCP_LAC2_SetPrvKey},\n    {CRYPT_EAL_IMPLPKEYMGMT_SETPUB, (CRYPT_EAL_ImplPkeyMgmtSetPub)PQCP_LAC2_SetPubKey},\n    {CRYPT_EAL_IMPLPKEYMGMT_GETPRV, (CRYPT_EAL_ImplPkeyMgmtGetPrv)PQCP_LAC2_GetPrvKey},\n    {CRYPT_EAL_IMPLPKEYMGMT_GETPUB, (CRYPT_EAL_ImplPkeyMgmtGetPub)PQCP_LAC2_GetPubKey},\n    {CRYPT_EAL_IMPLPKEYMGMT_DUPCTX, (CRYPT_EAL_ImplPkeyMgmtDupCtx)PQCP_LAC2_DupCtx},\n    {CRYPT_EAL_IMPLPKEYMGMT_COMPARE, (CRYPT_EAL_ImplPkeyMgmtCompare)PQCP_LAC2_Cmp},\n    {CRYPT_EAL_IMPLPKEYMGMT_CTRL, (CRYPT_EAL_ImplPkeyMgmtCtrl)PQCP_LAC2_Ctrl},\n    {CRYPT_EAL_IMPLPKEYMGMT_FREECTX, (CRYPT_EAL_ImplPkeyMgmtFreeCtx)PQCP_LAC2_FreeCtx},\n    CRYPT_EAL_FUNC_END,\n};"
+  },
+  {
+    "source": "codex",
+    "file": "testcode/script/build_pqcp_sdv.sh",
+    "line": "42-45",
+    "severity": "medium",
+    "title": "SDV build ignores the saved external OpenHiTLS path",
+    "problem": "`build_pqcp.sh` now writes the selected OpenHiTLS root to `build/base_path.txt`, but this script only consults that file when a nonexistent `build/macro.txt` is present. If PQCP was built with `--hitls_dir`, SDV falls back to `platform/openhitls` and then cannot find the headers/libs used for the actual provider build.",
+    "code": "if [ -f ${PQCP_ROOT_DIR}/build/macro.txt ];then\n    HITLS_ROOT_DIR=$(cat ${PQCP_ROOT_DIR}/build/base_path.txt)\nelse\n    HITLS_ROOT_DIR=${PQCP_ROOT_DIR}/platform/openhitls\nfi",
+    "fix": "if [ -f \"${PQCP_ROOT_DIR}/build/base_path.txt\" ]; then\n    HITLS_ROOT_DIR=\"$(cat \"${PQCP_ROOT_DIR}/build/base_path.txt\")\"\nelse\n    HITLS_ROOT_DIR=\"${PQCP_ROOT_DIR}/platform/openhitls\"\nfi\nexport HITLS_ROOT_DIR"
+  },
+  {
+    "source": "codex",
+    "file": "testcode/script/execute_sdv.sh",
+    "line": "35-36",
+    "severity": "medium",
+    "title": "Runtime library path points at a non-existent Secure_C directory",
+    "problem": "The runner adds `${PQCP_ROOT_DIR}/platform/Secure_C/lib` to the loader path, but the repository layout is `platform/openhitls/platform/Secure_C/lib` (or an external root from `base_path.txt`). On a normal checkout the `realpath` call resolves nothing useful, so the SDV executables can miss `boundscheck` at runtime.",
+    "code": "LIB_PATHS=\"$(realpath ${PQCP_ROOT_DIR}/build)\"\nLIB_PATHS=\"${LIB_PATHS}:$(realpath ${PQCP_ROOT_DIR}/platform/Secure_C/lib)\"",
+    "fix": "if [ -f \"${PQCP_ROOT_DIR}/build/base_path.txt\" ]; then\n    HITLS_ROOT_DIR=\"$(cat \"${PQCP_ROOT_DIR}/build/base_path.txt\")\"\nelse\n    HITLS_ROOT_DIR=\"${PQCP_ROOT_DIR}/platform/openhitls\"\nfi\n\nLIB_PATHS=\"$(realpath \"${PQCP_ROOT_DIR}/build\")\"\nLIB_PATHS=\"${LIB_PATHS}:$(realpath \"${HITLS_ROOT_DIR}/platform/Secure_C/lib\")\""
+  },
+  {
+    "source": "codex",
+    "file": "testcode/sdv/CMakeLists.txt",
+    "line": "81-82",
+    "severity": "medium",
+    "title": "Fallback compile definitions are never applied to generated SDV suites",
+    "problem": "`if(!MACROS)` is not a valid logical negation in CMake and evaluates false here, so the `SHARED_COMPILE_DEFS` fallback is dead code. When `macro.txt` is absent, the support library gets the fallback defines but the generated `sdv_exe` targets do not, which makes the two parts of the test build compile with different OpenHiTLS feature sets.",
+    "code": "if(!MACROS)\n    target_link_libraries(${sdv_exe} PRIVATE SHARED_COMPILE_DEFS)\nendif()",
+    "fix": "if(NOT MACROS)\n    target_link_libraries(${sdv_exe} PRIVATE SHARED_COMPILE_DEFS)\nendif()"
+  },
+  {
+    "source": "codex",
+    "file": "testcode/script/build_pqcp_sdv.sh",
+    "line": "76-79",
+    "severity": "low",
+    "title": "SDV build only accepts a Linux shared-object provider",
+    "problem": "The dependency check hardcodes `libpqcp_provider.so`. This rejects supported configurations introduced elsewhere in the PR, such as `./build_pqcp.sh static`, and it also fails on macOS where the provider filename is `.dylib`.",
+    "code": "if [ ! -f \"${PQCP_PROVIDER_DIR}/libpqcp_provider.so\" ]; then\n    echo \"[WARNING] PQCP provider not found: ${PQCP_PROVIDER_DIR}/libpqcp_provider.so\"\n    echo \"[INFO] Please build PQCP first: ./build_pqcp.sh\"\n    exit 1\nfi",
+    "fix": "if ! compgen -G \"${PQCP_PROVIDER_DIR}/libpqcp_provider.so\" >/dev/null && \\\n   ! compgen -G \"${PQCP_PROVIDER_DIR}/libpqcp_provider.dylib\" >/dev/null && \\\n   ! compgen -G \"${PQCP_PROVIDER_DIR}/libpqcp_provider.a\" >/dev/null; then\n    echo \"[WARNING] PQCP provider not found under ${PQCP_PROVIDER_DIR}\"\n    echo \"[INFO] Please build PQCP first: ./build_pqcp.sh\"\n    exit 1\nfi"
+  },
+  {
+    "source": "codex",
+    "file": "testcode/demo/scloudplus_demo.c",
+    "line": "53-71",
+    "severity": "low",
+    "title": "SCloud+ demo still passes the removed raw parameter ID",
+    "problem": "The provider now accepts `PQCP_SCLOUDPLUS_128/192/256` in `CRYPT_CTRL_SET_PARA_BY_ID`, but the demo still passes literal `256`. With the new control logic this returns `PQCP_SCLOUDPLUS_INVALID_ARG`, so the demo exits at its first parameter setup call.",
+    "code": "uint32_t sharekey2Len = 32;\nuint8_t sharekey2[32] = {0};\nint32_t val = 256;\nuint8_t pubdata[37520/2];\nBSL_Param pub[2] = {\n    {PQCP_PARAM_SCLOUDPLUS_PUBKEY, BSL_PARAM_TYPE_OCTETS, pubdata, sizeof(pubdata), 0},\n    BSL_PARAM_END\n};\nCRYPT_EAL_PkeyCtx *ctx = CRYPT_EAL_ProviderPkeyNewCtx(NULL, PQCP_PKEY_SCLOUDPLUS, CRYPT_EAL_PKEY_KEM_OPERATE,\n    \"provider=pqcp\");\n...\nret = CRYPT_EAL_PkeyCtrl(ctx, CRYPT_CTRL_SET_PARA_BY_ID, &val, sizeof(val));",
+    "fix": "uint32_t sharekey2Len = 32;\nuint8_t sharekey2[32] = {0};\nint32_t val = PQCP_SCLOUDPLUS_256;\nuint8_t pubdata[37520 / 2];\nBSL_Param pub[2] = {\n    {PQCP_PARAM_SCLOUDPLUS_PUBKEY, BSL_PARAM_TYPE_OCTETS, pubdata, sizeof(pubdata), 0},\n    BSL_PARAM_END\n};\nCRYPT_EAL_PkeyCtx *ctx = CRYPT_EAL_ProviderPkeyNewCtx(NULL, PQCP_PKEY_SCLOUDPLUS, CRYPT_EAL_PKEY_KEM_OPERATE,\n    \"provider=pqcp\");\n...\nret = CRYPT_EAL_PkeyCtrl(ctx, CRYPT_CTRL_SET_PARA_BY_ID, &val, sizeof(val));"
+  }
+]

@@ -1,0 +1,79 @@
+[
+  {
+    "source": "claude",
+    "file": "include/pqcp_err.h",
+    "line": "46",
+    "severity": "medium",
+    "title": "Incorrect enum name in pqcp_err.h",
+    "problem": "The enum is named `CRYPT_ERROR` but should be `PQCP_ERROR` to match the header file name and error code prefixes. This appears to be a copy-paste error from the original crypt_errno.h.",
+    "code": "} CRYPT_ERROR;",
+    "fix": "} PQCP_ERROR;"
+  },
+  {
+    "source": "claude",
+    "file": "build_pqcp.sh",
+    "line": "40",
+    "severity": "medium",
+    "title": "Bash 4.0+ specific syntax reduces portability",
+    "problem": "The `${algo^^}` syntax for uppercase conversion is specific to Bash 4.0+. This script may fail on systems with older bash versions (e.g., macOS default bash 3.2). The script doesn't have a shebang to enforce bash 4+.",
+    "code": "algo_to_macro()\n{\n    local algo=\"$1\"\n    echo \"PQCP_${algo^^}\"\n}",
+    "fix": "#!/usr/bin/env bash\n# Add at top of file, or use portable alternative:\nalgo_to_macro()\n{\n    local algo=\"$1\"\n    local upper=$(echo \"$algo\" | tr '[:lower:]' '[:upper:]')\n    echo \"PQCP_${upper}\"\n}"
+  },
+  {
+    "source": "claude",
+    "file": "src/scloudplus/src/scloudplus.c",
+    "line": "389-393",
+    "severity": "medium",
+    "title": "Shallow copy of para pointer in PQCP_SCLOUDPLUS_DupCtx",
+    "problem": "The DupCtx function assigns `ctx->para = src->para` instead of allocating a new copy. This means both contexts share the same parameter structure pointer. If src->para points to a stack-allocated PRESET_PARAS entry (which it does), this is safe. However, if para could ever be dynamically allocated in the future, this would be a use-after-free bug.",
+    "code": "if (src->para != NULL) {\n        ctx->para = src->para;\n    }",
+    "fix": "if (src->para != NULL) {\n        ctx->para = src->para;  // Safe because para always points to static PRESET_PARAS\n        // Add comment to clarify this is intentional\n    }"
+  },
+  {
+    "source": "claude",
+    "file": "src/polarlac/src/polarlac_rand.c",
+    "line": "233",
+    "severity": "low",
+    "title": "Inconsistent return value in SampleSparseTernaryVector256",
+    "problem": "The function returns `0` directly instead of using the `PQCP_SUCCESS` macro. While PQCP_SUCCESS is defined as 0, this is inconsistent with the rest of the codebase and reduces code readability.",
+    "code": "return 0;\n}",
+    "fix": "return PQCP_SUCCESS;\n}"
+  },
+  {
+    "source": "claude",
+    "file": "src/polarlac/src/polarlac_rand.c",
+    "line": "133-136",
+    "severity": "low",
+    "title": "Dead code after RETURN_RET_IF macro",
+    "problem": "The error checks after `RETURN_RET_IF` are unreachable. The RETURN_RET_IF macro returns immediately if the function fails, so the subsequent `if (ret != PQCP_SUCCESS)` checks can never execute with a failure condition.",
+    "code": "RETURN_RET_IF(CRYPT_EAL_MdSqueeze(mdCtx, r, 64), ret);\n    if (ret != PQCP_SUCCESS) {\n        return ret;\n    }",
+    "fix": "RETURN_RET_IF(CRYPT_EAL_MdSqueeze(mdCtx, r, 64), ret);"
+  },
+  {
+    "source": "claude",
+    "file": "src/polarlac/src/polarlac_rand.c",
+    "line": "193",
+    "severity": "low",
+    "title": "Dead code after RETURN_RET_IF in SampleSparseTernaryVector256",
+    "problem": "Similar to SampleSparseTernaryVector128, there's a RETURN_RET_IF followed by code, but in this case the error check was removed. However, the variable `t` is used immediately after which is correct - just noting this pattern differs from the function above it.",
+    "code": "RETURN_RET_IF(CRYPT_EAL_MdSqueeze(mdCtx, r, SHAKE256_RATE * 2), ret);\n    t = 0;"
+  },
+  {
+    "source": "claude",
+    "file": "src/provider/pqcp_provider.c",
+    "line": "90-93",
+    "severity": "low",
+    "title": "Unused parameters in PQCP_ProviderCtrl",
+    "problem": "The function explicitly casts parameters to void to silence unused warnings, but the function accepts these parameters without using them. This suggests either incomplete implementation or unnecessary parameters.",
+    "code": "static int32_t PQCP_ProviderCtrl(void *provCtx, int32_t cmd, void *val, uint32_t valLen)\n{\n    (void) provCtx;\n    (void) cmd;\n    (void) val;\n    (void) valLen;\n    /* Add provider control operations if needed */\n    return PQCP_SUCCESS;\n}"
+  },
+  {
+    "source": "claude",
+    "file": "CMakeLists.txt",
+    "line": "54-59",
+    "severity": "low",
+    "title": "Use of GLOB_RECURSE for source files",
+    "problem": "Using `file(GLOB_RECURSE ...)` automatically picks up all source files. If a new source file is added, it's automatically included. However, this behavior is not recommended by CMake documentation as it doesn't detect changes to the filesystem when re-running cmake.",
+    "code": "file(GLOB_RECURSE PROVIDER_SOURCES\n    src/provider/*.c\n    src/scloudplus/src/*.c\n    src/polarlac/src/*.c\n    src/composite_sign/src/*.c\n)"
+  }
+]

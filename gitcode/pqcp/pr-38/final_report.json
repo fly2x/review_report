@@ -1,0 +1,154 @@
+{
+  "context": {
+    "owner": "openHiTLS",
+    "repo": "pqcp",
+    "pr_id": "38",
+    "title": "",
+    "reviewers": [
+      "claude",
+      "gemini",
+      "codex"
+    ]
+  },
+  "statistics": {
+    "total": 12,
+    "critical": 0,
+    "high": 2,
+    "medium": 6,
+    "low": 4
+  },
+  "issues": [
+    {
+      "file": "src/provider/pqcp_pkey.c",
+      "line": "52-84",
+      "severity": "high",
+      "title": "KEM compare callback dropped from provider dispatch tables",
+      "reviewers": "CODEX",
+      "confidence": "trusted",
+      "problem": "The SCloud+ and PolarLAC key-management tables no longer register CRYPT_EAL_IMPLPKEYMGMT_COMPARE. The testcode/demo/polarlac_demo.c still calls CRYPT_EAL_PkeyCmp() on lines 154 and 161, which will now fail with NOT_SUPPORT error even though the API was previously available.",
+      "code": "const CRYPT_EAL_Func g_pqcpKeyMgmtScloudPlus[] = {\n    {CRYPT_EAL_IMPLPKEYMGMT_NEWCTX, (CRYPT_EAL_ImplPkeyMgmtNewCtx)CRYPT_PQCP_PkeyMgmtNewCtx},\n    {CRYPT_EAL_IMPLPKEYMGMT_GENKEY, (CRYPT_EAL_ImplPkeyMgmtGenKey)PQCP_SCLOUDPLUS_Gen},\n    {CRYPT_EAL_IMPLPKEYMGMT_SETPRV, (CRYPT_EAL_ImplPkeyMgmtSetPrv)PQCP_SCLOUDPLUS_SetPrvKey},\n    {CRYPT_EAL_IMPLPKEYMGMT_SETPUB, (CRYPT_EAL_ImplPkeyMgmtSetPub)PQCP_SCLOUDPLUS_SetPubKey},\n    {CRYPT_EAL_IMPLPKEYMGMT_GETPRV, (CRYPT_EAL_ImplPkeyMgmtGetPrv)PQCP_SCLOUDPLUS_GetPrvKey},\n    {CRYPT_EAL_IMPLPKEYMGMT_GETPUB, (CRYPT_EAL_ImplPkeyMgmtGetPub)PQCP_SCLOUDPLUS_GetPubKey},\n    {CRYPT_EAL_IMPLPKEYMGMT_DUPCTX, (CRYPT_EAL_ImplPkeyMgmtDupCtx)PQCP_SCLOUDPLUS_DupCtx},\n    {CRYPT_EAL_IMPLPKEYMGMT_CTRL, (CRYPT_EAL_ImplPkeyMgmtCtrl)PQCP_SCLOUDPLUS_Ctrl},\n    {CRYPT_EAL_IMPLPKEYMGMT_FREECTX, (CRYPT_EAL_ImplPkeyMgmtFreeCtx)PQCP_SCLOUDPLUS_FreeCtx},\n    CRYPT_EAL_FUNC_END,\n};",
+      "fix": "const CRYPT_EAL_Func g_pqcpKeyMgmtScloudPlus[] = {\n    {CRYPT_EAL_IMPLPKEYMGMT_NEWCTX, (CRYPT_EAL_ImplPkeyMgmtNewCtx)CRYPT_PQCP_PkeyMgmtNewCtx},\n    {CRYPT_EAL_IMPLPKEYMGMT_GENKEY, (CRYPT_EAL_ImplPkeyMgmtGenKey)PQCP_SCLOUDPLUS_Gen},\n    {CRYPT_EAL_IMPLPKEYMGMT_SETPRV, (CRYPT_EAL_ImplPkeyMgmtSetPrv)PQCP_SCLOUDPLUS_SetPrvKey},\n    {CRYPT_EAL_IMPLPKEYMGMT_SETPUB, (CRYPT_EAL_ImplPkeyMgmtSetPub)PQCP_SCLOUDPLUS_SetPubKey},\n    {CRYPT_EAL_IMPLPKEYMGMT_GETPRV, (CRYPT_EAL_ImplPkeyMgmtGetPrv)PQCP_SCLOUDPLUS_GetPrvKey},\n    {CRYPT_EAL_IMPLPKEYMGMT_GETPUB, (CRYPT_EAL_ImplPkeyMgmtGetPub)PQCP_SCLOUDPLUS_GetPubKey},\n    {CRYPT_EAL_IMPLPKEYMGMT_DUPCTX, (CRYPT_EAL_ImplPkeyMgmtDupCtx)PQCP_SCLOUDPLUS_DupCtx},\n    {CRYPT_EAL_IMPLPKEYMGMT_COMPARE, (CRYPT_EAL_ImplPkeyMgmtCompare)PQCP_SCLOUDPLUS_Cmp},\n    {CRYPT_EAL_IMPLPKEYMGMT_CTRL, (CRYPT_EAL_ImplPkeyMgmtCtrl)PQCP_SCLOUDPLUS_Ctrl},\n    {CRYPT_EAL_IMPLPKEYMGMT_FREECTX, (CRYPT_EAL_ImplPkeyMgmtFreeCtx)PQCP_SCLOUDPLUS_FreeCtx},\n    CRYPT_EAL_FUNC_END,\n};\n\nconst CRYPT_EAL_Func g_pqcpKeyMgmtPolarLac[] = {\n    {CRYPT_EAL_IMPLPKEYMGMT_NEWCTX, (CRYPT_EAL_ImplPkeyMgmtNewCtx)CRYPT_PQCP_PkeyMgmtNewCtx},\n    {CRYPT_EAL_IMPLPKEYMGMT_GENKEY, (CRYPT_EAL_ImplPkeyMgmtGenKey)PQCP_LAC2_Gen},\n    {CRYPT_EAL_IMPLPKEYMGMT_SETPRV, (CRYPT_EAL_ImplPkeyMgmtSetPrv)PQCP_LAC2_SetPrvKey},\n    {CRYPT_EAL_IMPLPKEYMGMT_SETPUB, (CRYPT_EAL_ImplPkeyMgmtSetPub)PQCP_LAC2_SetPubKey},\n    {CRYPT_EAL_IMPLPKEYMGMT_GETPRV, (CRYPT_EAL_ImplPkeyMgmtGetPrv)PQCP_LAC2_GetPrvKey},\n    {CRYPT_EAL_IMPLPKEYMGMT_GETPUB, (CRYPT_EAL_ImplPkeyMgmtGetPub)PQCP_LAC2_GetPubKey},\n    {CRYPT_EAL_IMPLPKEYMGMT_DUPCTX, (CRYPT_EAL_ImplPkeyMgmtDupCtx)PQCP_LAC2_DupCtx},\n    {CRYPT_EAL_IMPLPKEYMGMT_COMPARE, (CRYPT_EAL_ImplPkeyMgmtCompare)PQCP_LAC2_Cmp},\n    {CRYPT_EAL_IMPLPKEYMGMT_CTRL, (CRYPT_EAL_ImplPkeyMgmtCtrl)PQCP_LAC2_Ctrl},\n    {CRYPT_EAL_IMPLPKEYMGMT_FREECTX, (CRYPT_EAL_ImplPkeyMgmtFreeCtx)PQCP_LAC2_FreeCtx},\n    CRYPT_EAL_FUNC_END,\n};"
+    },
+    {
+      "file": "testcode/demo/scloudplus_demo.c",
+      "line": "53",
+      "severity": "high",
+      "title": "SCloud+ demo passes invalid parameter ID to CRYPT_CTRL_SET_PARA_BY_ID",
+      "reviewers": "CODEX",
+      "confidence": "trusted",
+      "problem": "The demo passes raw integer 256 to CRYPT_CTRL_SET_PARA_BY_ID, but the Ctrl function in scloudplus.c only accepts PQCP_SCLOUDPLUS_128/192/256 (defined as 6000/6001/6002). Passing 256 triggers the else case returning PQCP_SCLOUDPLUS_INVALID_ARG.",
+      "code": "int32_t val = 256;\nret = CRYPT_EAL_PkeyCtrl(ctx, CRYPT_CTRL_SET_PARA_BY_ID, &val, sizeof(val));",
+      "fix": "int32_t val = PQCP_SCLOUDPLUS_256;\nret = CRYPT_EAL_PkeyCtrl(ctx, CRYPT_CTRL_SET_PARA_BY_ID, &val, sizeof(val));"
+    },
+    {
+      "file": "include/pqcp_err.h",
+      "line": "46",
+      "severity": "medium",
+      "title": "Incorrect enum name CRYPT_ERROR instead of PQCP_ERROR",
+      "reviewers": "CLAUDE",
+      "confidence": "trusted",
+      "problem": "The enum is named CRYPT_ERROR but should be PQCP_ERROR to match the header file name (pqcp_err.h) and the PQCP_ prefix used by all error codes in the enum. This appears to be a copy-paste error from crypt_errno.h.",
+      "code": "PQCP_COMPOSITE_LEN_NOT_ENOUGH\n} CRYPT_ERROR;",
+      "fix": "PQCP_COMPOSITE_LEN_NOT_ENOUGH\n} PQCP_ERROR;"
+    },
+    {
+      "file": "testcode/script/build_pqcp_sdv.sh",
+      "line": "42-45",
+      "severity": "medium",
+      "title": "SDV build ignores saved external OpenHiTLS path",
+      "reviewers": "CODEX",
+      "confidence": "trusted",
+      "problem": "The script checks for build/macro.txt before reading build/base_path.txt. If PQCP was built with --hitls_dir but macro.txt is missing, SDV falls back to platform/openhitls instead of using the saved HiTLS path from base_path.txt.",
+      "code": "if [ -f ${PQCP_ROOT_DIR}/build/macro.txt ];then\n    HITLS_ROOT_DIR=$(cat ${PQCP_ROOT_DIR}/build/base_path.txt)\nelse\n    HITLS_ROOT_DIR=${PQCP_ROOT_DIR}/platform/openhitls\nfi",
+      "fix": "if [ -f \"${PQCP_ROOT_DIR}/build/base_path.txt\" ]; then\n    HITLS_ROOT_DIR=\"$(cat \"${PQCP_ROOT_DIR}/build/base_path.txt\")\"\nelse\n    HITLS_ROOT_DIR=\"${PQCP_ROOT_DIR}/platform/openhitls\"\nfi\nexport HITLS_ROOT_DIR"
+    },
+    {
+      "file": "testcode/script/execute_sdv.sh",
+      "line": "35-36",
+      "severity": "medium",
+      "title": "Runtime library path points to non-existent Secure_C directory",
+      "reviewers": "CODEX",
+      "confidence": "trusted",
+      "problem": "The script adds PQCP_ROOT_DIR/platform/Secure_C/lib to LD_LIBRARY_PATH, but the actual path is PQCP_ROOT_DIR/platform/openhitls/platform/Secure_C/lib (or under an external HiTLS root from base_path.txt). The realpath will fail or resolve nothing useful.",
+      "code": "LIB_PATHS=\"$(realpath ${PQCP_ROOT_DIR}/build)\"\nLIB_PATHS=\"${LIB_PATHS}:$(realpath ${PQCP_ROOT_DIR}/platform/Secure_C/lib)\"",
+      "fix": "if [ -f \"${PQCP_ROOT_DIR}/build/base_path.txt\" ]; then\n    HITLS_ROOT_DIR=\"$(cat \"${PQCP_ROOT_DIR}/build/base_path.txt\")\"\nelse\n    HITLS_ROOT_DIR=\"${PQCP_ROOT_DIR}/platform/openhitls\"\nfi\n\nLIB_PATHS=\"$(realpath \"${PQCP_ROOT_DIR}/build\")\"\nLIB_PATHS=\"${LIB_PATHS}:$(realpath \"${HITLS_ROOT_DIR}/platform/Secure_C/lib\")\""
+    },
+    {
+      "file": "testcode/sdv/CMakeLists.txt",
+      "line": "81-82",
+      "severity": "medium",
+      "title": "Invalid CMake logical negation causes dead fallback code",
+      "reviewers": "CODEX",
+      "confidence": "trusted",
+      "problem": "The condition uses if(!MACROS) which is not valid CMake syntax. This evaluates to false, so the SHARED_COMPILE_DEFS fallback is never applied to generated test executables when macro.txt is absent.",
+      "code": "if(!MACROS)\n    target_link_libraries(${sdv_exe} PRIVATE SHARED_COMPILE_DEFS)\nendif()",
+      "fix": "if(NOT MACROS)\n    target_link_libraries(${sdv_exe} PRIVATE SHARED_COMPILE_DEFS)\nendif()"
+    },
+    {
+      "file": "build_pqcp.sh",
+      "line": "40",
+      "severity": "medium",
+      "title": "Bash 4.0+ specific syntax reduces portability",
+      "reviewers": "CLAUDE",
+      "confidence": "trusted",
+      "problem": "The ${algo^^} uppercase conversion syntax requires Bash 4.0+. This will fail on macOS (default bash 3.2) and older systems. The shebang specifies bash but does not enforce version 4+.",
+      "code": "algo_to_macro()\n{\n    local algo=\"$1\"\n    echo \"PQCP_${algo^^}\"\n}",
+      "fix": "algo_to_macro()\n{\n    local algo=\"$1\"\n    local upper=$(echo \"$algo\" | tr '[:lower:]' '[:upper:]')\n    echo \"PQCP_${upper}\"\n}"
+    },
+    {
+      "file": "src/scloudplus/src/scloudplus.c",
+      "line": "391-392",
+      "severity": "medium",
+      "title": "Shallow copy of para pointer in DupCtx without documentation",
+      "reviewers": "CLAUDE",
+      "confidence": "evaluate",
+      "problem": "DupCtx assigns ctx->para = src->para directly without allocation. Both contexts share the same pointer to static PRESET_PARAS. While currently safe (para always points to static data), this could become a use-after-free bug if para is ever changed to point to dynamically allocated memory.",
+      "code": "if (src->para != NULL) {\n    ctx->para = src->para;\n}",
+      "fix": "if (src->para != NULL) {\n    /* Safe: para always points to static PRESET_PARAS array */\n    ctx->para = src->para;\n}"
+    },
+    {
+      "file": "src/polarlac/src/polarlac_rand.c",
+      "line": "133-136",
+      "severity": "low",
+      "title": "Dead code after RETURN_RET_IF macro",
+      "reviewers": "CLAUDE",
+      "confidence": "trusted",
+      "problem": "The error check after RETURN_RET_IF is unreachable. RETURN_RET_IF returns immediately on failure, so the subsequent if (ret != PQCP_SUCCESS) block can never execute with a failure condition.",
+      "code": "RETURN_RET_IF(CRYPT_EAL_MdSqueeze(mdCtx, r, 64), ret);\nif (ret != PQCP_SUCCESS) {\n    return ret;\n}",
+      "fix": "RETURN_RET_IF(CRYPT_EAL_MdSqueeze(mdCtx, r, 64), ret);"
+    },
+    {
+      "file": "src/polarlac/src/polarlac_rand.c",
+      "line": "233",
+      "severity": "low",
+      "title": "Inconsistent return value using literal 0 instead of PQCP_SUCCESS",
+      "reviewers": "CLAUDE",
+      "confidence": "trusted",
+      "problem": "The function returns literal 0 instead of using the PQCP_SUCCESS macro. While PQCP_SUCCESS is defined as 0, this is inconsistent with the rest of the codebase and reduces code readability.",
+      "code": "return 0;",
+      "fix": "return PQCP_SUCCESS;"
+    },
+    {
+      "file": "testcode/script/build_pqcp_sdv.sh",
+      "line": "76-79",
+      "severity": "low",
+      "title": "SDV build only accepts Linux shared-object provider",
+      "reviewers": "CODEX",
+      "confidence": "trusted",
+      "problem": "The dependency check hardcodes libpqcp_provider.so, rejecting supported configurations like static builds or macOS builds. The script will exit incorrectly when the provider library exists but with a different extension.",
+      "code": "if [ ! -f \"${PQCP_PROVIDER_DIR}/libpqcp_provider.so\" ]; then\n    echo \"[WARNING] PQCP provider not found: ${PQCP_PROVIDER_DIR}/libpqcp_provider.so\"\n    echo \"[INFO] Please build PQCP first: ./build_pqcp.sh\"\n    exit 1\nfi",
+      "fix": "# Check for any supported PQCP provider library\nPROVIDER_FOUND=0\nfor ext in .so .dylib .a; do\n    if [ -f \"${PQCP_PROVIDER_DIR}/libpqcp_provider${ext}\" ]; then\n        PROVIDER_FOUND=1\n        break\n    fi\ndone\nif [ ${PROVIDER_FOUND} -eq 0 ]; then\n    echo \"[WARNING] PQCP provider not found under ${PQCP_PROVIDER_DIR}\"\n    echo \"[INFO] Please build PQCP first: ./build_pqcp.sh\"\n    exit 1\nfi"
+    },
+    {
+      "file": "src/provider/pqcp_provider.c",
+      "line": "91-96",
+      "severity": "low",
+      "title": "Unused parameters in PQCP_ProviderCtrl",
+      "reviewers": "CLAUDE",
+      "confidence": "evaluate",
+      "problem": "The function explicitly casts all parameters to void to silence unused warnings, but still accepts these parameters in its signature. This suggests either incomplete implementation or unnecessary parameters.",
+      "code": "static int32_t PQCP_ProviderCtrl(void *provCtx, int32_t cmd, void *val, uint32_t valLen)\n{\n    (void) provCtx;\n    (void) cmd;\n    (void) val;\n    (void) valLen;\n    /* Add provider control operations if needed */\n    return PQCP_SUCCESS;\n}",
+      "fix": "/* Provider control operations not yet implemented */\nstatic int32_t PQCP_ProviderCtrl(void *provCtx, int32_t cmd, void *val, uint32_t valLen)\n{\n    (void) provCtx;\n    (void) cmd;\n    (void) val;\n    (void) valLen;\n    return PQCP_SUCCESS;\n}"
+    }
+  ]
+}
