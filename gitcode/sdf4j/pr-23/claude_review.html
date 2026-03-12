@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Code Review: openHiTLS/sdf4j#23 - CLAUDE</title>
+    <style>
+        :root { --critical: #dc2626; --high: #ea580c; --medium: #ca8a04; --low: #65a30d; }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: system-ui, sans-serif; background: #f8fafc; color: #1e293b; padding: 2rem; line-height: 1.6; }
+        .container { max-width: 900px; margin: 0 auto; }
+        h1 { font-size: 1.5rem; margin-bottom: 0.5rem; }
+        .subtitle { color: #64748b; margin-bottom: 2rem; }
+        .section { margin-bottom: 2rem; }
+        .section-title { font-size: 1.1rem; font-weight: 600; padding: 0.5rem 1rem; border-radius: 0.5rem 0.5rem 0 0; color: white; }
+        .section-title.critical { background: var(--critical); }
+        .section-title.high { background: var(--high); }
+        .section-title.medium { background: var(--medium); }
+        .section-title.low { background: var(--low); }
+        .issue { background: white; border: 1px solid #e2e8f0; border-top: none; padding: 1rem; }
+        .issue:last-child { border-radius: 0 0 0.5rem 0.5rem; }
+        .issue-title { font-weight: 600; margin-bottom: 0.25rem; }
+        .issue-location { font-family: monospace; font-size: 0.875rem; color: #64748b; margin-bottom: 0.75rem; }
+        .issue-source { font-size: 0.75rem; color: #94a3b8; margin-top: 0.5rem; }
+        pre { background: #1e293b; color: #e2e8f0; padding: 0.75rem; border-radius: 0.375rem; overflow-x: auto; font-size: 0.875rem; margin: 0.5rem 0; }
+        .problem { margin: 0.75rem 0; }
+        .fix-label { font-weight: 600; margin-top: 0.75rem; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Code Review: openHiTLS/sdf4j#23 - CLAUDE</h1>
+        <div class="subtitle"></div>
+<div class="section"><div class="section-title critical">Critical</div>
+<div class="issue">
+                <div class="issue-title">Uninitialized pointer ct_m causes undefined behavior</div>
+                <div class="issue-location">sdf4j/src/main/native/src/sdf_jni_hybrid.c:104-116</div>
+                <pre>HybridCipher *cipher = (HybridCipher*)malloc(sizeof(HybridCipher) + HYBRIDENCref_ECC_FIXED_LEN + 
+    HYBRIDENCref_MAX_LEN);
+if (cipher == NULL) {
+    (*env)-&gt;ReleasePrimitiveArrayCritical(env, publicKey, pub_key_buf, JNI_ABORT);
+    THROW_SDF_EXCEPTION(env, SDR_NOBUFFER, "Memory allocation failed for cipher");
+    return NULL;
+}
+
+HANDLE key_handle = 0;
+LONG ret = g_sdf_functions.SDF_GenerateKeyWithEPK_Hybrid(
+    (HANDLE)sessionHandle, algID,
+    (BYTE*)pub_key_buf, &amp;pub_key_len,
+    cipher, &amp;key_handle);</pre>
+                <div class="problem"><strong>Issue:</strong> The HybridCipher struct is allocated with extra memory for ct_m, but the ct_m pointer is never initialized before passing to SDF_GenerateKeyWithEPK_Hybrid. When the SDF library writes to cipher->ct_m, it will dereference an uninitialized pointer, causing undefined behavior and potential crashes.</div>
+                <div class="fix-label">Fix:</div><pre>HybridCipher *cipher = (HybridCipher*)malloc(sizeof(HybridCipher) + HYBRIDENCref_ECC_FIXED_LEN + 
+    HYBRIDENCref_MAX_LEN);
+if (cipher == NULL) {
+    (*env)-&gt;ReleasePrimitiveArrayCritical(env, publicKey, pub_key_buf, JNI_ABORT);
+    THROW_SDF_EXCEPTION(env, SDR_NOBUFFER, "Memory allocation failed for cipher");
+    return NULL;
+}
+cipher-&gt;ct_m = (BYTE*)cipher + sizeof(HybridCipher) + HYBRIDENCref_ECC_FIXED_LEN;
+
+HANDLE key_handle = 0;
+LONG ret = g_sdf_functions.SDF_GenerateKeyWithEPK_Hybrid(
+    (HANDLE)sessionHandle, algID,
+    (BYTE*)pub_key_buf, &amp;pub_key_len,
+    cipher, &amp;key_handle);</pre>
+                <div class="issue-source">Reviewer: claude</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">Uninitialized pointer sig_m causes undefined behavior</div>
+                <div class="issue-location">sdf4j/src/main/native/src/sdf_jni_hybrid.c:152-161</div>
+                <pre>HybridSignature *signature = (HybridSignature*)malloc(sizeof(HybridSignature) + HYBRIDSIGref_MAX_LEN);
+if (signature == NULL) {
+    (*env)-&gt;ReleasePrimitiveArrayCritical(env, data, data_buf, JNI_ABORT);
+    THROW_SDF_EXCEPTION(env, SDR_NOBUFFER, "Memory allocation failed for signature");
+    return NULL;
+}
+
+LONG ret = g_sdf_functions.SDF_InternalSign_Composite(
+    (HANDLE)sessionHandle, keyIndex,
+    (BYTE*)data_buf, data_len, signature);</pre>
+                <div class="problem"><strong>Issue:</strong> The HybridSignature struct is allocated with extra memory for sig_m, but the sig_m pointer is never initialized before passing to SDF_InternalSign_Composite. When the SDF library writes to signature->sig_m, it will dereference an uninitialized pointer.</div>
+                <div class="fix-label">Fix:</div><pre>HybridSignature *signature = (HybridSignature*)malloc(sizeof(HybridSignature) + HYBRIDSIGref_MAX_LEN);
+if (signature == NULL) {
+    (*env)-&gt;ReleasePrimitiveArrayCritical(env, data, data_buf, JNI_ABORT);
+    THROW_SDF_EXCEPTION(env, SDR_NOBUFFER, "Memory allocation failed for signature");
+    return NULL;
+}
+signature-&gt;sig_m = (BYTE*)signature + sizeof(HybridSignature);
+
+LONG ret = g_sdf_functions.SDF_InternalSign_Composite(
+    (HANDLE)sessionHandle, keyIndex,
+    (BYTE*)data_buf, data_len, signature);</pre>
+                <div class="issue-source">Reviewer: claude</div>
+            </div>
+</div>
+<div class="section"><div class="section-title high">High</div>
+<div class="issue">
+                <div class="issue-title">ECCCipher flexible array truncated at fixed 32 bytes</div>
+                <div class="issue-location">sdf4j/src/main/native/src/type_conversion.c:794-824</div>
+                <pre>size_t alloc_size = sizeof(HybridCipher) + HYBRIDENCref_ECC_FIXED_LEN + HYBRIDENCref_MAX_LEN;
+HybridCipher *native_cipher = (HybridCipher*)calloc(1, alloc_size);
+if (native_cipher == NULL) {
+    free(temp_cts);
+    THROW_SDF_EXCEPTION(env, SDR_INARGERR, "calloc failed");
+    return NULL;
+}
+native_cipher-&gt;ct_m = (BYTE*)(native_cipher) + sizeof(HybridCipher) + HYBRIDENCref_ECC_FIXED_LEN;
+...
+/* ct_s */
+if (temp_cts != NULL) {
+    memcpy(&amp;native_cipher-&gt;ct_s, temp_cts, sizeof(ECCCipher) + HYBRIDENCref_ECC_FIXED_LEN);
+    free(temp_cts);
+}</pre>
+                <div class="problem"><strong>Issue:</strong> The code allocates a fixed-size buffer for ct_s (32 bytes via HYBRIDENCref_ECC_FIXED_LEN) and copies exactly sizeof(ECCCipher) + 32 bytes. However, ECCCipher contains a flexible array C[] whose actual length is stored in temp_cts->L. The old code correctly used this variable length (c_len), but the new code assumes C[] is always 32 bytes. If temp_cts->L > 32, the memcpy will read beyond temp_cts allocation (reading garbage/unallocated memory) and the excess ciphertext data will be lost, causing decryption failures.</div>
+                <div class="fix-label">Fix:</div><pre>jsize c_len = 0;
+if (temp_cts != NULL) {
+    c_len = (jsize)temp_cts-&gt;L;
+}
+
+size_t alloc_size = sizeof(HybridCipher) + c_len + HYBRIDENCref_MAX_LEN;
+HybridCipher *native_cipher = (HybridCipher*)calloc(1, alloc_size);
+if (native_cipher == NULL) {
+    free(temp_cts);
+    THROW_SDF_EXCEPTION(env, SDR_INARGERR, "calloc failed");
+    return NULL;
+}
+native_cipher-&gt;ct_m = (BYTE*)(native_cipher) + sizeof(HybridCipher) + c_len;
+...
+/* ct_s */
+if (temp_cts != NULL) {
+    memcpy(&amp;native_cipher-&gt;ct_s, temp_cts, sizeof(ECCCipher) + c_len);
+    free(temp_cts);
+}</pre>
+                <div class="issue-source">Reviewer: claude</div>
+            </div>
+</div>
+</div></body></html>

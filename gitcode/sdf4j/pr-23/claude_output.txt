@@ -1,0 +1,122 @@
+===ISSUE===
+FILE: sdf4j/src/main/native/src/sdf_jni_hybrid.c
+LINE: 104-116
+SEVERITY: critical
+TITLE: Uninitialized pointer ct_m causes undefined behavior
+PROBLEM: The HybridCipher struct is allocated with extra memory for ct_m, but the ct_m pointer is never initialized before passing to SDF_GenerateKeyWithEPK_Hybrid. When the SDF library writes to cipher->ct_m, it will dereference an uninitialized pointer, causing undefined behavior and potential crashes.
+CODE:
+```
+HybridCipher *cipher = (HybridCipher*)malloc(sizeof(HybridCipher) + HYBRIDENCref_ECC_FIXED_LEN + 
+    HYBRIDENCref_MAX_LEN);
+if (cipher == NULL) {
+    (*env)->ReleasePrimitiveArrayCritical(env, publicKey, pub_key_buf, JNI_ABORT);
+    THROW_SDF_EXCEPTION(env, SDR_NOBUFFER, "Memory allocation failed for cipher");
+    return NULL;
+}
+
+HANDLE key_handle = 0;
+LONG ret = g_sdf_functions.SDF_GenerateKeyWithEPK_Hybrid(
+    (HANDLE)sessionHandle, algID,
+    (BYTE*)pub_key_buf, &pub_key_len,
+    cipher, &key_handle);
+```
+FIX:
+```
+HybridCipher *cipher = (HybridCipher*)malloc(sizeof(HybridCipher) + HYBRIDENCref_ECC_FIXED_LEN + 
+    HYBRIDENCref_MAX_LEN);
+if (cipher == NULL) {
+    (*env)->ReleasePrimitiveArrayCritical(env, publicKey, pub_key_buf, JNI_ABORT);
+    THROW_SDF_EXCEPTION(env, SDR_NOBUFFER, "Memory allocation failed for cipher");
+    return NULL;
+}
+cipher->ct_m = (BYTE*)cipher + sizeof(HybridCipher) + HYBRIDENCref_ECC_FIXED_LEN;
+
+HANDLE key_handle = 0;
+LONG ret = g_sdf_functions.SDF_GenerateKeyWithEPK_Hybrid(
+    (HANDLE)sessionHandle, algID,
+    (BYTE*)pub_key_buf, &pub_key_len,
+    cipher, &key_handle);
+```
+===END===
+
+===ISSUE===
+FILE: sdf4j/src/main/native/src/sdf_jni_hybrid.c
+LINE: 152-161
+SEVERITY: critical
+TITLE: Uninitialized pointer sig_m causes undefined behavior
+PROBLEM: The HybridSignature struct is allocated with extra memory for sig_m, but the sig_m pointer is never initialized before passing to SDF_InternalSign_Composite. When the SDF library writes to signature->sig_m, it will dereference an uninitialized pointer.
+CODE:
+```
+HybridSignature *signature = (HybridSignature*)malloc(sizeof(HybridSignature) + HYBRIDSIGref_MAX_LEN);
+if (signature == NULL) {
+    (*env)->ReleasePrimitiveArrayCritical(env, data, data_buf, JNI_ABORT);
+    THROW_SDF_EXCEPTION(env, SDR_NOBUFFER, "Memory allocation failed for signature");
+    return NULL;
+}
+
+LONG ret = g_sdf_functions.SDF_InternalSign_Composite(
+    (HANDLE)sessionHandle, keyIndex,
+    (BYTE*)data_buf, data_len, signature);
+```
+FIX:
+```
+HybridSignature *signature = (HybridSignature*)malloc(sizeof(HybridSignature) + HYBRIDSIGref_MAX_LEN);
+if (signature == NULL) {
+    (*env)->ReleasePrimitiveArrayCritical(env, data, data_buf, JNI_ABORT);
+    THROW_SDF_EXCEPTION(env, SDR_NOBUFFER, "Memory allocation failed for signature");
+    return NULL;
+}
+signature->sig_m = (BYTE*)signature + sizeof(HybridSignature);
+
+LONG ret = g_sdf_functions.SDF_InternalSign_Composite(
+    (HANDLE)sessionHandle, keyIndex,
+    (BYTE*)data_buf, data_len, signature);
+```
+===END===
+
+===ISSUE===
+FILE: sdf4j/src/main/native/src/type_conversion.c
+LINE: 794-824
+SEVERITY: high
+TITLE: ECCCipher flexible array truncated at fixed 32 bytes
+PROBLEM: The code allocates a fixed-size buffer for ct_s (32 bytes via HYBRIDENCref_ECC_FIXED_LEN) and copies exactly sizeof(ECCCipher) + 32 bytes. However, ECCCipher contains a flexible array C[] whose actual length is stored in temp_cts->L. The old code correctly used this variable length (c_len), but the new code assumes C[] is always 32 bytes. If temp_cts->L > 32, the memcpy will read beyond temp_cts allocation (reading garbage/unallocated memory) and the excess ciphertext data will be lost, causing decryption failures.
+CODE:
+```
+size_t alloc_size = sizeof(HybridCipher) + HYBRIDENCref_ECC_FIXED_LEN + HYBRIDENCref_MAX_LEN;
+HybridCipher *native_cipher = (HybridCipher*)calloc(1, alloc_size);
+if (native_cipher == NULL) {
+    free(temp_cts);
+    THROW_SDF_EXCEPTION(env, SDR_INARGERR, "calloc failed");
+    return NULL;
+}
+native_cipher->ct_m = (BYTE*)(native_cipher) + sizeof(HybridCipher) + HYBRIDENCref_ECC_FIXED_LEN;
+...
+/* ct_s */
+if (temp_cts != NULL) {
+    memcpy(&native_cipher->ct_s, temp_cts, sizeof(ECCCipher) + HYBRIDENCref_ECC_FIXED_LEN);
+    free(temp_cts);
+}
+```
+FIX:
+```
+jsize c_len = 0;
+if (temp_cts != NULL) {
+    c_len = (jsize)temp_cts->L;
+}
+
+size_t alloc_size = sizeof(HybridCipher) + c_len + HYBRIDENCref_MAX_LEN;
+HybridCipher *native_cipher = (HybridCipher*)calloc(1, alloc_size);
+if (native_cipher == NULL) {
+    free(temp_cts);
+    THROW_SDF_EXCEPTION(env, SDR_INARGERR, "calloc failed");
+    return NULL;
+}
+native_cipher->ct_m = (BYTE*)(native_cipher) + sizeof(HybridCipher) + c_len;
+...
+/* ct_s */
+if (temp_cts != NULL) {
+    memcpy(&native_cipher->ct_s, temp_cts, sizeof(ECCCipher) + c_len);
+    free(temp_cts);
+}
+```
+===END===

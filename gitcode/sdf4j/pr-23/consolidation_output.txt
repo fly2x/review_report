@@ -1,0 +1,187 @@
+Now I have verified all the issues. Let me output the consolidated findings:===ISSUE===
+FILE: sdf4j/src/main/native/src/sdf_jni_hybrid.c
+LINE: 104-116
+SEVERITY: critical
+TITLE: Uninitialized pointer ct_m causes undefined behavior
+REVIEWERS: CLAUDE, GEMINI
+CONFIDENCE: trusted
+PROBLEM: The HybridCipher struct is allocated with extra memory for ct_m data, but the ct_m pointer is never initialized before passing to SDF_GenerateKeyWithEPK_Hybrid. When the SDF library writes to cipher->ct_m, it will dereference an uninitialized pointer, causing undefined behavior and potential crashes.
+CODE:
+```
+HybridCipher *cipher = (HybridCipher*)malloc(sizeof(HybridCipher) + HYBRIDENCref_ECC_FIXED_LEN + 
+    HYBRIDENCref_MAX_LEN);
+if (cipher == NULL) {
+    (*env)->ReleasePrimitiveArrayCritical(env, publicKey, pub_key_buf, JNI_ABORT);
+    THROW_SDF_EXCEPTION(env, SDR_NOBUFFER, "Memory allocation failed for cipher");
+    return NULL;
+}
+
+HANDLE key_handle = 0;
+LONG ret = g_sdf_functions.SDF_GenerateKeyWithEPK_Hybrid(
+    (HANDLE)sessionHandle, algID,
+    (BYTE*)pub_key_buf, &pub_key_len,
+    cipher, &key_handle);
+```
+FIX:
+```
+HybridCipher *cipher = (HybridCipher*)malloc(sizeof(HybridCipher) + HYBRIDENCref_ECC_FIXED_LEN + 
+    HYBRIDENCref_MAX_LEN);
+if (cipher == NULL) {
+    (*env)->ReleasePrimitiveArrayCritical(env, publicKey, pub_key_buf, JNI_ABORT);
+    THROW_SDF_EXCEPTION(env, SDR_NOBUFFER, "Memory allocation failed for cipher");
+    return NULL;
+}
+cipher->ct_m = (BYTE*)cipher + sizeof(HybridCipher) + HYBRIDENCref_ECC_FIXED_LEN;
+
+HANDLE key_handle = 0;
+LONG ret = g_sdf_functions.SDF_GenerateKeyWithEPK_Hybrid(
+    (HANDLE)sessionHandle, algID,
+    (BYTE*)pub_key_buf, &pub_key_len,
+    cipher, &key_handle);
+```
+===END===
+===ISSUE===
+FILE: sdf4j/src/main/native/src/sdf_jni_hybrid.c
+LINE: 152-161
+SEVERITY: critical
+TITLE: Uninitialized pointer sig_m causes undefined behavior
+REVIEWERS: CLAUDE, GEMINI
+CONFIDENCE: trusted
+PROBLEM: The HybridSignature struct is allocated with extra memory for sig_m, but the sig_m pointer is never initialized before passing to SDF_InternalSign_Composite. When the SDF library writes to signature->sig_m, it will dereference an uninitialized pointer.
+CODE:
+```
+HybridSignature *signature = (HybridSignature*)malloc(sizeof(HybridSignature) + HYBRIDSIGref_MAX_LEN);
+if (signature == NULL) {
+    (*env)->ReleasePrimitiveArrayCritical(env, data, data_buf, JNI_ABORT);
+    THROW_SDF_EXCEPTION(env, SDR_NOBUFFER, "Memory allocation failed for signature");
+    return NULL;
+}
+
+LONG ret = g_sdf_functions.SDF_InternalSign_Composite(
+    (HANDLE)sessionHandle, keyIndex,
+    (BYTE*)data_buf, data_len, signature);
+```
+FIX:
+```
+HybridSignature *signature = (HybridSignature*)malloc(sizeof(HybridSignature) + HYBRIDSIGref_MAX_LEN);
+if (signature == NULL) {
+    (*env)->ReleasePrimitiveArrayCritical(env, data, data_buf, JNI_ABORT);
+    THROW_SDF_EXCEPTION(env, SDR_NOBUFFER, "Memory allocation failed for signature");
+    return NULL;
+}
+signature->sig_m = (BYTE*)signature + sizeof(HybridSignature);
+
+LONG ret = g_sdf_functions.SDF_InternalSign_Composite(
+    (HANDLE)sessionHandle, keyIndex,
+    (BYTE*)data_buf, data_len, signature);
+```
+===END===
+===ISSUE===
+FILE: sdf4j/src/main/native/src/type_conversion.c
+LINE: 794-824
+SEVERITY: high
+TITLE: ECCCipher flexible array truncated at fixed 32 bytes
+REVIEWERS: CLAUDE, GEMINI, CODEX
+CONFIDENCE: trusted
+PROBLEM: The code allocates a fixed-size buffer for ct_s using HYBRIDENCref_ECC_FIXED_LEN (32 bytes) and copies exactly sizeof(ECCCipher) + 32 bytes. However, ECCCipher contains a flexible array C[] whose actual length is stored in temp_cts->L. If temp_cts->L > 32, the memcpy will read beyond the temp_cts allocation and the excess ciphertext data will be lost, causing decryption failures.
+CODE:
+```
+size_t alloc_size = sizeof(HybridCipher) + HYBRIDENCref_ECC_FIXED_LEN + HYBRIDENCref_MAX_LEN;
+HybridCipher *native_cipher = (HybridCipher*)calloc(1, alloc_size);
+if (native_cipher == NULL) {
+    free(temp_cts);
+    THROW_SDF_EXCEPTION(env, SDR_INARGERR, "calloc failed");
+    return NULL;
+}
+native_cipher->ct_m = (BYTE*)(native_cipher) + sizeof(HybridCipher) + HYBRIDENCref_ECC_FIXED_LEN;
+...
+/* ct_s */
+if (temp_cts != NULL) {
+    memcpy(&native_cipher->ct_s, temp_cts, sizeof(ECCCipher) + HYBRIDENCref_ECC_FIXED_LEN);
+    free(temp_cts);
+}
+```
+FIX:
+```
+jsize c_len = 0;
+if (temp_cts != NULL) {
+    c_len = (jsize)temp_cts->L;
+}
+
+size_t alloc_size = sizeof(HybridCipher) + c_len + HYBRIDENCref_MAX_LEN;
+HybridCipher *native_cipher = (HybridCipher*)calloc(1, alloc_size);
+if (native_cipher == NULL) {
+    free(temp_cts);
+    THROW_SDF_EXCEPTION(env, SDR_INARGERR, "calloc failed");
+    return NULL;
+}
+native_cipher->ct_m = (BYTE*)(native_cipher) + sizeof(HybridCipher) + c_len;
+...
+/* ct_s */
+if (temp_cts != NULL) {
+    memcpy(&native_cipher->ct_s, temp_cts, sizeof(ECCCipher) + c_len);
+    free(temp_cts);
+}
+```
+===END===
+===ISSUE===
+FILE: sdf4j/src/main/native/include/sdf_types.h
+LINE: 270-275
+SEVERITY: critical
+TITLE: HybridCipher layout change breaks SDF ABI compatibility
+REVIEWERS: CODEX
+CONFIDENCE: evaluate
+PROBLEM: HybridCipher is passed directly to SDF_ImportKeyWithISK_Hybrid and SDF_GenerateKeyWithEPK_Hybrid. Replacing the inline ct_m[1576] payload with BYTE *ct_m changes the binary layout that the vendor library reads and writes. On a 64-bit build, the old struct had ct_m at offset 4 (after ULONG L1), but the new definition places ct_m as a pointer at offset 4-8 (due to alignment), followed by uiAlgID at offset 12 and ct_s at offset 16. The SDF library expects a specific memory layout defined by GM/T 0018-2023, and this change will corrupt all hybrid-encryption operations.
+CODE:
+```
+typedef struct HybridCipher_st {
+    ULONG L1;
+    BYTE *ct_m;
+    ULONG uiAlgID;
+    ECCCipher ct_s;
+} HybridCipher;
+```
+FIX:
+```
+typedef struct HybridCipher_st {
+    ULONG L1;
+    BYTE ct_m[HYBRIDENCref_MAX_LEN];
+    ULONG uiAlgID;
+    ECCCipher ct_s;
+} HybridCipher;
+
+/* If JNI needs dynamically managed scratch space, keep that in a separate
+ * wrapper type and translate to/from the ABI-stable HybridCipher before
+ * calling any SDF_* function.
+ */
+```
+===END===
+===ISSUE===
+FILE: sdf4j/src/main/native/include/sdf_types.h
+LINE: 280-283
+SEVERITY: critical
+TITLE: HybridSignature pointer field breaks sign/verify interoperability
+REVIEWERS: CODEX
+CONFIDENCE: evaluate
+PROBLEM: HybridSignature is consumed directly by SDF_InternalSign_Composite and SDF_ExternalVerify_Composite. Changing sig_m from an inline array to a pointer removes the ABI-defined signature storage from the struct. The vendor library will write/read post-quantum signature bytes where the inline array used to be, while JNI now expects a heap pointer there, corrupting returned signatures and verification requests.
+CODE:
+```
+typedef struct HybridSignature_st {
+    ECCSignature sig_s;
+    ULONG L;
+    BYTE *sig_m;
+} HybridSignature;
+```
+FIX:
+```
+typedef struct HybridSignature_st {
+    ECCSignature sig_s;
+    ULONG L;
+    BYTE sig_m[HYBRIDSIGref_MAX_LEN];
+} HybridSignature;
+
+/* As with HybridCipher, keep any JNI-only indirection in a separate wrapper
+ * instead of changing the struct that crosses the SDF shared-library boundary.
+ */
+```
+===END===

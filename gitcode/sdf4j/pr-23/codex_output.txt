@@ -1,0 +1,104 @@
+===ISSUE===
+FILE: sdf4j/src/main/native/include/sdf_types.h
+LINE: 270-275
+SEVERITY: critical
+TITLE: HybridCipher layout no longer matches the SDF ABI
+PROBLEM: `HybridCipher` is passed directly to `SDF_ImportKeyWithISK_Hybrid` and `SDF_GenerateKeyWithEPK_Hybrid`. Replacing the inline `ct_m[1576]` payload with `BYTE *ct_m` changes the binary layout that the vendor library reads and writes. On a 64-bit build, the old `ct_m/uiAlgID/ct_s` offsets are `4/1580/1584`, but this definition moves them to `8/16/20`. The device library will therefore treat padding, the pointer slot, and `uiAlgID` as ciphertext bytes, corrupting every hybrid-encryption request/response and leaving JNI to dereference garbage afterwards.
+CODE:
+```c
+typedef struct HybridCipher_st {
+    ULONG L1;
+    BYTE *ct_m;
+    ULONG uiAlgID;
+    ECCCipher ct_s;
+} HybridCipher;
+```
+FIX:
+```c
+typedef struct HybridCipher_st {
+    ULONG L1;
+    BYTE ct_m[HYBRIDENCref_MAX_LEN];
+    ULONG uiAlgID;
+    ECCCipher ct_s;
+} HybridCipher;
+
+/* If JNI needs dynamically managed scratch space, keep that in a separate
+ * wrapper type and translate to/from the ABI-stable HybridCipher before
+ * calling any SDF_* function.
+ */
+```
+===END===
+===ISSUE===
+FILE: sdf4j/src/main/native/include/sdf_types.h
+LINE: 280-283
+SEVERITY: critical
+TITLE: HybridSignature pointer field breaks sign/verify interoperability
+PROBLEM: `HybridSignature` is also consumed directly by the vendor API (`SDF_InternalSign_Composite` and `SDF_ExternalVerify_Composite`). Changing `sig_m` from an inline array to a pointer removes the ABI-defined signature storage from the struct. The library will write/read post-quantum signature bytes where the inline array used to be, while JNI now expects a heap pointer there. That corrupts returned signatures and sends pointer bytes back into verification requests.
+CODE:
+```c
+typedef struct HybridSignature_st {
+    ECCSignature sig_s;                  /* SM2签名值 */
+    ULONG L;                             /* 后量子算法签名值长度 */
+    BYTE *sig_m;                         /* 后量子算法签名值 */
+} HybridSignature;
+```
+FIX:
+```c
+typedef struct HybridSignature_st {
+    ECCSignature sig_s;                  /* SM2签名值 */
+    ULONG L;                             /* 后量子算法签名值长度 */
+    BYTE sig_m[HYBRIDSIGref_MAX_LEN];    /* 后量子算法签名值 */
+} HybridSignature;
+
+/* As with HybridCipher, keep any JNI-only indirection in a separate wrapper
+ * instead of changing the struct that crosses the SDF shared-library boundary.
+ */
+```
+===END===
+===ISSUE===
+FILE: sdf4j/src/main/native/src/type_conversion.c
+LINE: 794-824
+SEVERITY: medium
+TITLE: HybridCipher conversion now truncates ct_s.C to 32 bytes
+PROBLEM: The previous converter sized the trailing `ECCCipher.C` area from `temp_cts->L` and copied the full `sizeof(ECCCipher) + c_len`. This change hard-codes `HYBRIDENCref_ECC_FIXED_LEN` for both allocation and `memcpy`. `HybridCipher`/`ECCCipher` still allow callers to pass any `ctS.l` that fits the Java array, so any `ctS.c` longer than 32 bytes is silently truncated before `SDF_ImportKeyWithISK_Hybrid`, producing a malformed ciphertext.
+CODE:
+```c
+size_t alloc_size = sizeof(HybridCipher) + HYBRIDENCref_ECC_FIXED_LEN + HYBRIDENCref_MAX_LEN;
+HybridCipher *native_cipher = (HybridCipher*)calloc(1, alloc_size);
+if (native_cipher == NULL) {
+    free(temp_cts);
+    THROW_SDF_EXCEPTION(env, SDR_INARGERR, "calloc failed");
+    return NULL;
+}
+native_cipher->ct_m = (BYTE*)(native_cipher) + sizeof(HybridCipher) + HYBRIDENCref_ECC_FIXED_LEN;
+...
+if (temp_cts != NULL) {
+    memcpy(&native_cipher->ct_s, temp_cts, sizeof(ECCCipher) + HYBRIDENCref_ECC_FIXED_LEN);
+    free(temp_cts);
+}
+```
+FIX:
+```c
+jsize c_len = 0;
+if (cts_obj != NULL) {
+    temp_cts = java_to_native_ECCCipher_alloc(env, cts_obj);
+    if (temp_cts == NULL) {
+        return NULL;
+    }
+    c_len = (jsize)temp_cts->L;
+}
+
+size_t alloc_size = sizeof(HybridCipher) + c_len;
+HybridCipher *native_cipher = (HybridCipher*)calloc(1, alloc_size);
+if (native_cipher == NULL) {
+    free(temp_cts);
+    THROW_SDF_EXCEPTION(env, SDR_INARGERR, "calloc failed");
+    return NULL;
+}
+
+if (temp_cts != NULL) {
+    memcpy(&native_cipher->ct_s, temp_cts, sizeof(ECCCipher) + c_len);
+    free(temp_cts);
+}
+```
+===END===
