@@ -1,0 +1,387 @@
+# Final Code Review Report
+## openHiTLS/openhitls - PR #1112
+
+### Summary
+- **Total Issues**: 6
+- **Critical**: 0
+- **High**: 3
+- **Medium**: 2
+- **Low**: 1
+- **Reviewers**: claude, gemini, codex
+
+---
+
+
+## High
+
+### DupCtx can free source hash cache on allocation failure
+`crypto/slh_dsa/src/slh_dsa.c:335-372`
+**Reviewers**: CODEX | **置信度**: 可信
+```
+CryptSlhDsaCtx *CRYPT_SLH_DSA_DupCtx(CryptSlhDsaCtx *ctx)
+{
+    if (ctx == NULL) {
+        BSL_ERR_PUSH_ERROR(CRYPT_NULL_INPUT);
+        return NULL;
+    }
+    CryptSlhDsaCtx *newCtx = CRYPT_SLH_DSA_NewCtx();
+    if (newCtx == NULL) {
+        BSL_ERR_PUSH_ERROR(CRYPT_MEM_ALLOC_FAIL);
+        return NULL;
+    }
+    (void)memcpy_s(newCtx, sizeof(CryptSlhDsaCtx), ctx, sizeof(CryptSlhDsaCtx));
+    newCtx->context = NULL;
+    newCtx->addrand = NULL;
+    if (ctx->context != NULL) {
+        newCtx->context = BSL_SAL_Dump(ctx->context, ctx->contextLen);
+        if (newCtx->context == NULL) {
+            CRYPT_SLH_DSA_FreeCtx(newCtx);
+            return NULL;
+        }
+    }
+    if (ctx->addrand != NULL) {
+        newCtx->addrand = BSL_SAL_Dump(ctx->addrand, ctx->addrandLen);
+        if (newCtx->addrand == NULL) {
+            CRYPT_SLH_DSA_FreeCtx(newCtx);
+            return NULL;
+        }
+    }
+    if (ctx->sha256MdCtx != NULL && ctx->sha512MdCtx != NULL) {
+        DupMdCtx(newCtx, ctx);
+        if (newCtx->sha256MdCtx == NULL || newCtx->sha512MdCtx == NULL) {
+            CRYPT_SLH_DSA_FreeCtx(newCtx);
+            return NULL;
+        }
+    }
+    
+    return newCtx;
+}
+```
+**Issue**: In CRYPT_SLH_DSA_DupCtx, memcpy_s copies sha256MdCtx and sha512MdCtx pointers from source to destination before any deep-copying occurs. The DupMdCtx call happens only after context and addrand dumps succeed. If either dump fails, CRYPT_SLH_DSA_FreeCtx(newCtx) is called while newCtx->sha256MdCtx and newCtx->sha512MdCtx still alias the source object's contexts. This frees the source's hash cache and creates a double-free vulnerability.
+**Fix**:
+```
+CryptSlhDsaCtx *CRYPT_SLH_DSA_DupCtx(CryptSlhDsaCtx *ctx)
+{
+    if (ctx == NULL) {
+        BSL_ERR_PUSH_ERROR(CRYPT_NULL_INPUT);
+        return NULL;
+    }
+    CryptSlhDsaCtx *newCtx = CRYPT_SLH_DSA_NewCtx();
+    if (newCtx == NULL) {
+        BSL_ERR_PUSH_ERROR(CRYPT_MEM_ALLOC_FAIL);
+        return NULL;
+    }
+    (void)memcpy_s(newCtx, sizeof(CryptSlhDsaCtx), ctx, sizeof(CryptSlhDsaCtx));
+    newCtx->context = NULL;
+    newCtx->addrand = NULL;
+    newCtx->sha256MdCtx = NULL;
+    newCtx->sha512MdCtx = NULL;
+
+    if (ctx->sha256MdCtx != NULL && ctx->sha512MdCtx != NULL) {
+        DupMdCtx(newCtx, ctx);
+        if (newCtx->sha256MdCtx == NULL || newCtx->sha512MdCtx == NULL) {
+            CRYPT_SLH_DSA_FreeCtx(newCtx);
+            return NULL;
+        }
+    }
+
+    if (ctx->context != NULL) {
+        newCtx->context = BSL_SAL_Dump(ctx->context, ctx->contextLen);
+        if (newCtx->context == NULL) {
+            CRYPT_SLH_DSA_FreeCtx(newCtx);
+            return NULL;
+        }
+    }
+    if (ctx->addrand != NULL) {
+        newCtx->addrand = BSL_SAL_Dump(ctx->addrand, ctx->addrandLen);
+        if (newCtx->addrand == NULL) {
+            CRYPT_SLH_DSA_FreeCtx(newCtx);
+            return NULL;
+        }
+    }
+    
+    return newCtx;
+}
+```
+
+---
+
+### Legacy key setters don't initialize SHA2 hash cache
+`crypto/slh_dsa/src/slh_dsa.c:914-941`
+**Reviewers**: CODEX | **置信度**: 可信
+```
+int32_t CRYPT_SLH_DSA_SetPubKey(CryptSlhDsaCtx *ctx, const CRYPT_SlhDsaPub *pub)
+{
+    int32_t ret = PubKeyCheck(ctx, pub);
+    if (ret != CRYPT_SUCCESS) {
+        BSL_ERR_PUSH_ERROR(ret);
+        return ret;
+    }
+    (void)memcpy_s(ctx->prvKey.pub.seed, ctx->para.n, pub->seed, ctx->para.n);
+    (void)memcpy_s(ctx->prvKey.pub.root, ctx->para.n, pub->root, ctx->para.n);
+    ctx->keyType |= SLH_DSA_PUBKEY;
+    return CRYPT_SUCCESS;
+}
+
+int32_t CRYPT_SLH_DSA_SetPrvKey(CryptSlhDsaCtx *ctx, const CRYPT_SlhDsaPrv *prv)
+{
+    int32_t ret = PrvKeyCheck(ctx, prv);
+    if (ret != CRYPT_SUCCESS) {
+        BSL_ERR_PUSH_ERROR(ret);
+        return ret;
+    }
+
+    (void)memcpy_s(ctx->prvKey.seed, sizeof(ctx->prvKey.seed), prv->seed, ctx->para.n);
+    (void)memcpy_s(ctx->prvKey.prf, sizeof(ctx->prvKey.prf), prv->prf, ctx->para.n);
+    (void)memcpy_s(ctx->prvKey.pub.seed, sizeof(ctx->prvKey.pub.seed), prv->pub.seed, ctx->para.n);
+    (void)memcpy_s(ctx->prvKey.pub.root, sizeof(ctx->prvKey.pub.root), prv->pub.root, ctx->para.n);
+    ctx->keyType |= SLH_DSA_PRVKEY;
+    return CRYPT_SUCCESS;
+}
+```
+**Issue**: The PR introduces SHA2-compressed SLH-DSA hash path that depends on ctx->sha256MdCtx/sha512MdCtx. InitMdCtx is only called in CRYPT_SLH_DSA_SetPubKeyEx and CRYPT_SLH_DSA_SetPrvKeyEx (lines 1038 and 1060), but NOT in the legacy APIs CRYPT_SLH_DSA_SetPubKey and CRYPT_SLH_DSA_SetPrvKey. Importing a SHA2-based key through legacy APIs leaves sha256MdCtx/sha512MdCtx NULL, causing the context to fail on first cached hash operation (sign/verify/pair-check).
+**Fix**:
+```
+int32_t CRYPT_SLH_DSA_SetPubKey(CryptSlhDsaCtx *ctx, const CRYPT_SlhDsaPub *pub)
+{
+    int32_t ret = PubKeyCheck(ctx, pub);
+    if (ret != CRYPT_SUCCESS) {
+        BSL_ERR_PUSH_ERROR(ret);
+        return ret;
+    }
+    (void)memcpy_s(ctx->prvKey.pub.seed, ctx->para.n, pub->seed, ctx->para.n);
+    (void)memcpy_s(ctx->prvKey.pub.root, ctx->para.n, pub->root, ctx->para.n);
+
+    ret = InitMdCtx(ctx);
+    if (ret != CRYPT_SUCCESS) {
+        BSL_ERR_PUSH_ERROR(ret);
+        return ret;
+    }
+
+    ctx->keyType |= SLH_DSA_PUBKEY;
+    return CRYPT_SUCCESS;
+}
+
+int32_t CRYPT_SLH_DSA_SetPrvKey(CryptSlhDsaCtx *ctx, const CRYPT_SlhDsaPrv *prv)
+{
+    int32_t ret = PrvKeyCheck(ctx, prv);
+    if (ret != CRYPT_SUCCESS) {
+        BSL_ERR_PUSH_ERROR(ret);
+        return ret;
+    }
+
+    (void)memcpy_s(ctx->prvKey.seed, sizeof(ctx->prvKey.seed), prv->seed, ctx->para.n);
+    (void)memcpy_s(ctx->prvKey.prf, sizeof(ctx->prvKey.prf), prv->prf, ctx->para.n);
+    (void)memcpy_s(ctx->prvKey.pub.seed, sizeof(ctx->prvKey.pub.seed), prv->pub.seed, ctx->para.n);
+    (void)memcpy_s(ctx->prvKey.pub.root, sizeof(ctx->prvKey.pub.root), prv->pub.root, ctx->para.n);
+
+    ret = InitMdCtx(ctx);
+    if (ret != CRYPT_SUCCESS) {
+        BSL_ERR_PUSH_ERROR(ret);
+        return ret;
+    }
+
+    ctx->keyType |= SLH_DSA_PRVKEY;
+    return CRYPT_SUCCESS;
+}
+```
+
+---
+
+### Memory leak in DupMdCtx on partial duplication failure
+`crypto/slh_dsa/src/slh_dsa_hash.c:137-143`
+**Reviewers**: CLAUDE | **置信度**: 可信
+```
+void DupMdCtx(CryptSlhDsaCtx *dest, CryptSlhDsaCtx *src)
+{
+    const EAL_MdMethod *hashMethod256 = EAL_MdFindDefaultMethod(CRYPT_MD_SHA256);
+    const EAL_MdMethod *hashMethod512 = EAL_MdFindDefaultMethod(CRYPT_MD_SHA512);
+    dest->sha256MdCtx = hashMethod256->dupCtx(src->sha256MdCtx);
+    dest->sha512MdCtx = hashMethod512->dupCtx(src->sha512MdCtx);
+}
+```
+**Issue**: If hashMethod256->dupCtx succeeds but hashMethod512->dupCtx fails (returns NULL), dest->sha256MdCtx is leaked. The function does not clean up the partially duplicated state before returning.
+**Fix**:
+```
+void DupMdCtx(CryptSlhDsaCtx *dest, CryptSlhDsaCtx *src)
+{
+    const EAL_MdMethod *hashMethod256 = EAL_MdFindDefaultMethod(CRYPT_MD_SHA256);
+    const EAL_MdMethod *hashMethod512 = EAL_MdFindDefaultMethod(CRYPT_MD_SHA512);
+    dest->sha256MdCtx = hashMethod256->dupCtx(src->sha256MdCtx);
+    if (dest->sha256MdCtx == NULL) {
+        return;
+    }
+    dest->sha512MdCtx = hashMethod512->dupCtx(src->sha512MdCtx);
+    if (dest->sha512MdCtx == NULL) {
+        hashMethod256->freeCtx(dest->sha256MdCtx);
+        dest->sha256MdCtx = NULL;
+    }
+}
+```
+
+---
+
+
+## Medium
+
+### Cached digest contexts leak when switching from SHA2 to SHAKE
+`crypto/slh_dsa/src/slh_dsa_hash.c:105-135`
+**Reviewers**: CODEX | **置信度**: 可信
+```
+int32_t InitMdCtx(CryptSlhDsaCtx *ctx)
+{
+    int32_t ret = CRYPT_SUCCESS;
+    if (ctx->para.isCompressed) {
+        if (ctx->sha256MdCtx != NULL || ctx->sha512MdCtx != NULL) {
+            FreeMdCtx(ctx);
+        }
+        uint32_t n = ctx->para.n;
+        uint8_t padding[SHA512_PADDING_LEN] = {0};
+        const CRYPT_ConstData hashData256[] = {{ctx->prvKey.pub.seed, n}, {padding, SHA256_PADDING_LEN - n}};
+        const EAL_MdMethod *hashMethod256 = EAL_MdFindDefaultMethod(CRYPT_MD_SHA256);
+        ret = CreateMdCtxAndUpdata(&ctx->sha256MdCtx, hashMethod256, hashData256,
+                                   sizeof(hashData256) / sizeof(hashData256[0]));
+        if (ret != CRYPT_SUCCESS) {
+            return ret;
+        }
+        const CRYPT_ConstData hashData512[] = {{ctx->prvKey.pub.seed, n}, {padding, SHA512_PADDING_LEN - n}};
+        const EAL_MdMethod *hashMethod512 = EAL_MdFindDefaultMethod(CRYPT_MD_SHA512);
+        ret = CreateMdCtxAndUpdata(&ctx->sha512MdCtx, hashMethod512, hashData512,
+                                   sizeof(hashData512) / sizeof(hashData512[0]));
+        if (ret != CRYPT_SUCCESS) {
+            hashMethod256->freeCtx(ctx->sha256MdCtx);
+            ctx->sha256MdCtx = NULL;
+            return ret;
+        }
+    } else {
+        ctx->sha256MdCtx = NULL;
+        ctx->sha512MdCtx = NULL;
+    }
+    return ret;
+}
+
+void FreeMdCtx(CryptSlhDsaCtx *ctx)
+{
+    if (ctx->para.isCompressed) {
+        const EAL_MdMethod *hashMethod256 = EAL_MdFindDefaultMethod(CRYPT_MD_SHA256);
+        const EAL_MdMethod *hashMethod512 = EAL_MdFindDefaultMethod(CRYPT_MD_SHA512);
+        hashMethod256->freeCtx(ctx->sha256MdCtx);
+        hashMethod512->freeCtx(ctx->sha512MdCtx);
+        ctx->sha256MdCtx = NULL;
+        ctx->sha512MdCtx = NULL;
+    }
+}
+```
+**Issue**: InitMdCtx sets sha256MdCtx/sha512MdCtx to NULL in the else branch when isCompressed is false (SHAKE variant), but only AFTER FreeMdCtx is called conditionally. FreeMdCtx only frees when isCompressed is true. If a caller reuses a context and changes the parameter ID from SHA2 to SHAKE, the else branch just drops the pointers without freeing them, leaking both cached md contexts. FreeMdCtx checks isCompressed instead of actual pointer ownership.
+**Fix**:
+```
+int32_t InitMdCtx(CryptSlhDsaCtx *ctx)
+{
+    FreeMdCtx(ctx);
+    
+    if (!ctx->para.isCompressed) {
+        return CRYPT_SUCCESS;
+    }
+
+    uint32_t n = ctx->para.n;
+    uint8_t padding[SHA512_PADDING_LEN] = {0};
+    const CRYPT_ConstData hashData256[] = {{ctx->prvKey.pub.seed, n}, {padding, SHA256_PADDING_LEN - n}};
+    const EAL_MdMethod *hashMethod256 = EAL_MdFindDefaultMethod(CRYPT_MD_SHA256);
+    int32_t ret = CreateMdCtxAndUpdata(&ctx->sha256MdCtx, hashMethod256, hashData256,
+                                       sizeof(hashData256) / sizeof(hashData256[0]));
+    if (ret != CRYPT_SUCCESS) {
+        return ret;
+    }
+
+    const CRYPT_ConstData hashData512[] = {{ctx->prvKey.pub.seed, n}, {padding, SHA512_PADDING_LEN - n}};
+    const EAL_MdMethod *hashMethod512 = EAL_MdFindDefaultMethod(CRYPT_MD_SHA512);
+    ret = CreateMdCtxAndUpdata(&ctx->sha512MdCtx, hashMethod512, hashData512,
+                               sizeof(hashData512) / sizeof(hashData512[0]));
+    if (ret != CRYPT_SUCCESS) {
+        hashMethod256->freeCtx(ctx->sha256MdCtx);
+        ctx->sha256MdCtx = NULL;
+    }
+    return ret;
+}
+
+void FreeMdCtx(CryptSlhDsaCtx *ctx)
+{
+    const EAL_MdMethod *hashMethod256 = EAL_MdFindDefaultMethod(CRYPT_MD_SHA256);
+    const EAL_MdMethod *hashMethod512 = EAL_MdFindDefaultMethod(CRYPT_MD_SHA512);
+
+    if (ctx->sha256MdCtx != NULL) {
+        hashMethod256->freeCtx(ctx->sha256MdCtx);
+        ctx->sha256MdCtx = NULL;
+    }
+    if (ctx->sha512MdCtx != NULL) {
+        hashMethod512->freeCtx(ctx->sha512MdCtx);
+        ctx->sha512MdCtx = NULL;
+    }
+}
+```
+
+---
+
+### FreeMdCtx calls freeCtx without NULL check
+`crypto/slh_dsa/src/slh_dsa_hash.c:145-155`
+**Reviewers**: CLAUDE | **置信度**: 较可信
+```
+void FreeMdCtx(CryptSlhDsaCtx *ctx)
+{
+    if (ctx->para.isCompressed) {
+        const EAL_MdMethod *hashMethod256 = EAL_MdFindDefaultMethod(CRYPT_MD_SHA256);
+        const EAL_MdMethod *hashMethod512 = EAL_MdFindDefaultMethod(CRYPT_MD_SHA512);
+        hashMethod256->freeCtx(ctx->sha256MdCtx);
+        hashMethod512->freeCtx(ctx->sha512MdCtx);
+        ctx->sha256MdCtx = NULL;
+        ctx->sha512MdCtx = NULL;
+    }
+}
+```
+**Issue**: FreeMdCtx calls hashMethod->freeCtx on ctx->sha256MdCtx and ctx->sha512MdCtx without checking if they are NULL first. While the assumption is that for compressed mode, these should always be valid, this lacks defensive programming. If an inconsistent state occurs (one NULL, one non-NULL), or if the hash method's freeCtx doesn't handle NULL gracefully, undefined behavior could occur.
+**Fix**:
+```
+void FreeMdCtx(CryptSlhDsaCtx *ctx)
+{
+    if (ctx->para.isCompressed) {
+        const EAL_MdMethod *hashMethod256 = EAL_MdFindDefaultMethod(CRYPT_MD_SHA256);
+        const EAL_MdMethod *hashMethod512 = EAL_MdFindDefaultMethod(CRYPT_MD_SHA512);
+        if (ctx->sha256MdCtx != NULL) {
+            hashMethod256->freeCtx(ctx->sha256MdCtx);
+            ctx->sha256MdCtx = NULL;
+        }
+        if (ctx->sha512MdCtx != NULL) {
+            hashMethod512->freeCtx(ctx->sha512MdCtx);
+            ctx->sha512MdCtx = NULL;
+        }
+    }
+}
+```
+
+---
+
+
+## Low
+
+### Magic number 18 for hash address offset is fragile
+`crypto/slh_dsa/src/slh_dsa_hash.c:409`
+**Reviewers**: CLAUDE | **置信度**: 较可信
+```
+PUT_UINT32_BE(start + i, (uint8_t *)sha256Ctx->block, 18); // 18 = layerAddrLen + treeAddrLen + typeLen + hashAddressOffset = 1 + 8 + 1 + 8
+```
+**Issue**: The hardcoded offset 18 is used to write the hash address in the block buffer. While the comment explains the calculation (layerAddrLen + treeAddrLen + typeLen + hashAddressOffset = 1 + 8 + 1 + 8), this magic number is fragile and could break if the address structure changes. The offset should be derived from constants or calculated dynamically.
+**Fix**:
+```
+#define SLH_DSA_CADRS_LAYER_ADDR_LEN   1
+#define SLH_DSA_CADRS_TREE_ADDR_LEN    8
+#define SLH_DSA_CADRS_TYPE_LEN         1
+#define SLH_DSA_CADRS_HASH_ADDR_OFFSET 8
+#define SLH_DSA_CADRS_HASH_ADDR_BYTE_OFFSET \
+    (SLH_DSA_CADRS_LAYER_ADDR_LEN + SLH_DSA_CADRS_TREE_ADDR_LEN + \
+     SLH_DSA_CADRS_TYPE_LEN + SLH_DSA_CADRS_HASH_ADDR_OFFSET)
+
+// In ChainSha256 function:
+PUT_UINT32_BE(start + i, (uint8_t *)sha256Ctx->block, SLH_DSA_CADRS_HASH_ADDR_BYTE_OFFSET);
+```
+
+---

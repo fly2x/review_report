@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Code Review: openHiTLS/openhitls#1112 - CODEX</title>
+    <style>
+        :root { --critical: #dc2626; --high: #ea580c; --medium: #ca8a04; --low: #65a30d; }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: system-ui, sans-serif; background: #f8fafc; color: #1e293b; padding: 2rem; line-height: 1.6; }
+        .container { max-width: 900px; margin: 0 auto; }
+        h1 { font-size: 1.5rem; margin-bottom: 0.5rem; }
+        .subtitle { color: #64748b; margin-bottom: 2rem; }
+        .section { margin-bottom: 2rem; }
+        .section-title { font-size: 1.1rem; font-weight: 600; padding: 0.5rem 1rem; border-radius: 0.5rem 0.5rem 0 0; color: white; }
+        .section-title.critical { background: var(--critical); }
+        .section-title.high { background: var(--high); }
+        .section-title.medium { background: var(--medium); }
+        .section-title.low { background: var(--low); }
+        .issue { background: white; border: 1px solid #e2e8f0; border-top: none; padding: 1rem; }
+        .issue:last-child { border-radius: 0 0 0.5rem 0.5rem; }
+        .issue-title { font-weight: 600; margin-bottom: 0.25rem; }
+        .issue-location { font-family: monospace; font-size: 0.875rem; color: #64748b; margin-bottom: 0.75rem; }
+        .issue-source { font-size: 0.75rem; color: #94a3b8; margin-top: 0.5rem; }
+        pre { background: #1e293b; color: #e2e8f0; padding: 0.75rem; border-radius: 0.375rem; overflow-x: auto; font-size: 0.875rem; margin: 0.5rem 0; }
+        .problem { margin: 0.75rem 0; }
+        .fix-label { font-weight: 600; margin-top: 0.75rem; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Code Review: openHiTLS/openhitls#1112 - CODEX</h1>
+        <div class="subtitle"></div>
+<div class="section"><div class="section-title high">High</div>
+<div class="issue">
+                <div class="issue-title">New SHA2 cache is initialized only for `Set*KeyEx`</div>
+                <div class="issue-location">crypto/slh_dsa/src/slh_dsa.c:1038-1060</div>
+                <pre>(void)memcpy_s(ctx-&gt;prvKey.pub.seed, ctx-&gt;para.n, pub.pubSeed-&gt;value, ctx-&gt;para.n);
+(void)memcpy_s(ctx-&gt;prvKey.pub.root, ctx-&gt;para.n, pub.pubRoot-&gt;value, ctx-&gt;para.n);
+ret = InitMdCtx(ctx);
+if (ret != CRYPT_SUCCESS) {
+    BSL_ERR_PUSH_ERROR(ret);
+    return ret;
+}
+ctx-&gt;keyType |= SLH_DSA_PUBKEY;
+...
+(void)memcpy_s(ctx-&gt;prvKey.seed, sizeof(ctx-&gt;prvKey.seed), prv.prvSeed-&gt;value, ctx-&gt;para.n);
+(void)memcpy_s(ctx-&gt;prvKey.prf, sizeof(ctx-&gt;prvKey.prf), prv.prvPrf-&gt;value, ctx-&gt;para.n);
+(void)memcpy_s(ctx-&gt;prvKey.pub.seed, sizeof(ctx-&gt;prvKey.pub.seed), prv.pubSeed-&gt;value, ctx-&gt;para.n);
+(void)memcpy_s(ctx-&gt;prvKey.pub.root, sizeof(ctx-&gt;prvKey.pub.root), prv.pubRoot-&gt;value, ctx-&gt;para.n);
+ret = InitMdCtx(ctx);
+if (ret != CRYPT_SUCCESS) {
+    BSL_ERR_PUSH_ERROR(ret);
+    return ret;
+}
+ctx-&gt;keyType |= SLH_DSA_PRVKEY;</pre>
+                <div class="problem"><strong>Issue:</strong> The PR makes the SHA2-compressed SLH-DSA hash path depend on `ctx->sha256MdCtx`/`ctx->sha512MdCtx`, but these changed lines only initialize that cache in `CRYPT_SLH_DSA_SetPubKeyEx` and `CRYPT_SLH_DSA_SetPrvKeyEx`. The legacy public APIs `CRYPT_SLH_DSA_SetPubKey` and `CRYPT_SLH_DSA_SetPrvKey` were left unchanged, so importing a SHA2-based key through those APIs now leaves the context unusable for sign/verify/pair-check on the first cached hash operation.</div>
+                <div class="fix-label">Fix:</div><pre>int32_t CRYPT_SLH_DSA_SetPubKey(CryptSlhDsaCtx *ctx, const CRYPT_SlhDsaPub *pub)
+{
+    int32_t ret = PubKeyCheck(ctx, pub);
+    if (ret != CRYPT_SUCCESS) {
+        BSL_ERR_PUSH_ERROR(ret);
+        return ret;
+    }
+    (void)memcpy_s(ctx-&gt;prvKey.pub.seed, ctx-&gt;para.n, pub-&gt;seed, ctx-&gt;para.n);
+    (void)memcpy_s(ctx-&gt;prvKey.pub.root, ctx-&gt;para.n, pub-&gt;root, ctx-&gt;para.n);
+
+    ret = InitMdCtx(ctx);
+    if (ret != CRYPT_SUCCESS) {
+        BSL_ERR_PUSH_ERROR(ret);
+        return ret;
+    }
+
+    ctx-&gt;keyType |= SLH_DSA_PUBKEY;
+    return CRYPT_SUCCESS;
+}
+
+int32_t CRYPT_SLH_DSA_SetPrvKey(CryptSlhDsaCtx *ctx, const CRYPT_SlhDsaPrv *prv)
+{
+    int32_t ret = PrvKeyCheck(ctx, prv);
+    if (ret != CRYPT_SUCCESS) {
+        BSL_ERR_PUSH_ERROR(ret);
+        return ret;
+    }
+
+    (void)memcpy_s(ctx-&gt;prvKey.seed, sizeof(ctx-&gt;prvKey.seed), prv-&gt;seed, ctx-&gt;para.n);
+    (void)memcpy_s(ctx-&gt;prvKey.prf, sizeof(ctx-&gt;prvKey.prf), prv-&gt;prf, ctx-&gt;para.n);
+    (void)memcpy_s(ctx-&gt;prvKey.pub.seed, sizeof(ctx-&gt;prvKey.pub.seed), prv-&gt;pub.seed, ctx-&gt;para.n);
+    (void)memcpy_s(ctx-&gt;prvKey.pub.root, sizeof(ctx-&gt;prvKey.pub.root), prv-&gt;pub.root, ctx-&gt;para.n);
+
+    ret = InitMdCtx(ctx);
+    if (ret != CRYPT_SUCCESS) {
+        BSL_ERR_PUSH_ERROR(ret);
+        return ret;
+    }
+
+    ctx-&gt;keyType |= SLH_DSA_PRVKEY;
+    return CRYPT_SUCCESS;
+}</pre>
+                <div class="issue-source">Reviewer: codex</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">`DupCtx` can free the source hash cache on an earlier allocation failure</div>
+                <div class="issue-location">crypto/slh_dsa/src/slh_dsa.c:363-367</div>
+                <pre>if (ctx-&gt;addrand != NULL) {
+    newCtx-&gt;addrand = BSL_SAL_Dump(ctx-&gt;addrand, ctx-&gt;addrandLen);
+    if (newCtx-&gt;addrand == NULL) {
+        CRYPT_SLH_DSA_FreeCtx(newCtx);
+        return NULL;
+    }
+}
+if (ctx-&gt;sha256MdCtx != NULL &amp;&amp; ctx-&gt;sha512MdCtx != NULL) {
+    DupMdCtx(newCtx, ctx);
+    if (newCtx-&gt;sha256MdCtx == NULL || newCtx-&gt;sha512MdCtx == NULL) {
+        CRYPT_SLH_DSA_FreeCtx(newCtx);
+        return NULL;
+    }
+}</pre>
+                <div class="problem"><strong>Issue:</strong> `memcpy_s(newCtx, ..., ctx, ...)` copies `sha256MdCtx` and `sha512MdCtx` from the source before any deep-copying happens. These changed lines duplicate the md contexts only after the `context` and `addrand` dumps succeed, so if either dump fails, `CRYPT_SLH_DSA_FreeCtx(newCtx)` runs while `newCtx->sha*MdCtx` still alias the source object. That frees the original context's cache and turns the source into a dangling-pointer / double-free hazard.</div>
+                <div class="fix-label">Fix:</div><pre>(void)memcpy_s(newCtx, sizeof(CryptSlhDsaCtx), ctx, sizeof(CryptSlhDsaCtx));
+newCtx-&gt;context = NULL;
+newCtx-&gt;addrand = NULL;
+newCtx-&gt;sha256MdCtx = NULL;
+newCtx-&gt;sha512MdCtx = NULL;
+
+if (ctx-&gt;sha256MdCtx != NULL &amp;&amp; ctx-&gt;sha512MdCtx != NULL) {
+    DupMdCtx(newCtx, ctx);
+    if (newCtx-&gt;sha256MdCtx == NULL || newCtx-&gt;sha512MdCtx == NULL) {
+        CRYPT_SLH_DSA_FreeCtx(newCtx);
+        return NULL;
+    }
+}
+
+if (ctx-&gt;context != NULL) {
+    newCtx-&gt;context = BSL_SAL_Dump(ctx-&gt;context, ctx-&gt;contextLen);
+    if (newCtx-&gt;context == NULL) {
+        CRYPT_SLH_DSA_FreeCtx(newCtx);
+        return NULL;
+    }
+}
+if (ctx-&gt;addrand != NULL) {
+    newCtx-&gt;addrand = BSL_SAL_Dump(ctx-&gt;addrand, ctx-&gt;addrandLen);
+    if (newCtx-&gt;addrand == NULL) {
+        CRYPT_SLH_DSA_FreeCtx(newCtx);
+        return NULL;
+    }
+}</pre>
+                <div class="issue-source">Reviewer: codex</div>
+            </div>
+</div>
+<div class="section"><div class="section-title low">Low</div>
+<div class="issue">
+                <div class="issue-title">Cached digest contexts leak when the ctx is switched from SHA2 to SHAKE</div>
+                <div class="issue-location">crypto/slh_dsa/src/slh_dsa_hash.c:130-153</div>
+                <pre>} else {
+        ctx-&gt;sha256MdCtx = NULL;
+        ctx-&gt;sha512MdCtx = NULL;
+    }
+    return ret;
+}
+
+void FreeMdCtx(CryptSlhDsaCtx *ctx)
+{
+    if (ctx-&gt;para.isCompressed) {
+        const EAL_MdMethod *hashMethod256 = EAL_MdFindDefaultMethod(CRYPT_MD_SHA256);
+        const EAL_MdMethod *hashMethod512 = EAL_MdFindDefaultMethod(CRYPT_MD_SHA512);
+        hashMethod256-&gt;freeCtx(ctx-&gt;sha256MdCtx);
+        hashMethod512-&gt;freeCtx(ctx-&gt;sha512MdCtx);
+        ctx-&gt;sha256MdCtx = NULL;
+        ctx-&gt;sha512MdCtx = NULL;
+    }
+}</pre>
+                <div class="problem"><strong>Issue:</strong> Cache cleanup is tied to `ctx->para.isCompressed` instead of the actual ownership of `sha256MdCtx`/`sha512MdCtx`. If a caller reuses one context and changes the parameter ID from a SHA2 SLH-DSA variant to a SHAKE variant, the `else` branch just drops the pointers and `FreeMdCtx` stops freeing them because `isCompressed` is now false. Reconfiguring a context across algorithm families therefore leaks both cached md contexts.</div>
+                <div class="fix-label">Fix:</div><pre>int32_t InitMdCtx(CryptSlhDsaCtx *ctx)
+{
+    int32_t ret = CRYPT_SUCCESS;
+
+    FreeMdCtx(ctx);
+    if (!ctx-&gt;para.isCompressed) {
+        return CRYPT_SUCCESS;
+    }
+
+    uint32_t n = ctx-&gt;para.n;
+    uint8_t padding[SHA512_PADDING_LEN] = {0};
+    const CRYPT_ConstData hashData256[] = {{ctx-&gt;prvKey.pub.seed, n}, {padding, SHA256_PADDING_LEN - n}};
+    const EAL_MdMethod *hashMethod256 = EAL_MdFindDefaultMethod(CRYPT_MD_SHA256);
+    ret = CreateMdCtxAndUpdata(&amp;ctx-&gt;sha256MdCtx, hashMethod256, hashData256,
+                               sizeof(hashData256) / sizeof(hashData256[0]));
+    if (ret != CRYPT_SUCCESS) {
+        return ret;
+    }
+
+    const CRYPT_ConstData hashData512[] = {{ctx-&gt;prvKey.pub.seed, n}, {padding, SHA512_PADDING_LEN - n}};
+    const EAL_MdMethod *hashMethod512 = EAL_MdFindDefaultMethod(CRYPT_MD_SHA512);
+    ret = CreateMdCtxAndUpdata(&amp;ctx-&gt;sha512MdCtx, hashMethod512, hashData512,
+                               sizeof(hashData512) / sizeof(hashData512[0]));
+    if (ret != CRYPT_SUCCESS) {
+        hashMethod256-&gt;freeCtx(ctx-&gt;sha256MdCtx);
+        ctx-&gt;sha256MdCtx = NULL;
+    }
+    return ret;
+}
+
+void FreeMdCtx(CryptSlhDsaCtx *ctx)
+{
+    const EAL_MdMethod *hashMethod256 = EAL_MdFindDefaultMethod(CRYPT_MD_SHA256);
+    const EAL_MdMethod *hashMethod512 = EAL_MdFindDefaultMethod(CRYPT_MD_SHA512);
+
+    if (ctx-&gt;sha256MdCtx != NULL) {
+        hashMethod256-&gt;freeCtx(ctx-&gt;sha256MdCtx);
+        ctx-&gt;sha256MdCtx = NULL;
+    }
+    if (ctx-&gt;sha512MdCtx != NULL) {
+        hashMethod512-&gt;freeCtx(ctx-&gt;sha512MdCtx);
+        ctx-&gt;sha512MdCtx = NULL;
+    }
+}</pre>
+                <div class="issue-source">Reviewer: codex</div>
+            </div>
+</div>
+</div></body></html>

@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Code Review: openHiTLS/openhitls#1112 - CLAUDE</title>
+    <style>
+        :root { --critical: #dc2626; --high: #ea580c; --medium: #ca8a04; --low: #65a30d; }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: system-ui, sans-serif; background: #f8fafc; color: #1e293b; padding: 2rem; line-height: 1.6; }
+        .container { max-width: 900px; margin: 0 auto; }
+        h1 { font-size: 1.5rem; margin-bottom: 0.5rem; }
+        .subtitle { color: #64748b; margin-bottom: 2rem; }
+        .section { margin-bottom: 2rem; }
+        .section-title { font-size: 1.1rem; font-weight: 600; padding: 0.5rem 1rem; border-radius: 0.5rem 0.5rem 0 0; color: white; }
+        .section-title.critical { background: var(--critical); }
+        .section-title.high { background: var(--high); }
+        .section-title.medium { background: var(--medium); }
+        .section-title.low { background: var(--low); }
+        .issue { background: white; border: 1px solid #e2e8f0; border-top: none; padding: 1rem; }
+        .issue:last-child { border-radius: 0 0 0.5rem 0.5rem; }
+        .issue-title { font-weight: 600; margin-bottom: 0.25rem; }
+        .issue-location { font-family: monospace; font-size: 0.875rem; color: #64748b; margin-bottom: 0.75rem; }
+        .issue-source { font-size: 0.75rem; color: #94a3b8; margin-top: 0.5rem; }
+        pre { background: #1e293b; color: #e2e8f0; padding: 0.75rem; border-radius: 0.375rem; overflow-x: auto; font-size: 0.875rem; margin: 0.5rem 0; }
+        .problem { margin: 0.75rem 0; }
+        .fix-label { font-weight: 600; margin-top: 0.75rem; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Code Review: openHiTLS/openhitls#1112 - CLAUDE</h1>
+        <div class="subtitle"></div>
+<div class="section"><div class="section-title high">High</div>
+<div class="issue">
+                <div class="issue-title">Memory leak in DupMdCtx on partial duplication failure</div>
+                <div class="issue-location">crypto/slh_dsa/src/slh_dsa_hash.c:137-143</div>
+                <pre>void DupMdCtx(CryptSlhDsaCtx *dest, CryptSlhDsaCtx *src)
+{
+    const EAL_MdMethod *hashMethod256 = EAL_MdFindDefaultMethod(CRYPT_MD_SHA256);
+    const EAL_MdMethod *hashMethod512 = EAL_MdFindDefaultMethod(CRYPT_MD_SHA512);
+    dest-&gt;sha256MdCtx = hashMethod256-&gt;dupCtx(src-&gt;sha256MdCtx);
+    dest-&gt;sha512MdCtx = hashMethod512-&gt;dupCtx(src-&gt;sha512MdCtx);
+}</pre>
+                <div class="problem"><strong>Issue:</strong> If hashMethod256->dupCtx succeeds but hashMethod512->dupCtx fails, the first duplicated context (dest->sha256MdCtx) is leaked. The function does not clean up the partially duplicated state before returning.</div>
+                <div class="fix-label">Fix:</div><pre>void DupMdCtx(CryptSlhDsaCtx *dest, CryptSlhDsaCtx *src)
+{
+    const EAL_MdMethod *hashMethod256 = EAL_MdFindDefaultMethod(CRYPT_MD_SHA256);
+    const EAL_MdMethod *hashMethod512 = EAL_MdFindDefaultMethod(CRYPT_MD_SHA512);
+    dest-&gt;sha256MdCtx = hashMethod256-&gt;dupCtx(src-&gt;sha256MdCtx);
+    if (dest-&gt;sha256MdCtx == NULL) {
+        return; // Early return on first failure
+    }
+    dest-&gt;sha512MdCtx = hashMethod512-&gt;dupCtx(src-&gt;sha512MdCtx);
+    if (dest-&gt;sha512MdCtx == NULL) {
+        // Clean up the first context on second failure
+        hashMethod256-&gt;freeCtx(dest-&gt;sha256MdCtx);
+        dest-&gt;sha256MdCtx = NULL;
+    }
+}</pre>
+                <div class="issue-source">Reviewer: claude</div>
+            </div>
+</div>
+<div class="section"><div class="section-title medium">Medium</div>
+<div class="issue">
+                <div class="issue-title">FreeMdCtx calls freeCtx without NULL check</div>
+                <div class="issue-location">crypto/slh_dsa/src/slh_dsa_hash.c:145-155</div>
+                <pre>void FreeMdCtx(CryptSlhDsaCtx *ctx)
+{
+    if (ctx-&gt;para.isCompressed) {
+        const EAL_MdMethod *hashMethod256 = EAL_MdFindDefaultMethod(CRYPT_MD_SHA256);
+        const EAL_MdMethod *hashMethod512 = EAL_MdFindDefaultMethod(CRYPT_MD_SHA512);
+        hashMethod256-&gt;freeCtx(ctx-&gt;sha256MdCtx);
+        hashMethod512-&gt;freeCtx(ctx-&gt;sha512MdCtx);
+        ctx-&gt;sha256MdCtx = NULL;
+        ctx-&gt;sha512MdCtx = NULL;
+    }
+}</pre>
+                <div class="problem"><strong>Issue:</strong> The function calls hashMethod->freeCtx on ctx->sha256MdCtx and ctx->sha512MdCtx without checking if they are NULL first. While some implementations may handle NULL gracefully, it's not guaranteed by all hash method implementations.</div>
+                <div class="fix-label">Fix:</div><pre>void FreeMdCtx(CryptSlhDsaCtx *ctx)
+{
+    if (ctx-&gt;para.isCompressed) {
+        const EAL_MdMethod *hashMethod256 = EAL_MdFindDefaultMethod(CRYPT_MD_SHA256);
+        const EAL_MdMethod *hashMethod512 = EAL_MdFindDefaultMethod(CRYPT_MD_SHA512);
+        if (ctx-&gt;sha256MdCtx != NULL) {
+            hashMethod256-&gt;freeCtx(ctx-&gt;sha256MdCtx);
+            ctx-&gt;sha256MdCtx = NULL;
+        }
+        if (ctx-&gt;sha512MdCtx != NULL) {
+            hashMethod512-&gt;freeCtx(ctx-&gt;sha512MdCtx);
+            ctx-&gt;sha512MdCtx = NULL;
+        }
+    }
+}</pre>
+                <div class="issue-source">Reviewer: claude</div>
+            </div>
+</div>
+<div class="section"><div class="section-title low">Low</div>
+<div class="issue">
+                <div class="issue-title">Fragile context duplication condition in CRYPT_SLH_DSA_DupCtx</div>
+                <div class="issue-location">crypto/slh_dsa/src/slh_dsa.c:363-369</div>
+                <pre>if (ctx-&gt;sha256MdCtx != NULL &amp;&amp; ctx-&gt;sha512MdCtx != NULL) {
+        DupMdCtx(newCtx, ctx);
+        if (newCtx-&gt;sha256MdCtx == NULL || newCtx-&gt;sha512MdCtx == NULL) {
+            CRYPT_SLH_DSA_FreeCtx(newCtx);
+            return NULL;
+        }
+    }</pre>
+                <div class="problem"><strong>Issue:</strong> The condition `ctx->sha256MdCtx != NULL && ctx->sha512MdCtx != NULL` only triggers duplication when BOTH are non-NULL. While this should theoretically always be the case for compressed mode, if an inconsistent state occurs (one NULL, one non-NULL), the duplication is silently skipped. This could lead to the newCtx having uninitialized contexts while being used.</div>
+                <div class="fix-label">Fix:</div><pre>// In compressed mode, both contexts should be initialized together
+    // Use ctx-&gt;para.isCompressed to determine if duplication is needed
+    if (ctx-&gt;para.isCompressed) {
+        DupMdCtx(newCtx, ctx);
+        if (newCtx-&gt;sha256MdCtx == NULL || newCtx-&gt;sha512MdCtx == NULL) {
+            CRYPT_SLH_DSA_FreeCtx(newCtx);
+            return NULL;
+        }
+    }</pre>
+                <div class="issue-source">Reviewer: claude</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">Magic number 18 for hash address offset is fragile</div>
+                <div class="issue-location">crypto/slh_dsa/src/slh_dsa_hash.c:409</div>
+                <pre>PUT_UINT32_BE(start + i, (uint8_t *)sha256Ctx-&gt;block, 18); // 18 = layerAddrLen + treeAddrLen + typeLen + hashAddressOffset = 1 + 8 + 1 + 8</pre>
+                <div class="problem"><strong>Issue:</strong> The hardcoded offset 18 is used to write the hash address in the block buffer. While the comment explains the calculation (layerAddrLen + treeAddrLen + typeLen + hashAddressOffset = 1 + 8 + 1 + 8), this magic number is fragile and could break if the address structure changes. The offset should be derived from constants or calculated dynamically.</div>
+                <div class="fix-label">Fix:</div><pre>// Define compressed address layout constants
+#define SLH_DSA_CADRS_LAYER_ADDR_LEN   1
+#define SLH_DSA_CADRS_TREE_ADDR_LEN    8
+#define SLH_DSA_CADRS_TYPE_LEN         1
+#define SLH_DSA_CADRS_HASH_ADDR_OFFSET 8
+#define SLH_DSA_CADRS_HASH_ADDR_BYTE_OFFSET \
+    (SLH_DSA_CADRS_LAYER_ADDR_LEN + SLH_DSA_CADRS_TREE_ADDR_LEN + \
+     SLH_DSA_CADRS_TYPE_LEN + SLH_DSA_CADRS_HASH_ADDR_OFFSET)
+
+// In ChainSha256 function:
+        PUT_UINT32_BE(start + i, (uint8_t *)sha256Ctx-&gt;block, SLH_DSA_CADRS_HASH_ADDR_BYTE_OFFSET);</pre>
+                <div class="issue-source">Reviewer: claude</div>
+            </div>
+</div>
+</div></body></html>
