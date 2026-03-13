@@ -1,0 +1,22 @@
+[
+  {
+    "source": "claude",
+    "file": "docs/开发指南.md",
+    "line": "334-335",
+    "severity": "high",
+    "title": "Incorrect method names in documentation example",
+    "problem": "The documentation uses non-existent method names getSponsorPubKey() and getSponsorTmpPubKey(). The actual method names in KeyAgreementResult are getPublicKey() and getTmpPublicKey(). Code copied from this documentation will fail to compile.",
+    "code": "ECCPublicKey sponsorPubKey = sponsorResult.getSponsorPubKey();\nECCPublicKey sponsorTmpPubKey = sponsorResult.getSponsorTmpPubKey();\n...\nECCPublicKey responsePubKey = responseResult.getSponsorPubKey();\nECCPublicKey responseTmpPubKey = responseResult.getSponsorTmpPubKey();",
+    "fix": "ECCPublicKey sponsorPubKey = sponsorResult.getPublicKey();\nECCPublicKey sponsorTmpPubKey = sponsorResult.getTmpPublicKey();\n...\nECCPublicKey responsePubKey = responseResult.getPublicKey();\nECCPublicKey responseTmpPubKey = responseResult.getTmpPublicKey();"
+  },
+  {
+    "source": "claude",
+    "file": "sdf4j/src/main/java/org/openhitls/sdf4j/types/HybridSignature.java",
+    "line": "141-143",
+    "severity": "medium",
+    "title": "Missing validation in HybridSignature.setL()",
+    "problem": "The setL() method does not validate that the input value is non-negative or consistent with sigM.length. Similar methods in ECCCipher.setL() and HybridCipher.setL1() perform this validation to prevent invalid state.",
+    "code": "public void setL(int l) {\n        this.l = l;\n    }",
+    "fix": "public void setL(int l) {\n        if (l < 0) {\n            throw new IllegalArgumentException(\"Signature length cannot be negative\");\n        }\n        if (sigM != null && l > sigM.length) {\n            throw new IllegalArgumentException(\"Signature length cannot exceed data length\");\n        }\n        this.l = l;\n    }"
+  }
+]

@@ -1,0 +1,72 @@
+[
+  {
+    "source": "codex",
+    "file": "examples/src/test/java/org/openhitls/SM3ExampleTest.java",
+    "line": "29-41",
+    "severity": "high",
+    "title": "Renaming the example to *Test makes the default build require a live SDF environment",
+    "problem": "Renaming this class into Surefire’s default `*Test` pattern means `mvn test` now executes it automatically, but `setUp()` unconditionally loads the vendor library and opens a device. On any machine without a configured SDF library/device, the examples module fails instead of skipping. The same regression was introduced by the matching renames in `SM2ExampleTest` and `SM4ExampleTest`.",
+    "code": "public class SM3ExampleTest {\n\n    @Before\n    public void setUp() throws SDFException {\n        sdf = new SDF();\n        deviceHandle = sdf.SDF_OpenDevice();\n        sessionHandle = sdf.SDF_OpenSession(deviceHandle);\n    }",
+    "fix": "import org.junit.Assume;\n\npublic class SM3ExampleTest {\n\n    @Before\n    public void setUp() {\n        try {\n            sdf = new SDF();\n            deviceHandle = sdf.SDF_OpenDevice();\n            sessionHandle = sdf.SDF_OpenSession(deviceHandle);\n        } catch (UnsatisfiedLinkError | SDFException e) {\n            Assume.assumeNoException(\"Requires configured SDF library and device\", e);\n        }\n    }"
+  },
+  {
+    "source": "codex",
+    "file": "examples/src/test/java/org/openhitls/SM4ExampleTest.java",
+    "line": "65-78",
+    "severity": "medium",
+    "title": "tearDown releases KEK access even when setUp never acquired it",
+    "problem": "JUnit runs `@After` even when `@Before` fails. If `SDF_GetKEKAccessRight()` or `SDF_GenerateKeyWithKEK()` throws, `sessionHandle` is already non-zero but no KEK access right may have been granted. `tearDown()` then calls `SDF_ReleaseKEKAccessRight()` unconditionally and can replace the original setup failure with a secondary cleanup error.",
+    "code": "sdf.SDF_GetKEKAccessRight(sessionHandle, KEY_INDEX, KEY_PASSWORD);\nKeyEncryptionResult result = sdf.SDF_GenerateKeyWithKEK(sessionHandle, SM4_KEY_BITS, AlgorithmID.SGD_SM4_ECB, KEY_INDEX);\necbKeyHandle = result.getKeyHandle();\n\n...\n\nif (sessionHandle != 0) {\n    sdf.SDF_ReleaseKEKAccessRight(sessionHandle, KEY_INDEX);\n    sdf.SDF_CloseSession(sessionHandle);\n}",
+    "fix": "private boolean kekAccessGranted;\n\n@Before\npublic void setUp() throws SDFException {\n    sdf = new SDF();\n    deviceHandle = sdf.SDF_OpenDevice();\n    sessionHandle = sdf.SDF_OpenSession(deviceHandle);\n    loadConfig();\n\n    sdf.SDF_GetKEKAccessRight(sessionHandle, KEY_INDEX, KEY_PASSWORD);\n    kekAccessGranted = true;\n\n    KeyEncryptionResult result = sdf.SDF_GenerateKeyWithKEK(\n            sessionHandle, SM4_KEY_BITS, AlgorithmID.SGD_SM4_ECB, KEY_INDEX);\n    ecbKeyHandle = result.getKeyHandle();\n}\n\n@After\npublic void tearDown() throws SDFException {\n    if (sdf != null) {\n        if (ecbKeyHandle != 0) {\n            sdf.SDF_DestroyKey(sessionHandle, ecbKeyHandle);\n        }\n        if (sessionHandle != 0) {\n            if (kekAccessGranted) {\n                sdf.SDF_ReleaseKEKAccessRight(sessionHandle, KEY_INDEX);\n            }\n            sdf.SDF_CloseSession(sessionHandle);\n        }\n        if (deviceHandle != 0) {\n            sdf.SDF_CloseDevice(deviceHandle);\n        }\n    }\n}"
+  },
+  {
+    "source": "codex",
+    "file": "docs/开发指南.md",
+    "line": "68-87",
+    "severity": "medium",
+    "title": "Quick-start library-loading instructions use unsupported keys and the wrong path format",
+    "problem": "The loader requires both a library name and a directory path (`sdf4j.library.name` + `sdf4j.library.path`, `library.name` + `library.path`, or `SDF_LIBRARY_NAME` + `SDF_LIBRARY_PATH`). The new guide shows only a full `.so` path and even uses `library.search.paths`, which the implementation never reads. Following these snippets will produce `UnsatisfiedLinkError`.",
+    "code": "#### 方式一：Java系统属性\njava -Dsdf4j.library.path=/usr/lib/libsdfx.so -jar your-app.jar\n\n#### 方式二：配置文件\nlibrary.name=sdfx\nlibrary.search.paths=/usr/lib:/usr/local/lib\n\n#### 方式三：环境变量\nexport SDF_LIBRARY_PATH=/usr/lib/libsdfx.so",
+    "fix": "#### 方式一：Java系统属性\njava -Dsdf4j.library.name=sdfx -Dsdf4j.library.path=/usr/lib -jar your-app.jar\n\n#### 方式二：配置文件\nlibrary.name=sdfx\nlibrary.path=/usr/lib\n\n#### 方式三：环境变量\nexport SDF_LIBRARY_NAME=sdfx\nexport SDF_LIBRARY_PATH=/usr/lib"
+  },
+  {
+    "source": "codex",
+    "file": "docs/测试指南.md",
+    "line": "183-190",
+    "severity": "medium",
+    "title": "Capability detector example cannot compile because the block lambdas resolve to Runnable",
+    "problem": "These block lambdas do not return a value, so overload resolution picks `checkFunction(Runnable)`. `Runnable.run()` cannot throw `SDFException`, which makes the `Hash_SM3` and `HMAC` examples uncompilable, and the `catch (SDFException e)` inside the `Runnable` overload is itself invalid Java.",
+    "code": "capabilities.put(\"Hash_SM3\", checkFunction(() -> {\n    sdf.SDF_HashInit(sessionHandle, AlgorithmID.SGD_SM3, null, null);\n    sdf.SDF_HashUpdate(sessionHandle, new byte[16]);\n    sdf.SDF_HashFinal(sessionHandle);\n}));\ncapabilities.put(\"HMAC\", checkFunction(() -> {\n    sdf.SDF_HMACInit(sessionHandle, 0, AlgorithmID.SGD_SM3);\n}));\n\n...\n\nprivate boolean checkFunction(Runnable func) {\n    try {\n        func.run();\n        return true;\n    } catch (SDFException e) {\n        return e.getErrorCode() != ErrorCode.SDR_NOTSUPPORT;\n    } catch (Exception e) {\n        return false;\n    }\n}",
+    "fix": "capabilities.put(\"Hash_SM3\", checkFunction(() -> {\n    sdf.SDF_HashInit(sessionHandle, AlgorithmID.SGD_SM3, null, null);\n    sdf.SDF_HashUpdate(sessionHandle, new byte[16]);\n    sdf.SDF_HashFinal(sessionHandle);\n    return null;\n}));\ncapabilities.put(\"HMAC\", checkFunction(() -> {\n    sdf.SDF_HMACInit(sessionHandle, 0, AlgorithmID.SGD_SM3);\n    return null;\n}));\n\nprivate boolean checkFunction(Callable<?> func) {\n    try {\n        func.call();\n        return true;\n    } catch (SDFException e) {\n        return e.getErrorCode() != ErrorCode.SDR_NOTSUPPORT;\n    } catch (Exception e) {\n        return false;\n    }\n}"
+  },
+  {
+    "source": "codex",
+    "file": "docs/开发指南.md",
+    "line": "334-348",
+    "severity": "low",
+    "title": "Key agreement example calls getters that do not exist",
+    "problem": "`KeyAgreementResult` only exposes `getPublicKey()` and `getTmpPublicKey()`. The new guide uses `getSponsorPubKey()` and `getSponsorTmpPubKey()`, so the sample code does not compile.",
+    "code": "ECCPublicKey sponsorPubKey = sponsorResult.getSponsorPubKey();\nECCPublicKey sponsorTmpPubKey = sponsorResult.getSponsorTmpPubKey();\n\n...\n\nECCPublicKey responsePubKey = responseResult.getSponsorPubKey();\nECCPublicKey responseTmpPubKey = responseResult.getSponsorTmpPubKey();",
+    "fix": "ECCPublicKey sponsorPubKey = sponsorResult.getPublicKey();\nECCPublicKey sponsorTmpPubKey = sponsorResult.getTmpPublicKey();\n\n...\n\nECCPublicKey responsePubKey = responseResult.getPublicKey();\nECCPublicKey responseTmpPubKey = responseResult.getTmpPublicKey();"
+  },
+  {
+    "source": "codex",
+    "file": "docs/测试指南.md",
+    "line": "196-198",
+    "severity": "low",
+    "title": "Capability detector uses a non-existent SDF_GenerateAgreementDataWithECC overload",
+    "problem": "`SDF_GenerateAgreementDataWithECC` takes four arguments, but the guide calls it with six. Anyone copying the sample gets a compile error instead of a usable detector.",
+    "code": "capabilities.put(\"KeyAgreement_ECC\", checkFunction(() ->\n    sdf.SDF_GenerateAgreementDataWithECC(sessionHandle, 1, 128,\n        new byte[16], null, null)));",
+    "fix": "capabilities.put(\"KeyAgreement_ECC\", checkFunction(() ->\n    sdf.SDF_GenerateAgreementDataWithECC(sessionHandle, 1, 128, new byte[16])));"
+  },
+  {
+    "source": "codex",
+    "file": "script/build_with_simulator.sh",
+    "line": "64-68",
+    "severity": "low",
+    "title": "Javadoc failures are ignored while the script still reports success",
+    "problem": "The new `mvn javadoc:javadoc` step is not checked for failure. If Javadoc generation breaks, the script still prints `SDF4J built successfully.` and exits as if the full build passed.",
+    "code": "mvn clean package \\\n    -Dsdf.library.name=$SDFX_LIB_NAME \\\n    -Dsdf.library.path=$SDFX_BUILD_DIR || exit 1\nmvn javadoc:javadoc -pl sdf4j\necho \"SDF4J built successfully.\"",
+    "fix": "mvn clean package \\\n    -Dsdf.library.name=$SDFX_LIB_NAME \\\n    -Dsdf.library.path=$SDFX_BUILD_DIR || exit 1\nmvn javadoc:javadoc -pl sdf4j || exit 1\necho \"SDF4J built successfully.\""
+  }
+]

@@ -1,0 +1,305 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Final Report: openHiTLS/sdf4j#24</title>
+    <style>
+        :root { --critical: #dc2626; --high: #ea580c; --medium: #ca8a04; --low: #65a30d;
+                 --trusted: #059669; --likely: #0284c7; --evaluate: #7c3aed; }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: system-ui, sans-serif; background: #f8fafc; color: #1e293b; padding: 2rem; line-height: 1.6; }
+        .container { max-width: 900px; margin: 0 auto; }
+        h1 { font-size: 1.75rem; margin-bottom: 0.5rem; }
+        .subtitle { color: #64748b; margin-bottom: 1rem; }
+        .stats { display: flex; gap: 1rem; margin-bottom: 2rem; flex-wrap: wrap; }
+        .stat { background: white; border: 1px solid #e2e8f0; border-radius: 0.5rem; padding: 1rem; min-width: 100px; text-align: center; }
+        .stat-value { font-size: 1.5rem; font-weight: 700; }
+        .stat-label { font-size: 0.875rem; color: #64748b; }
+        .stat.critical .stat-value { color: var(--critical); }
+        .stat.high .stat-value { color: var(--high); }
+        .stat.medium .stat-value { color: var(--medium); }
+        .stat.low .stat-value { color: var(--low); }
+        .reviewers { background: #e0e7ff; color: #3730a3; padding: 0.5rem 1rem; border-radius: 0.5rem; margin-bottom: 2rem; }
+        .section { margin-bottom: 2rem; }
+        .section-title { font-size: 1.1rem; font-weight: 600; padding: 0.5rem 1rem; border-radius: 0.5rem 0.5rem 0 0; color: white; }
+        .section-title.critical { background: var(--critical); }
+        .section-title.high { background: var(--high); }
+        .section-title.medium { background: var(--medium); }
+        .section-title.low { background: var(--low); }
+        .issue { background: white; border: 1px solid #e2e8f0; border-top: none; padding: 1rem; }
+        .issue:last-child { border-radius: 0 0 0.5rem 0.5rem; }
+        .issue-title { font-weight: 600; margin-bottom: 0.25rem; }
+        .issue-location { font-family: monospace; font-size: 0.875rem; color: #64748b; margin-bottom: 0.5rem; }
+        .issue-meta { font-size: 0.75rem; margin-bottom: 0.75rem; display: flex; gap: 0.75rem; align-items: center; }
+        .issue-meta .reviewers { background: #f1f5f9; color: #475569; padding: 0.25rem 0.5rem; border-radius: 0.25rem; margin: 0; }
+        .confidence-badge { padding: 0.25rem 0.5rem; border-radius: 0.25rem; font-weight: 500; }
+        .confidence-badge.trusted { background: #d1fae5; color: #065f46; }
+        .confidence-badge.likely { background: #dbeafe; color: #1e40af; }
+        .confidence-badge.evaluate { background: #ede9fe; color: #5b21b6; }
+        pre { background: #1e293b; color: #e2e8f0; padding: 0.75rem; border-radius: 0.375rem; overflow-x: auto; font-size: 0.875rem; margin: 0.5rem 0; }
+        .problem { margin: 0.75rem 0; }
+        .fix-label { font-weight: 600; margin-top: 0.75rem; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Final Code Review Report</h1>
+        <div class="subtitle">openHiTLS/sdf4j - PR #24</div>
+        <p style="margin-bottom: 1rem;"></p>
+
+        <div class="stats">
+            <div class="stat"><div class="stat-value">8</div><div class="stat-label">Total</div></div>
+            <div class="stat critical"><div class="stat-value">0</div><div class="stat-label">Critical</div></div>
+            <div class="stat high"><div class="stat-value">2</div><div class="stat-label">High</div></div>
+            <div class="stat medium"><div class="stat-value">4</div><div class="stat-label">Medium</div></div>
+            <div class="stat low"><div class="stat-value">2</div><div class="stat-label">Low</div></div>
+        </div>
+
+        <div class="reviewers">Reviewers: claude, codex</div>
+<div class="section"><div class="section-title high">High</div>
+<div class="issue">
+                <div class="issue-title">Key agreement example uses non-existent getter methods</div>
+                <div class="issue-location">docs/开发指南.md:334-348</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CLAUDE, CODEX</span>
+                    <span class="confidence-badge trusted">置信度: 可信</span>
+                </div>
+                <pre>ECCPublicKey sponsorPubKey = sponsorResult.getSponsorPubKey();
+ECCPublicKey sponsorTmpPubKey = sponsorResult.getSponsorTmpPubKey();
+
+...
+
+ECCPublicKey responsePubKey = responseResult.getSponsorPubKey();
+ECCPublicKey responseTmpPubKey = responseResult.getSponsorTmpPubKey();</pre>
+                <div class="problem"><strong>Issue:</strong> The documentation uses incorrect method names getSponsorPubKey() and getSponsorTmpPubKey() for KeyAgreementResult. The actual method names are getPublicKey() and getTmpPublicKey(). Code copied from this documentation will fail to compile.</div>
+                <div class="fix-label">Fix:</div><pre>ECCPublicKey sponsorPubKey = sponsorResult.getPublicKey();
+ECCPublicKey sponsorTmpPubKey = sponsorResult.getTmpPublicKey();
+
+...
+
+ECCPublicKey responsePubKey = responseResult.getPublicKey();
+ECCPublicKey responseTmpPubKey = responseResult.getTmpPublicKey();</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">Tests renamed to *Test pattern run without SDF device</div>
+                <div class="issue-location">examples/src/test/java/org/openhitls/SM3ExampleTest.java:29-42</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CODEX</span>
+                    <span class="confidence-badge trusted">置信度: 可信</span>
+                </div>
+                <pre>@Before
+public void setUp() throws SDFException {
+    sdf = new SDF();
+    deviceHandle = sdf.SDF_OpenDevice();
+    sessionHandle = sdf.SDF_OpenSession(deviceHandle);
+}</pre>
+                <div class="problem"><strong>Issue:</strong> Renaming SM3Example.java to SM3ExampleTest.java (and similarly for SM2ExampleTest.java and SM4ExampleTest.java) causes mvn test to execute them automatically. But setUp() unconditionally loads the vendor library and opens a device. On machines without a configured SDF library/device, the examples module fails instead of skipping gracefully.</div>
+                <div class="fix-label">Fix:</div><pre>import org.junit.Assume;
+
+@Before
+public void setUp() {
+    try {
+        sdf = new SDF();
+        deviceHandle = sdf.SDF_OpenDevice();
+        sessionHandle = sdf.SDF_OpenSession(deviceHandle);
+    } catch (UnsatisfiedLinkError | SDFException e) {
+        Assume.assumeNoException("Requires configured SDF library and device", e);
+    }
+}</pre>
+            </div>
+</div>
+<div class="section"><div class="section-title medium">Medium</div>
+<div class="issue">
+                <div class="issue-title">Quick-start library configuration uses incorrect property names</div>
+                <div class="issue-location">docs/开发指南.md:68-87</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CODEX</span>
+                    <span class="confidence-badge trusted">置信度: 可信</span>
+                </div>
+                <pre>#### 方式一：Java系统属性
+java -Dsdf4j.library.path=/usr/lib/libsdfx.so -jar your-app.jar
+
+#### 方式二：配置文件
+library.name=sdfx
+library.search.paths=/usr/lib:/usr/local/lib
+
+#### 方式三：环境变量
+export SDF_LIBRARY_PATH=/usr/lib/libsdfx.so</pre>
+                <div class="problem"><strong>Issue:</strong> The documentation shows incorrect configuration for loading the SDF library: (1) Shows using a full .so path with -Dsdf4j.library.path, but the loader requires both library.name AND library.path as separate values; (2) Shows library.search.paths which the implementation never reads. Following these examples will result in UnsatisfiedLinkError.</div>
+                <div class="fix-label">Fix:</div><pre>#### 方式一：Java系统属性
+java -Dsdf4j.library.name=sdfx -Dsdf4j.library.path=/usr/lib -jar your-app.jar
+
+#### 方式二：配置文件
+library.name=sdfx
+library.path=/usr/lib
+
+#### 方式三：环境变量
+export SDF_LIBRARY_NAME=sdfx
+export SDF_LIBRARY_PATH=/usr/lib</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">Capability detector example uses wrong lambda type</div>
+                <div class="issue-location">docs/测试指南.md:183-190</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CODEX</span>
+                    <span class="confidence-badge trusted">置信度: 可信</span>
+                </div>
+                <pre>capabilities.put("Hash_SM3", checkFunction(() -&gt; {
+    sdf.SDF_HashInit(sessionHandle, AlgorithmID.SGD_SM3, null, null);
+    sdf.SDF_HashUpdate(sessionHandle, new byte[16]);
+    sdf.SDF_HashFinal(sessionHandle);
+}));
+capabilities.put("HMAC", checkFunction(() -&gt; {
+    sdf.SDF_HMACInit(sessionHandle, 0, AlgorithmID.SGD_SM3);
+}));
+
+private boolean checkFunction(Runnable func) {
+    try {
+        func.run();
+        return true;
+    } catch (SDFException e) {
+        return e.getErrorCode() != ErrorCode.SDR_NOTSUPPORT;
+    } catch (Exception e) {
+        return false;
+    }
+}</pre>
+                <div class="problem"><strong>Issue:</strong> The block lambdas in checkFunction() calls do not return values, so overload resolution picks checkFunction(Runnable) instead of checkFunction(Callable<?>). But Runnable.run() cannot throw SDFException, making the example uncompilable.</div>
+                <div class="fix-label">Fix:</div><pre>capabilities.put("Hash_SM3", checkFunction(() -&gt; {
+    sdf.SDF_HashInit(sessionHandle, AlgorithmID.SGD_SM3, null, null);
+    sdf.SDF_HashUpdate(sessionHandle, new byte[16]);
+    sdf.SDF_HashFinal(sessionHandle);
+    return null;
+}));
+capabilities.put("HMAC", checkFunction(() -&gt; {
+    sdf.SDF_HMACInit(sessionHandle, 0, AlgorithmID.SGD_SM3);
+    return null;
+}));
+
+private boolean checkFunction(Callable&lt;?&gt; func) {
+    try {
+        func.call();
+        return true;
+    } catch (SDFException e) {
+        return e.getErrorCode() != ErrorCode.SDR_NOTSUPPORT;
+    } catch (Exception e) {
+        return false;
+    }
+}</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">tearDown releases KEK access even when setUp never acquired it</div>
+                <div class="issue-location">examples/src/test/java/org/openhitls/SM4ExampleTest.java:65-78</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CODEX</span>
+                    <span class="confidence-badge trusted">置信度: 可信</span>
+                </div>
+                <pre>@After
+public void tearDown() throws SDFException {
+    if (sdf != null) {
+        if (ecbKeyHandle != 0) {
+            sdf.SDF_DestroyKey(sessionHandle, ecbKeyHandle);
+        }
+        if (sessionHandle != 0) {
+            sdf.SDF_ReleaseKEKAccessRight(sessionHandle, KEY_INDEX);
+            sdf.SDF_CloseSession(sessionHandle);
+        }
+        if (deviceHandle != 0) {
+            sdf.SDF_CloseDevice(deviceHandle);
+        }
+    }
+}</pre>
+                <div class="problem"><strong>Issue:</strong> JUnit runs @After even when @Before fails. If SDF_GetKEKAccessRight() or SDF_GenerateKeyWithKEK() throws during setUp(), sessionHandle is non-zero but no KEK access right was granted. tearDown() then calls SDF_ReleaseKEKAccessRight() unconditionally and can replace the original setup failure with a secondary cleanup error.</div>
+                <div class="fix-label">Fix:</div><pre>private boolean kekAccessGranted;
+
+@Before
+public void setUp() throws SDFException {
+    sdf = new SDF();
+    deviceHandle = sdf.SDF_OpenDevice();
+    sessionHandle = sdf.SDF_OpenSession(deviceHandle);
+    loadConfig();
+
+    sdf.SDF_GetKEKAccessRight(sessionHandle, KEY_INDEX, KEY_PASSWORD);
+    kekAccessGranted = true;
+
+    KeyEncryptionResult result = sdf.SDF_GenerateKeyWithKEK(
+            sessionHandle, SM4_KEY_BITS, AlgorithmID.SGD_SM4_ECB, KEY_INDEX);
+    ecbKeyHandle = result.getKeyHandle();
+}
+
+@After
+public void tearDown() throws SDFException {
+    if (sdf != null) {
+        if (ecbKeyHandle != 0) {
+            sdf.SDF_DestroyKey(sessionHandle, ecbKeyHandle);
+        }
+        if (sessionHandle != 0) {
+            if (kekAccessGranted) {
+                sdf.SDF_ReleaseKEKAccessRight(sessionHandle, KEY_INDEX);
+            }
+            sdf.SDF_CloseSession(sessionHandle);
+        }
+        if (deviceHandle != 0) {
+            sdf.SDF_CloseDevice(deviceHandle);
+        }
+    }
+}</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">Missing validation in HybridSignature.setL()</div>
+                <div class="issue-location">sdf4j/src/main/java/org/openhitls/sdf4j/types/HybridSignature.java:141-143</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CLAUDE</span>
+                    <span class="confidence-badge trusted">置信度: 可信</span>
+                </div>
+                <pre>public void setL(int l) {
+    this.l = l;
+}</pre>
+                <div class="problem"><strong>Issue:</strong> The setL() method does not validate that the input value is non-negative or consistent with sigM.length. Similar methods in ECCCipher.setL() and HybridCipher.setL1() perform this validation to prevent invalid state.</div>
+                <div class="fix-label">Fix:</div><pre>public void setL(int l) {
+    if (l &lt; 0) {
+        throw new IllegalArgumentException("Signature length cannot be negative");
+    }
+    if (sigM != null &amp;&amp; l &gt; sigM.length) {
+        throw new IllegalArgumentException("Signature length cannot exceed data length");
+    }
+    this.l = l;
+}</pre>
+            </div>
+</div>
+<div class="section"><div class="section-title low">Low</div>
+<div class="issue">
+                <div class="issue-title">Capability detector calls SDF_GenerateAgreementDataWithECC with wrong number of arguments</div>
+                <div class="issue-location">docs/测试指南.md:196-198</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CODEX</span>
+                    <span class="confidence-badge trusted">置信度: 可信</span>
+                </div>
+                <pre>capabilities.put("KeyAgreement_ECC", checkFunction(() -&gt;
+    sdf.SDF_GenerateAgreementDataWithECC(sessionHandle, 1, 128,
+        new byte[16], null, null)));</pre>
+                <div class="problem"><strong>Issue:</strong> SDF_GenerateAgreementDataWithECC takes 4 arguments (sessionHandle, keyIndex, keyBits, sponsorID), but the guide calls it with 6 arguments. Anyone copying the sample gets a compile error.</div>
+                <div class="fix-label">Fix:</div><pre>capabilities.put("KeyAgreement_ECC", checkFunction(() -&gt;
+    sdf.SDF_GenerateAgreementDataWithECC(sessionHandle, 1, 128, new byte[16])));</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">Javadoc generation failures are ignored</div>
+                <div class="issue-location">script/build_with_simulator.sh:64-68</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CODEX</span>
+                    <span class="confidence-badge trusted">置信度: 可信</span>
+                </div>
+                <pre>mvn clean package \
+    -Dsdf.library.name=$SDFX_LIB_NAME \
+    -Dsdf.library.path=$SDFX_BUILD_DIR || exit 1
+mvn javadoc:javadoc -pl sdf4j
+echo "SDF4J built successfully."</pre>
+                <div class="problem"><strong>Issue:</strong> The mvn javadoc:javadoc step is not checked for failure (no || exit 1). If Javadoc generation breaks, the script still prints "SDF4J built successfully." and exits with success status.</div>
+                <div class="fix-label">Fix:</div><pre>mvn clean package \
+    -Dsdf.library.name=$SDFX_LIB_NAME \
+    -Dsdf.library.path=$SDFX_BUILD_DIR || exit 1
+mvn javadoc:javadoc -pl sdf4j || exit 1
+echo "SDF4J built successfully."</pre>
+            </div>
+</div>
+</div></body></html>

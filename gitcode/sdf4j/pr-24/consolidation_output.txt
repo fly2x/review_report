@@ -1,0 +1,296 @@
+All issues have been verified. Now outputting the consolidated report:
+
+===ISSUE===
+FILE: docs/开发指南.md
+LINE: 334-348
+SEVERITY: high
+TITLE: Key agreement example uses non-existent getter methods
+REVIEWERS: CLAUDE, CODEX
+CONFIDENCE: trusted
+PROBLEM: The documentation uses incorrect method names getSponsorPubKey() and getSponsorTmpPubKey() for KeyAgreementResult. The actual method names are getPublicKey() and getTmpPublicKey(). Code copied from this documentation will fail to compile.
+CODE:
+```
+ECCPublicKey sponsorPubKey = sponsorResult.getSponsorPubKey();
+ECCPublicKey sponsorTmpPubKey = sponsorResult.getSponsorTmpPubKey();
+
+...
+
+ECCPublicKey responsePubKey = responseResult.getSponsorPubKey();
+ECCPublicKey responseTmpPubKey = responseResult.getSponsorTmpPubKey();
+```
+FIX:
+```
+ECCPublicKey sponsorPubKey = sponsorResult.getPublicKey();
+ECCPublicKey sponsorTmpPubKey = sponsorResult.getTmpPublicKey();
+
+...
+
+ECCPublicKey responsePubKey = responseResult.getPublicKey();
+ECCPublicKey responseTmpPubKey = responseResult.getTmpPublicKey();
+```
+===END===
+
+===ISSUE===
+FILE: docs/开发指南.md
+LINE: 68-87
+SEVERITY: medium
+TITLE: Quick-start library configuration uses incorrect property names
+REVIEWERS: CODEX
+CONFIDENCE: trusted
+PROBLEM: The documentation shows incorrect configuration for loading the SDF library: (1) Shows using a full .so path with -Dsdf4j.library.path, but the loader requires both library.name AND library.path as separate values; (2) Shows library.search.paths which the implementation never reads. Following these examples will result in UnsatisfiedLinkError.
+CODE:
+```
+#### 方式一：Java系统属性
+java -Dsdf4j.library.path=/usr/lib/libsdfx.so -jar your-app.jar
+
+#### 方式二：配置文件
+library.name=sdfx
+library.search.paths=/usr/lib:/usr/local/lib
+
+#### 方式三：环境变量
+export SDF_LIBRARY_PATH=/usr/lib/libsdfx.so
+```
+FIX:
+```
+#### 方式一：Java系统属性
+java -Dsdf4j.library.name=sdfx -Dsdf4j.library.path=/usr/lib -jar your-app.jar
+
+#### 方式二：配置文件
+library.name=sdfx
+library.path=/usr/lib
+
+#### 方式三：环境变量
+export SDF_LIBRARY_NAME=sdfx
+export SDF_LIBRARY_PATH=/usr/lib
+```
+===END===
+
+===ISSUE===
+FILE: docs/测试指南.md
+LINE: 183-190
+SEVERITY: medium
+TITLE: Capability detector example uses wrong lambda type
+REVIEWERS: CODEX
+CONFIDENCE: trusted
+PROBLEM: The block lambdas in checkFunction() calls do not return values, so overload resolution picks checkFunction(Runnable) instead of checkFunction(Callable<?>). But Runnable.run() cannot throw SDFException, making the example uncompilable.
+CODE:
+```
+capabilities.put("Hash_SM3", checkFunction(() -> {
+    sdf.SDF_HashInit(sessionHandle, AlgorithmID.SGD_SM3, null, null);
+    sdf.SDF_HashUpdate(sessionHandle, new byte[16]);
+    sdf.SDF_HashFinal(sessionHandle);
+}));
+capabilities.put("HMAC", checkFunction(() -> {
+    sdf.SDF_HMACInit(sessionHandle, 0, AlgorithmID.SGD_SM3);
+}));
+
+private boolean checkFunction(Runnable func) {
+    try {
+        func.run();
+        return true;
+    } catch (SDFException e) {
+        return e.getErrorCode() != ErrorCode.SDR_NOTSUPPORT;
+    } catch (Exception e) {
+        return false;
+    }
+}
+```
+FIX:
+```
+capabilities.put("Hash_SM3", checkFunction(() -> {
+    sdf.SDF_HashInit(sessionHandle, AlgorithmID.SGD_SM3, null, null);
+    sdf.SDF_HashUpdate(sessionHandle, new byte[16]);
+    sdf.SDF_HashFinal(sessionHandle);
+    return null;
+}));
+capabilities.put("HMAC", checkFunction(() -> {
+    sdf.SDF_HMACInit(sessionHandle, 0, AlgorithmID.SGD_SM3);
+    return null;
+}));
+
+private boolean checkFunction(Callable<?> func) {
+    try {
+        func.call();
+        return true;
+    } catch (SDFException e) {
+        return e.getErrorCode() != ErrorCode.SDR_NOTSUPPORT;
+    } catch (Exception e) {
+        return false;
+    }
+}
+```
+===END===
+
+===ISSUE===
+FILE: examples/src/test/java/org/openhitls/SM3ExampleTest.java
+LINE: 29-42
+SEVERITY: high
+TITLE: Tests renamed to *Test pattern run without SDF device
+REVIEWERS: CODEX
+CONFIDENCE: trusted
+PROBLEM: Renaming SM3Example.java to SM3ExampleTest.java (and similarly for SM2ExampleTest.java and SM4ExampleTest.java) causes mvn test to execute them automatically. But setUp() unconditionally loads the vendor library and opens a device. On machines without a configured SDF library/device, the examples module fails instead of skipping gracefully.
+CODE:
+```
+@Before
+public void setUp() throws SDFException {
+    sdf = new SDF();
+    deviceHandle = sdf.SDF_OpenDevice();
+    sessionHandle = sdf.SDF_OpenSession(deviceHandle);
+}
+```
+FIX:
+```
+import org.junit.Assume;
+
+@Before
+public void setUp() {
+    try {
+        sdf = new SDF();
+        deviceHandle = sdf.SDF_OpenDevice();
+        sessionHandle = sdf.SDF_OpenSession(deviceHandle);
+    } catch (UnsatisfiedLinkError | SDFException e) {
+        Assume.assumeNoException("Requires configured SDF library and device", e);
+    }
+}
+```
+===END===
+
+===ISSUE===
+FILE: examples/src/test/java/org/openhitls/SM4ExampleTest.java
+LINE: 65-78
+SEVERITY: medium
+TITLE: tearDown releases KEK access even when setUp never acquired it
+REVIEWERS: CODEX
+CONFIDENCE: trusted
+PROBLEM: JUnit runs @After even when @Before fails. If SDF_GetKEKAccessRight() or SDF_GenerateKeyWithKEK() throws during setUp(), sessionHandle is non-zero but no KEK access right was granted. tearDown() then calls SDF_ReleaseKEKAccessRight() unconditionally and can replace the original setup failure with a secondary cleanup error.
+CODE:
+```
+@After
+public void tearDown() throws SDFException {
+    if (sdf != null) {
+        if (ecbKeyHandle != 0) {
+            sdf.SDF_DestroyKey(sessionHandle, ecbKeyHandle);
+        }
+        if (sessionHandle != 0) {
+            sdf.SDF_ReleaseKEKAccessRight(sessionHandle, KEY_INDEX);
+            sdf.SDF_CloseSession(sessionHandle);
+        }
+        if (deviceHandle != 0) {
+            sdf.SDF_CloseDevice(deviceHandle);
+        }
+    }
+}
+```
+FIX:
+```
+private boolean kekAccessGranted;
+
+@Before
+public void setUp() throws SDFException {
+    sdf = new SDF();
+    deviceHandle = sdf.SDF_OpenDevice();
+    sessionHandle = sdf.SDF_OpenSession(deviceHandle);
+    loadConfig();
+
+    sdf.SDF_GetKEKAccessRight(sessionHandle, KEY_INDEX, KEY_PASSWORD);
+    kekAccessGranted = true;
+
+    KeyEncryptionResult result = sdf.SDF_GenerateKeyWithKEK(
+            sessionHandle, SM4_KEY_BITS, AlgorithmID.SGD_SM4_ECB, KEY_INDEX);
+    ecbKeyHandle = result.getKeyHandle();
+}
+
+@After
+public void tearDown() throws SDFException {
+    if (sdf != null) {
+        if (ecbKeyHandle != 0) {
+            sdf.SDF_DestroyKey(sessionHandle, ecbKeyHandle);
+        }
+        if (sessionHandle != 0) {
+            if (kekAccessGranted) {
+                sdf.SDF_ReleaseKEKAccessRight(sessionHandle, KEY_INDEX);
+            }
+            sdf.SDF_CloseSession(sessionHandle);
+        }
+        if (deviceHandle != 0) {
+            sdf.SDF_CloseDevice(deviceHandle);
+        }
+    }
+}
+```
+===END===
+
+===ISSUE===
+FILE: docs/测试指南.md
+LINE: 196-198
+SEVERITY: low
+TITLE: Capability detector calls SDF_GenerateAgreementDataWithECC with wrong number of arguments
+REVIEWERS: CODEX
+CONFIDENCE: trusted
+PROBLEM: SDF_GenerateAgreementDataWithECC takes 4 arguments (sessionHandle, keyIndex, keyBits, sponsorID), but the guide calls it with 6 arguments. Anyone copying the sample gets a compile error.
+CODE:
+```
+capabilities.put("KeyAgreement_ECC", checkFunction(() ->
+    sdf.SDF_GenerateAgreementDataWithECC(sessionHandle, 1, 128,
+        new byte[16], null, null)));
+```
+FIX:
+```
+capabilities.put("KeyAgreement_ECC", checkFunction(() ->
+    sdf.SDF_GenerateAgreementDataWithECC(sessionHandle, 1, 128, new byte[16])));
+```
+===END===
+
+===ISSUE===
+FILE: sdf4j/src/main/java/org/openhitls/sdf4j/types/HybridSignature.java
+LINE: 141-143
+SEVERITY: medium
+TITLE: Missing validation in HybridSignature.setL()
+REVIEWERS: CLAUDE
+CONFIDENCE: trusted
+PROBLEM: The setL() method does not validate that the input value is non-negative or consistent with sigM.length. Similar methods in ECCCipher.setL() and HybridCipher.setL1() perform this validation to prevent invalid state.
+CODE:
+```
+public void setL(int l) {
+    this.l = l;
+}
+```
+FIX:
+```
+public void setL(int l) {
+    if (l < 0) {
+        throw new IllegalArgumentException("Signature length cannot be negative");
+    }
+    if (sigM != null && l > sigM.length) {
+        throw new IllegalArgumentException("Signature length cannot exceed data length");
+    }
+    this.l = l;
+}
+```
+===END===
+
+===ISSUE===
+FILE: script/build_with_simulator.sh
+LINE: 64-68
+SEVERITY: low
+TITLE: Javadoc generation failures are ignored
+REVIEWERS: CODEX
+CONFIDENCE: trusted
+PROBLEM: The mvn javadoc:javadoc step is not checked for failure (no || exit 1). If Javadoc generation breaks, the script still prints "SDF4J built successfully." and exits with success status.
+CODE:
+```
+mvn clean package \
+    -Dsdf.library.name=$SDFX_LIB_NAME \
+    -Dsdf.library.path=$SDFX_BUILD_DIR || exit 1
+mvn javadoc:javadoc -pl sdf4j
+echo "SDF4J built successfully."
+```
+FIX:
+```
+mvn clean package \
+    -Dsdf.library.name=$SDFX_LIB_NAME \
+    -Dsdf.library.path=$SDFX_BUILD_DIR || exit 1
+mvn javadoc:javadoc -pl sdf4j || exit 1
+echo "SDF4J built successfully."
+```
+===END===

@@ -1,11 +1,215 @@
-Now I'll output the issues I found during my review:
+===ISSUE===
+FILE: sdf4j-jce/src/main/native/src/sdf_jce_sm4.c
+LINE: 365-371
+SEVERITY: high
+TITLE: Context freed before error check in sm4EncryptFinal
+PROBLEM: The context is freed (free(ctx)) before checking the return value of SDF_EncryptFinal. If the operation fails, the context is freed and then an exception is thrown. The Java side still has a reference to the freed context handle, and if cleanup code (like finalize() or explicit cleanup) calls sm4Free again, it will cause a double-free vulnerability.
+CODE:
+```
+    LONG ret = g_sdf_functions.SDF_EncryptFinal(ctx->session_handle, output, &outputLen);
+
+    ctx->initialized = 0;
+    free(ctx);
+
+    if (ret != SDR_OK) {
+        throw_jce_exception(env, (int)ret, "SM4 encrypt final failed");
+        return NULL;
+    }
+```
+FIX:
+```
+    LONG ret = g_sdf_functions.SDF_EncryptFinal(ctx->session_handle, output, &outputLen);
+
+    if (ret != SDR_OK) {
+        throw_jce_exception(env, (int)ret, "SM4 encrypt final failed");
+        free(ctx);
+        return NULL;
+    }
+
+    ctx->initialized = 0;
+    free(ctx);
+
+    jbyteArray result = (*env)->NewByteArray(env, (jsize)outputLen);
+    if (result != NULL && outputLen > 0) {
+        (*env)->SetByteArrayRegion(env, result, 0, (jsize)outputLen, (jbyte *)output);
+    }
+    return result;
+```
+===END===
+
+===ISSUE===
+FILE: sdf4j-jce/src/main/native/src/sdf_jce_sm4.c
+LINE: 522-528
+SEVERITY: high
+TITLE: Context freed before error check in sm4DecryptFinal
+PROBLEM: Same issue as sm4EncryptFinal. The context is freed before checking the return value, leading to potential double-free if error handling code attempts to clean up.
+CODE:
+```
+    LONG ret = g_sdf_functions.SDF_DecryptFinal(ctx->session_handle, output, &outputLen);
+
+    ctx->initialized = 0;
+    free(ctx);
+
+    if (ret != SDR_OK) {
+        throw_jce_exception(env, (int)ret, "SM4 decrypt final failed");
+        return NULL;
+    }
+```
+FIX:
+```
+    LONG ret = g_sdf_functions.SDF_DecryptFinal(ctx->session_handle, output, &outputLen);
+
+    if (ret != SDR_OK) {
+        throw_jce_exception(env, (int)ret, "SM4 decrypt final failed");
+        free(ctx);
+        return NULL;
+    }
+
+    ctx->initialized = 0;
+    free(ctx);
+
+    jbyteArray result = (*env)->NewByteArray(env, (jsize)outputLen);
+    if (result != NULL && outputLen > 0) {
+        (*env)->SetByteArrayRegion(env, result, 0, (jsize)outputLen, (jbyte *)output);
+    }
+    return result;
+```
+===END===
+
+===ISSUE===
+FILE: sdf4j-jce/src/main/java/org/openhitls/sdf4j/jce/digest/SM3MessageDigest.java
+LINE: 69-71
+SEVERITY: medium
+TITLE: Memory leak in SM3MessageDigest.engineDigest
+PROBLEM: After calling sm3Final, the native context (allocated by sm3Init with malloc) is never freed. The ctx is set to 0 but sm3Free is never called, causing a memory leak for each digest operation.
+CODE:
+```
+        byte[] result = SDFJceNative.sm3Final(ctx);
+        ctx = 0;
+        initialized = false;
+```
+FIX:
+```
+        byte[] result = SDFJceNative.sm3Final(ctx);
+        SDFJceNative.sm3Free(ctx);
+        ctx = 0;
+        initialized = false;
+```
+===END===
+
+===ISSUE===
+FILE: sdf4j-jce/src/main/java/org/openhitls/sdf4j/jce/key/SM2PrivateKey.java
+LINE: 33, 48
+SEVERITY: medium
+TITLE: SM2PrivateKey doesn't clone key bytes, allowing external modification
+PROBLEM: The constructor assigns the keyBytes reference directly without cloning. This allows external code to modify the internal key state. Additionally, getEncoded() returns the internal array directly, and destroy() zeros the array which affects the caller's original array if they passed it directly to the constructor.
+CODE:
+```
+    public SM2PrivateKey(byte[] keyBytes) {
+        if (keyBytes == null || keyBytes.length != 32) {
+            throw new IllegalArgumentException("Key must be 32 bytes");
+        }
+        this.keyBytes = keyBytes;
+    }
+
+    @Override
+    public byte[] getEncoded() {
+        return keyBytes;
+    }
+```
+FIX:
+```
+    public SM2PrivateKey(byte[] keyBytes) {
+        if (keyBytes == null || keyBytes.length != 32) {
+            throw new IllegalArgumentException("Key must be 32 bytes");
+        }
+        this.keyBytes = keyBytes.clone();
+    }
+
+    @Override
+    public byte[] getEncoded() {
+        return keyBytes.clone();
+    }
+```
+===END===
+
+===ISSUE===
+FILE: sdf4j-jce/src/main/native/src/sdf_jce_sm2.c
+LINE: 117-122
+SEVERITY: high
+TITLE: sm2Sign modifies caller's private key array
+PROBLEM: After memset(privKeyBytes, 0, ...) to clear sensitive data, ReleaseByteArrayElements is called with mode 0 which copies back to the original array. This writes zeros to the caller's original private key array, causing unexpected data corruption.
+CODE:
+```
+ERR:
+    /* Clear sensitive data in JNI buffer before releasing */
+    memset(privKeyBytes, 0, (size_t)privKeyLen);
+    (*env)->ReleaseByteArrayElements(env, privateKey, privKeyBytes, 0);
+```
+FIX:
+```
+ERR:
+    /* Clear sensitive data in JNI buffer before releasing */
+    memset(privKeyBytes, 0, (size_t)privKeyLen);
+    (*env)->ReleaseByteArrayElements(env, privateKey, privKeyBytes, JNI_ABORT);
+```
+===END===
+
+===ISSUE===
+FILE: sdf4j-jce/src/main/native/src/sdf_jce_sm2.c
+LINE: 264-269
+SEVERITY: high
+TITLE: sm2Decrypt modifies caller's private key array
+PROBLEM: Same issue as sm2Sign - zeros are written to the caller's original array due to using ReleaseByteArrayElements with mode 0 after memset.
+CODE:
+```
+ERR:
+    /* 清除敏感数据 */
+    memset(privKeyBytes, 0, (size_t)privKeyLen);
+    (*env)->ReleaseByteArrayElements(env, privateKey, privKeyBytes, 0);
+```
+FIX:
+```
+ERR:
+    /* 清除敏感数据 */
+    memset(privKeyBytes, 0, (size_t)privKeyLen);
+    (*env)->ReleaseByteArrayElements(env, privateKey, privKeyBytes, JNI_ABORT);
+```
+===END===
+
+===ISSUE===
+FILE: sdf4j-jce/src/main/native/src/sdf_jce_sm3.c
+LINE: 192-193
+SEVERITY: low
+TITLE: sm3Free doesn't clear sensitive data before freeing
+PROBLEM: The sm3Free function frees the context without clearing potentially sensitive data. For consistency with sm4Free which does memset before free, sm3Free should also clear the context.
+CODE:
+```
+    SM3Context *ctx = (SM3Context *)(uintptr_t)ctxHandle;
+    if (ctx == NULL) {
+        return;
+    }
+
+    free(ctx);
+```
+FIX:
+```
+    SM3Context *ctx = (SM3Context *)(uintptr_t)ctxHandle;
+    if (ctx == NULL) {
+        return;
+    }
+
+    memset(ctx, 0, sizeof(SM3Context));
+    free(ctx);
+```
+===END===
 
 ===ISSUE===
 FILE: sdf4j-jce/src/main/java/org/openhitls/sdf4j/jce/key/SM2PublicKey.java
-LINE: 62-65
-SEVERITY: high
-TITLE: SM2PublicKey.getX() and getY() return internal array directly
-PROBLEM: The getX() and getY() methods return the internal x and y arrays directly instead of defensive copies. This allows callers to modify the public key coordinates, which could lead to security vulnerabilities.
+LINE: 36-37, 47-48
+SEVERITY: low
+TITLE: SM2PublicKey getX/getY return internal arrays without cloning
+PROBLEM: The getX() and getY() methods return the internal byte arrays directly without cloning, allowing external modification of the key's internal state.
 CODE:
 ```
     public byte[] getX() {
@@ -29,222 +233,76 @@ FIX:
 ===END===
 
 ===ISSUE===
-FILE: sdf4j-jce/src/main/java/org/openhitls/sdf4j/jce/key/SM2PrivateKey.java
-LINE: 42-44
-SEVERITY: high
-TITLE: SM2PrivateKey.getEncoded() returns internal array directly
-PROBLEM: The getEncoded() method returns the internal keyBytes array directly instead of a defensive copy. This allows callers to modify the private key material.
+FILE: sdf4j-jce/src/main/java/org/openhitls/sdf4j/jce/spec/SM2ParameterSpec.java
+LINE: 81
+SEVERITY: low
+TITLE: SM2ParameterSpec.getUserId returns internal array without cloning
+PROBLEM: The getUserId() method returns the internal userId array directly without cloning, allowing external modification.
 CODE:
 ```
-    @Override
-    public byte[] getEncoded() {
-        return keyBytes;
+    public byte[] getUserId() {
+        return userId;
     }
 ```
 FIX:
 ```
-    @Override
-    public byte[] getEncoded() {
-        return keyBytes.clone();
+    public byte[] getUserId() {
+        return userId.clone();
     }
 ```
 ===END===
 
 ===ISSUE===
-FILE: sdf4j-jce/src/main/java/org/openhitls/sdf4j/jce/key/SM2PrivateKey.java
-LINE: 50-53
-SEVERITY: high
-TITLE: SM2PrivateKey.destroy() affects shared array reference
-PROBLEM: The destroy() method fills keyBytes with zeros. Since the constructor stores the reference directly (not a copy), this affects the original array passed to the constructor. If the caller still holds a reference to their original array, it will be zeroed. This is unexpected behavior that could cause issues.
-CODE:
-```
-    public SM2PrivateKey(byte[] keyBytes) {
-        if (keyBytes == null || keyBytes.length != 32) {
-            throw new IllegalArgumentException("Key must be 32 bytes");
-        }
-        this.keyBytes = keyBytes;
-    }
-
-    public void destroy() {
-        Arrays.fill(keyBytes, (byte) 0);
-    }
-```
-FIX:
-```
-    public SM2PrivateKey(byte[] keyBytes) {
-        if (keyBytes == null || keyBytes.length != 32) {
-            throw new IllegalArgumentException("Key must be 32 bytes");
-        }
-        this.keyBytes = keyBytes.clone();
-    }
-
-    public void destroy() {
-        Arrays.fill(keyBytes, (byte) 0);
-    }
-```
-===END===
-
-===ISSUE===
-FILE: sdf4j-jce/src/main/java/org/openhitls/sdf4j/jce/digest/SM3MessageDigest.java
-LINE: 38-43
-SEVERITY: medium
-TITLE: SM3MessageDigest.engineReset() may free already-freed context
-PROBLEM: The engineReset() method calls sm3Free(ctx) and sets ctx=0. However, engineDigest() already frees the context and sets ctx=0. If engineReset() is called after engineDigest() but the ctx variable wasn't set to 0 (e.g., due to an exception), it could lead to double-free or freeing a garbage pointer.
+FILE: sdf4j-jce/src/main/java/org/openhitls/sdf4j/jce/cipher/SM4Cipher.java
+LINE: 237
+SEVERITY: low
+TITLE: SM2Cipher.engineSetPadding accepts unsupported padding mode
+PROBLEM: The engineSetPadding method accepts "PKCS1Padding" but the comment says SM2 only supports NoPadding. This is misleading and the method should throw an exception for unsupported padding.
 CODE:
 ```
     @Override
-    protected void engineReset() {
-        if (ctx != 0) {
-            SDFJceNative.sm3Free(ctx);
-            ctx = 0;
+    protected void engineSetPadding(String padding) throws NoSuchPaddingException {
+        if (!"NoPadding".equalsIgnoreCase(padding) && !"PKCS1Padding".equalsIgnoreCase(padding)) {
+            throw new NoSuchPaddingException("SM2 only supports NoPadding");
         }
-        initialized = false;
     }
 ```
 FIX:
 ```
     @Override
-    protected void engineReset() {
-        if (ctx != 0) {
-            SDFJceNative.sm3Free(ctx);
-            ctx = 0;
+    protected void engineSetPadding(String padding) throws NoSuchPaddingException {
+        if (!"NoPadding".equalsIgnoreCase(padding)) {
+            throw new NoSuchPaddingException("SM2 only supports NoPadding");
         }
-        initialized = false;
     }
-```
-(Note: This requires ensuring native sm3Free handles NULL/0 gracefully, or adding additional state tracking)
-===END===
-
-===ISSUE===
-FILE: sdf4j-jce/src/main/native/src/sdf_jce_sm3.c
-LINE: 78-82
-SEVERITY: medium
-TITLE: SM3 streaming uses single global SDF session
-PROBLEM: The sm3Init function allocates a local SM3Context but the actual SM3 state is maintained in the global SDF session (g_session_handle). The ctx returned is just a flag, not a true independent SM3 context. This means multiple concurrent SM3 operations will interfere with each other.
-CODE:
-```
-    SM3Context *ctx = (SM3Context *)malloc(sizeof(SM3Context));
-    ...
-    LONG ret = g_sdf_functions.SDF_HashInit(g_session_handle, SGD_SM3, NULL, NULL, 0);
-```
-FIX:
-```
-(This is an architectural issue. The SDF API limitation means the JCE provider cannot support concurrent SM3 operations. Consider either:
-1. Documenting this limitation
-2. Using mutex locks to serialize SM3 operations
-3. Maintaining SM3 state in software instead of using SDF's streaming API)
 ```
 ===END===
 
 ===ISSUE===
 FILE: sdf4j-jce/src/main/native/src/sdf_jce_sm2.c
-LINE: 40-52
-SEVERITY: medium
-TITLE: sm2SignWithIndex accepts PIN parameter but doesn't use it
-PROBLEM: The sm2SignWithIndex function accepts a PIN parameter but never uses it for authorization. The comment says "can be null if already authorized", but there's no code to use the PIN if provided. This could lead to confusion where users expect the PIN to be used for authentication.
-CODE:
-```
-    /* 获取PIN */
-    char *pinStr = NULL;
-    int pinLen = 0;
-    if (pin != NULL) {
-        pinLen = (*env)->GetArrayLength(env, pin);
-        pinStr = (char *)malloc((size_t)(pinLen + 1));
-        ...
-        (*env)->GetByteArrayRegion(env, pin, 0, pinLen, (jbyte *)pinStr);
-        pinStr[pinLen] = '\0';
-    }
-
-    ECCSignature signature = {0};
-    ...
-
-    LONG ret = g_sdf_functions.SDF_InternalSign_ECC(g_session_handle, (ULONG)keyIndex, (BYTE *)dataBytes,
-        (ULONG)dataLen, &signature);
-```
-FIX:
-```
-(Either use the PIN for authorization via SDF_LoginUser or similar, or clarify in documentation that the PIN parameter is reserved for future use)
-```
-===END===
-
-===ISSUE===
-FILE: sdf4j-jce/src/main/java/org/openhitls/sdf4j/jce/NativeLoader.java
-LINE: 97-106
+LINE: 195-201
 SEVERITY: low
-TITLE: NativeLoader.loadLibraryFromResources() doesn't clean up old temp files
-PROBLEM: The method always re-extracts the library to temp directory. If the library version changes, old temp files remain. Additionally, if multiple JVMs use this simultaneously, there could be race conditions on the temp file.
+TITLE: sm2Verify doesn't check signature length
+PROBLEM: The sm2Verify function checks publicKeyX and publicKeyY lengths but doesn't validate the signature array length. A malformed signature could cause out-of-bounds read when accessing sigBytes.
 CODE:
 ```
-            // Extract the library (always re-extract to ensure using latest version)
-            Files.copy(is, tempLib, StandardCopyOption.REPLACE_EXISTING);
-
-            // Load the extracted library
-            System.load(tempLib.toAbsolutePath().toString());
-```
-FIX:
-```
-            // Extract the library, but only if newer or doesn't exist
-            if (!Files.exists(tempLib) || 
-                Files.getLastModifiedTime(Paths.get(resourcePath).toUri().toURL().openConnection()).toMillis() > 
-                Files.getLastModifiedTime(tempLib).toMillis()) {
-                Files.copy(is, tempLib, StandardCopyOption.REPLACE_EXISTING);
-            }
-
-            // Load the extracted library
-            System.load(tempLib.toAbsolutePath().toString());
-            
-            // Consider adding deleteOnExit() or scheduled cleanup
-            tempLib.toFile().deleteOnExit();
-```
-===END===
-
-===ISSUE===
-FILE: sdf4j-jce/src/main/native/src/sdf_jce_sm2.c
-LINE: 156-181
-SEVERITY: low
-TITLE: sm2Sign doesn't validate privateKey length before use
-PROBLEM: While there is a length check at line 71, if a malicious caller manages to bypass the Java layer checks, the native code directly copies 32 bytes without re-validating. This is defense-in-depth issue.
-CODE:
-```
-    jsize privKeyLen = (*env)->GetArrayLength(env, privateKey);
-    if (privKeyLen != SM2_KEY_BYTES) {
-        throw_exception(env, "java/lang/IllegalArgumentException", "Private key must be 32 bytes");
-        return NULL;
+    jsize xLen = (*env)->GetArrayLength(env, publicKeyX);
+    jsize yLen = (*env)->GetArrayLength(env, publicKeyY);
+    if (xLen != SM2_KEY_BYTES || yLen != SM2_KEY_BYTES) {
+        throw_exception(env, "java/lang/IllegalArgumentException",
+                        "SM2 public key/signature length is invalid");
+        return JNI_FALSE;
     }
 ```
 FIX:
 ```
-(Consider adding additional validation in native code as defense-in-depth, though current Java-layer check provides primary protection)
-```
-===END===
-
-===ISSUE===
-FILE: sdf4j-jce/src/main/java/org/openhitls/sdf4j/jce/SDFProvider.java
-LINE: 50-56
-SEVERITY: low
-TITLE: SDFProvider constructor throws error if SDF not available
-PROBLEM: The constructor calls NativeLoader.load() which will throw UnsatisfiedLinkError if the SDF library is not available. This prevents the provider from being registered for later use (e.g., with different configuration).
-CODE:
-```
-    public SDFProvider() {
-        super(PROVIDER_NAME, VERSION, INFO);
-        registerAlgorithms();
-        // Trigger native library loading, which auto-initializes SDF via SDF_LIBRARY_PATH environment variable
-        ensureNativeLoaded();
-    }
-```
-FIX:
-```
-    public SDFProvider() {
-        super(PROVIDER_NAME, VERSION, INFO);
-        registerAlgorithms();
-        // Trigger native library loading - throws if SDF library not available
-        try {
-            ensureNativeLoaded();
-        } catch (UnsatisfiedLinkError e) {
-            // Log warning but allow provider registration
-            System.err.println("Warning: SDF library not available - cryptographic operations will fail: " + e.getMessage());
-        }
+    jsize xLen = (*env)->GetArrayLength(env, publicKeyX);
+    jsize yLen = (*env)->GetArrayLength(env, publicKeyY);
+    jsize sigLen = (*env)->GetArrayLength(env, signature);
+    if (xLen != SM2_KEY_BYTES || yLen != SM2_KEY_BYTES || sigLen != SM2_SIGNATURE_BYTES) {
+        throw_exception(env, "java/lang/IllegalArgumentException",
+                        "SM2 public key/signature length is invalid");
+        return JNI_FALSE;
     }
 ```
 ===END===

@@ -17,8 +17,199 @@ You are consolidating change review findings from multiple AI reviewers.
 
 ## High
 
-### SM2PublicKey.getX() and getY() return internal array directly
-`sdf4j-jce/src/main/java/org/openhitls/sdf4j/jce/key/SM2PublicKey.java:62-65`
+### Context freed before error check in sm4EncryptFinal
+`sdf4j-jce/src/main/native/src/sdf_jce_sm4.c:365-371`
+```
+LONG ret = g_sdf_functions.SDF_EncryptFinal(ctx->session_handle, output, &outputLen);
+
+    ctx->initialized = 0;
+    free(ctx);
+
+    if (ret != SDR_OK) {
+        throw_jce_exception(env, (int)ret, "SM4 encrypt final failed");
+        return NULL;
+    }
+```
+**Issue**: The context is freed (free(ctx)) before checking the return value of SDF_EncryptFinal. If the operation fails, the context is freed and then an exception is thrown. The Java side still has a reference to the freed context handle, and if cleanup code (like finalize() or explicit cleanup) calls sm4Free again, it will cause a double-free vulnerability.
+**Fix**:
+```
+LONG ret = g_sdf_functions.SDF_EncryptFinal(ctx->session_handle, output, &outputLen);
+
+    if (ret != SDR_OK) {
+        throw_jce_exception(env, (int)ret, "SM4 encrypt final failed");
+        free(ctx);
+        return NULL;
+    }
+
+    ctx->initialized = 0;
+    free(ctx);
+
+    jbyteArray result = (*env)->NewByteArray(env, (jsize)outputLen);
+    if (result != NULL && outputLen > 0) {
+        (*env)->SetByteArrayRegion(env, result, 0, (jsize)outputLen, (jbyte *)output);
+    }
+    return result;
+```
+
+---
+
+### Context freed before error check in sm4DecryptFinal
+`sdf4j-jce/src/main/native/src/sdf_jce_sm4.c:522-528`
+```
+LONG ret = g_sdf_functions.SDF_DecryptFinal(ctx->session_handle, output, &outputLen);
+
+    ctx->initialized = 0;
+    free(ctx);
+
+    if (ret != SDR_OK) {
+        throw_jce_exception(env, (int)ret, "SM4 decrypt final failed");
+        return NULL;
+    }
+```
+**Issue**: Same issue as sm4EncryptFinal. The context is freed before checking the return value, leading to potential double-free if error handling code attempts to clean up.
+**Fix**:
+```
+LONG ret = g_sdf_functions.SDF_DecryptFinal(ctx->session_handle, output, &outputLen);
+
+    if (ret != SDR_OK) {
+        throw_jce_exception(env, (int)ret, "SM4 decrypt final failed");
+        free(ctx);
+        return NULL;
+    }
+
+    ctx->initialized = 0;
+    free(ctx);
+
+    jbyteArray result = (*env)->NewByteArray(env, (jsize)outputLen);
+    if (result != NULL && outputLen > 0) {
+        (*env)->SetByteArrayRegion(env, result, 0, (jsize)outputLen, (jbyte *)output);
+    }
+    return result;
+```
+
+---
+
+### sm2Sign modifies caller's private key array
+`sdf4j-jce/src/main/native/src/sdf_jce_sm2.c:117-122`
+```
+ERR:
+    /* Clear sensitive data in JNI buffer before releasing */
+    memset(privKeyBytes, 0, (size_t)privKeyLen);
+    (*env)->ReleaseByteArrayElements(env, privateKey, privKeyBytes, 0);
+```
+**Issue**: After memset(privKeyBytes, 0, ...) to clear sensitive data, ReleaseByteArrayElements is called with mode 0 which copies back to the original array. This writes zeros to the caller's original private key array, causing unexpected data corruption.
+**Fix**:
+```
+ERR:
+    /* Clear sensitive data in JNI buffer before releasing */
+    memset(privKeyBytes, 0, (size_t)privKeyLen);
+    (*env)->ReleaseByteArrayElements(env, privateKey, privKeyBytes, JNI_ABORT);
+```
+
+---
+
+### sm2Decrypt modifies caller's private key array
+`sdf4j-jce/src/main/native/src/sdf_jce_sm2.c:264-269`
+```
+ERR:
+    /* 清除敏感数据 */
+    memset(privKeyBytes, 0, (size_t)privKeyLen);
+    (*env)->ReleaseByteArrayElements(env, privateKey, privKeyBytes, 0);
+```
+**Issue**: Same issue as sm2Sign - zeros are written to the caller's original array due to using ReleaseByteArrayElements with mode 0 after memset.
+**Fix**:
+```
+ERR:
+    /* 清除敏感数据 */
+    memset(privKeyBytes, 0, (size_t)privKeyLen);
+    (*env)->ReleaseByteArrayElements(env, privateKey, privKeyBytes, JNI_ABORT);
+```
+
+---
+
+
+## Medium
+
+### Memory leak in SM3MessageDigest.engineDigest
+`sdf4j-jce/src/main/java/org/openhitls/sdf4j/jce/digest/SM3MessageDigest.java:69-71`
+```
+byte[] result = SDFJceNative.sm3Final(ctx);
+        ctx = 0;
+        initialized = false;
+```
+**Issue**: After calling sm3Final, the native context (allocated by sm3Init with malloc) is never freed. The ctx is set to 0 but sm3Free is never called, causing a memory leak for each digest operation.
+**Fix**:
+```
+byte[] result = SDFJceNative.sm3Final(ctx);
+        SDFJceNative.sm3Free(ctx);
+        ctx = 0;
+        initialized = false;
+```
+
+---
+
+### SM2PrivateKey doesn't clone key bytes, allowing external modification
+`sdf4j-jce/src/main/java/org/openhitls/sdf4j/jce/key/SM2PrivateKey.java:33`
+```
+public SM2PrivateKey(byte[] keyBytes) {
+        if (keyBytes == null || keyBytes.length != 32) {
+            throw new IllegalArgumentException("Key must be 32 bytes");
+        }
+        this.keyBytes = keyBytes;
+    }
+
+    @Override
+    public byte[] getEncoded() {
+        return keyBytes;
+    }
+```
+**Issue**: The constructor assigns the keyBytes reference directly without cloning. This allows external code to modify the internal key state. Additionally, getEncoded() returns the internal array directly, and destroy() zeros the array which affects the caller's original array if they passed it directly to the constructor.
+**Fix**:
+```
+public SM2PrivateKey(byte[] keyBytes) {
+        if (keyBytes == null || keyBytes.length != 32) {
+            throw new IllegalArgumentException("Key must be 32 bytes");
+        }
+        this.keyBytes = keyBytes.clone();
+    }
+
+    @Override
+    public byte[] getEncoded() {
+        return keyBytes.clone();
+    }
+```
+
+---
+
+
+## Low
+
+### sm3Free doesn't clear sensitive data before freeing
+`sdf4j-jce/src/main/native/src/sdf_jce_sm3.c:192-193`
+```
+SM3Context *ctx = (SM3Context *)(uintptr_t)ctxHandle;
+    if (ctx == NULL) {
+        return;
+    }
+
+    free(ctx);
+```
+**Issue**: The sm3Free function frees the context without clearing potentially sensitive data. For consistency with sm4Free which does memset before free, sm3Free should also clear the context.
+**Fix**:
+```
+SM3Context *ctx = (SM3Context *)(uintptr_t)ctxHandle;
+    if (ctx == NULL) {
+        return;
+    }
+
+    memset(ctx, 0, sizeof(SM3Context));
+    free(ctx);
+```
+
+---
+
+### SM2PublicKey getX/getY return internal arrays without cloning
+`sdf4j-jce/src/main/java/org/openhitls/sdf4j/jce/key/SM2PublicKey.java:36-37`
 ```
 public byte[] getX() {
         return x;
@@ -28,7 +219,7 @@ public byte[] getX() {
         return y;
     }
 ```
-**Issue**: The getX() and getY() methods return the internal x and y arrays directly instead of defensive copies. This allows callers to modify the public key coordinates, which could lead to security vulnerabilities.
+**Issue**: The getX() and getY() methods return the internal byte arrays directly without cloning, allowing external modification of the key's internal state.
 **Fix**:
 ```
 public byte[] getX() {
@@ -42,203 +233,67 @@ public byte[] getX() {
 
 ---
 
-### SM2PrivateKey.getEncoded() returns internal array directly
-`sdf4j-jce/src/main/java/org/openhitls/sdf4j/jce/key/SM2PrivateKey.java:42-44`
+### SM2ParameterSpec.getUserId returns internal array without cloning
+`sdf4j-jce/src/main/java/org/openhitls/sdf4j/jce/spec/SM2ParameterSpec.java:81`
 ```
-@Override
-    public byte[] getEncoded() {
-        return keyBytes;
+public byte[] getUserId() {
+        return userId;
     }
 ```
-**Issue**: The getEncoded() method returns the internal keyBytes array directly instead of a defensive copy. This allows callers to modify the private key material.
+**Issue**: The getUserId() method returns the internal userId array directly without cloning, allowing external modification.
 **Fix**:
 ```
-@Override
-    public byte[] getEncoded() {
-        return keyBytes.clone();
+public byte[] getUserId() {
+        return userId.clone();
     }
 ```
 
 ---
 
-### SM2PrivateKey.destroy() affects shared array reference
-`sdf4j-jce/src/main/java/org/openhitls/sdf4j/jce/key/SM2PrivateKey.java:50-53`
-```
-public SM2PrivateKey(byte[] keyBytes) {
-        if (keyBytes == null || keyBytes.length != 32) {
-            throw new IllegalArgumentException("Key must be 32 bytes");
-        }
-        this.keyBytes = keyBytes;
-    }
-
-    public void destroy() {
-        Arrays.fill(keyBytes, (byte) 0);
-    }
-```
-**Issue**: The destroy() method fills keyBytes with zeros. Since the constructor stores the reference directly (not a copy), this affects the original array passed to the constructor. If the caller still holds a reference to their original array, it will be zeroed. This is unexpected behavior that could cause issues.
-**Fix**:
-```
-public SM2PrivateKey(byte[] keyBytes) {
-        if (keyBytes == null || keyBytes.length != 32) {
-            throw new IllegalArgumentException("Key must be 32 bytes");
-        }
-        this.keyBytes = keyBytes.clone();
-    }
-
-    public void destroy() {
-        Arrays.fill(keyBytes, (byte) 0);
-    }
-```
-
----
-
-
-## Medium
-
-### SM3MessageDigest.engineReset() may free already-freed context
-`sdf4j-jce/src/main/java/org/openhitls/sdf4j/jce/digest/SM3MessageDigest.java:38-43`
+### SM2Cipher.engineSetPadding accepts unsupported padding mode
+`sdf4j-jce/src/main/java/org/openhitls/sdf4j/jce/cipher/SM4Cipher.java:237`
 ```
 @Override
-    protected void engineReset() {
-        if (ctx != 0) {
-            SDFJceNative.sm3Free(ctx);
-            ctx = 0;
+    protected void engineSetPadding(String padding) throws NoSuchPaddingException {
+        if (!"NoPadding".equalsIgnoreCase(padding) && !"PKCS1Padding".equalsIgnoreCase(padding)) {
+            throw new NoSuchPaddingException("SM2 only supports NoPadding");
         }
-        initialized = false;
     }
 ```
-**Issue**: The engineReset() method calls sm3Free(ctx) and sets ctx=0. However, engineDigest() already frees the context and sets ctx=0. If engineReset() is called after engineDigest() but the ctx variable wasn't set to 0 (e.g., due to an exception), it could lead to double-free or freeing a garbage pointer.
+**Issue**: The engineSetPadding method accepts "PKCS1Padding" but the comment says SM2 only supports NoPadding. This is misleading and the method should throw an exception for unsupported padding.
 **Fix**:
 ```
 @Override
-    protected void engineReset() {
-        if (ctx != 0) {
-            SDFJceNative.sm3Free(ctx);
-            ctx = 0;
+    protected void engineSetPadding(String padding) throws NoSuchPaddingException {
+        if (!"NoPadding".equalsIgnoreCase(padding)) {
+            throw new NoSuchPaddingException("SM2 only supports NoPadding");
         }
-        initialized = false;
     }
 ```
 
 ---
 
-### SM3 streaming uses single global SDF session
-`sdf4j-jce/src/main/native/src/sdf_jce_sm3.c:78-82`
+### sm2Verify doesn't check signature length
+`sdf4j-jce/src/main/native/src/sdf_jce_sm2.c:195-201`
 ```
-SM3Context *ctx = (SM3Context *)malloc(sizeof(SM3Context));
-    ...
-    LONG ret = g_sdf_functions.SDF_HashInit(g_session_handle, SGD_SM3, NULL, NULL, 0);
-```
-**Issue**: The sm3Init function allocates a local SM3Context but the actual SM3 state is maintained in the global SDF session (g_session_handle). The ctx returned is just a flag, not a true independent SM3 context. This means multiple concurrent SM3 operations will interfere with each other.
-**Fix**:
-```
-(This is an architectural issue. The SDF API limitation means the JCE provider cannot support concurrent SM3 operations. Consider either:
-1. Documenting this limitation
-2. Using mutex locks to serialize SM3 operations
-3. Maintaining SM3 state in software instead of using SDF's streaming API)
-```
-
----
-
-### sm2SignWithIndex accepts PIN parameter but doesn't use it
-`sdf4j-jce/src/main/native/src/sdf_jce_sm2.c:40-52`
-```
-/* 获取PIN */
-    char *pinStr = NULL;
-    int pinLen = 0;
-    if (pin != NULL) {
-        pinLen = (*env)->GetArrayLength(env, pin);
-        pinStr = (char *)malloc((size_t)(pinLen + 1));
-        ...
-        (*env)->GetByteArrayRegion(env, pin, 0, pinLen, (jbyte *)pinStr);
-        pinStr[pinLen] = '\0';
-    }
-
-    ECCSignature signature = {0};
-    ...
-
-    LONG ret = g_sdf_functions.SDF_InternalSign_ECC(g_session_handle, (ULONG)keyIndex, (BYTE *)dataBytes,
-        (ULONG)dataLen, &signature);
-```
-**Issue**: The sm2SignWithIndex function accepts a PIN parameter but never uses it for authorization. The comment says "can be null if already authorized", but there's no code to use the PIN if provided. This could lead to confusion where users expect the PIN to be used for authentication.
-**Fix**:
-```
-(Either use the PIN for authorization via SDF_LoginUser or similar, or clarify in documentation that the PIN parameter is reserved for future use)
-```
-
----
-
-
-## Low
-
-### NativeLoader.loadLibraryFromResources() doesn't clean up old temp files
-`sdf4j-jce/src/main/java/org/openhitls/sdf4j/jce/NativeLoader.java:97-106`
-```
-// Extract the library (always re-extract to ensure using latest version)
-            Files.copy(is, tempLib, StandardCopyOption.REPLACE_EXISTING);
-
-            // Load the extracted library
-            System.load(tempLib.toAbsolutePath().toString());
-```
-**Issue**: The method always re-extracts the library to temp directory. If the library version changes, old temp files remain. Additionally, if multiple JVMs use this simultaneously, there could be race conditions on the temp file.
-**Fix**:
-```
-// Extract the library, but only if newer or doesn't exist
-            if (!Files.exists(tempLib) || 
-                Files.getLastModifiedTime(Paths.get(resourcePath).toUri().toURL().openConnection()).toMillis() > 
-                Files.getLastModifiedTime(tempLib).toMillis()) {
-                Files.copy(is, tempLib, StandardCopyOption.REPLACE_EXISTING);
-            }
-
-            // Load the extracted library
-            System.load(tempLib.toAbsolutePath().toString());
-            
-            // Consider adding deleteOnExit() or scheduled cleanup
-            tempLib.toFile().deleteOnExit();
-```
-
----
-
-### sm2Sign doesn't validate privateKey length before use
-`sdf4j-jce/src/main/native/src/sdf_jce_sm2.c:156-181`
-```
-jsize privKeyLen = (*env)->GetArrayLength(env, privateKey);
-    if (privKeyLen != SM2_KEY_BYTES) {
-        throw_exception(env, "java/lang/IllegalArgumentException", "Private key must be 32 bytes");
-        return NULL;
+jsize xLen = (*env)->GetArrayLength(env, publicKeyX);
+    jsize yLen = (*env)->GetArrayLength(env, publicKeyY);
+    if (xLen != SM2_KEY_BYTES || yLen != SM2_KEY_BYTES) {
+        throw_exception(env, "java/lang/IllegalArgumentException",
+                        "SM2 public key/signature length is invalid");
+        return JNI_FALSE;
     }
 ```
-**Issue**: While there is a length check at line 71, if a malicious caller manages to bypass the Java layer checks, the native code directly copies 32 bytes without re-validating. This is defense-in-depth issue.
+**Issue**: The sm2Verify function checks publicKeyX and publicKeyY lengths but doesn't validate the signature array length. A malformed signature could cause out-of-bounds read when accessing sigBytes.
 **Fix**:
 ```
-(Consider adding additional validation in native code as defense-in-depth, though current Java-layer check provides primary protection)
-```
-
----
-
-### SDFProvider constructor throws error if SDF not available
-`sdf4j-jce/src/main/java/org/openhitls/sdf4j/jce/SDFProvider.java:50-56`
-```
-public SDFProvider() {
-        super(PROVIDER_NAME, VERSION, INFO);
-        registerAlgorithms();
-        // Trigger native library loading, which auto-initializes SDF via SDF_LIBRARY_PATH environment variable
-        ensureNativeLoaded();
-    }
-```
-**Issue**: The constructor calls NativeLoader.load() which will throw UnsatisfiedLinkError if the SDF library is not available. This prevents the provider from being registered for later use (e.g., with different configuration).
-**Fix**:
-```
-public SDFProvider() {
-        super(PROVIDER_NAME, VERSION, INFO);
-        registerAlgorithms();
-        // Trigger native library loading - throws if SDF library not available
-        try {
-            ensureNativeLoaded();
-        } catch (UnsatisfiedLinkError e) {
-            // Log warning but allow provider registration
-            System.err.println("Warning: SDF library not available - cryptographic operations will fail: " + e.getMessage());
-        }
+jsize xLen = (*env)->GetArrayLength(env, publicKeyX);
+    jsize yLen = (*env)->GetArrayLength(env, publicKeyY);
+    jsize sigLen = (*env)->GetArrayLength(env, signature);
+    if (xLen != SM2_KEY_BYTES || yLen != SM2_KEY_BYTES || sigLen != SM2_SIGNATURE_BYTES) {
+        throw_exception(env, "java/lang/IllegalArgumentException",
+                        "SM2 public key/signature length is invalid");
+        return JNI_FALSE;
     }
 ```
 
@@ -255,17 +310,23 @@ public SDFProvider() {
 
 ## High
 
-### SM2 JNI entry points copy fixed-size buffers without validating Java array lengths
-`sdf4j-jce/src/main/native/src/sdf_jce_sm2.c:206-228`
+### sm2Verify reads past short signature buffers
+`sdf4j-jce/src/main/native/src/sdf_jce_sm2.c:146-171`
 ```
-memcpy(eccPubKey.x + ECCref_MAX_LEN - SM2_KEY_BYTES, xBytes, SM2_KEY_BYTES);
-memcpy(eccPubKey.y + ECCref_MAX_LEN - SM2_KEY_BYTES, yBytes, SM2_KEY_BYTES);
+jsize xLen = (*env)->GetArrayLength(env, publicKeyX);
+jsize yLen = (*env)->GetArrayLength(env, publicKeyY);
+if (xLen != SM2_KEY_BYTES || yLen != SM2_KEY_BYTES) {
+    throw_exception(env, "java/lang/IllegalArgumentException",
+                    "SM2 public key/signature length is invalid");
+    return JNI_FALSE;
+}
+
+jbyte *sigBytes = (*env)->GetByteArrayElements(env, signature, NULL);
+...
 memcpy(eccSig.r + ECCref_MAX_LEN - SM2_KEY_BYTES, sigBytes, SM2_KEY_BYTES);
 memcpy(eccSig.s + ECCref_MAX_LEN - SM2_KEY_BYTES, sigBytes + SM2_KEY_BYTES, SM2_KEY_BYTES);
-
-memcpy(eccPrivKey.K + ECCref_MAX_LEN - SM2_KEY_BYTES, privKeyBytes, SM2_KEY_BYTES);
 ```
-**Issue**: Several SM2 native methods memcpy 32-byte and 64-byte fields out of Java byte arrays before checking that the arrays are actually that long. A short `publicKeyX`, `publicKeyY`, `signature`, or `privateKey` passed to `SDFJceNative` can make the JNI code read past the JVM-managed buffer and crash the process.
+**Issue**: The native verifier only validates the public-key coordinates. It then copies 64 bytes from `signature` unconditionally. A caller can pass a shorter `byte[]` to `SDFJceNative.sm2Verify(...)`, which makes the JNI code read past the Java array and can crash the JVM or feed adjacent memory into signature verification.
 **Fix**:
 ```
 jsize xLen = (*env)->GetArrayLength(env, publicKeyX);
@@ -273,169 +334,94 @@ jsize yLen = (*env)->GetArrayLength(env, publicKeyY);
 jsize sigLen = (*env)->GetArrayLength(env, signature);
 if (xLen != SM2_KEY_BYTES || yLen != SM2_KEY_BYTES || sigLen != SM2_SIGNATURE_BYTES) {
     throw_exception(env, "java/lang/IllegalArgumentException",
-                    "SM2 public key/signature length is invalid");
+                    "Public key must be 32 bytes and signature must be 64 bytes");
     return JNI_FALSE;
 }
 
+jbyte *xBytes = (*env)->GetByteArrayElements(env, publicKeyX, NULL);
+jbyte *yBytes = (*env)->GetByteArrayElements(env, publicKeyY, NULL);
+jbyte *dataBytes = (*env)->GetByteArrayElements(env, data, NULL);
+jbyte *sigBytes = (*env)->GetByteArrayElements(env, signature, NULL);
+if (xBytes == NULL || yBytes == NULL || dataBytes == NULL || sigBytes == NULL) {
+    if (xBytes) (*env)->ReleaseByteArrayElements(env, publicKeyX, xBytes, JNI_ABORT);
+    if (yBytes) (*env)->ReleaseByteArrayElements(env, publicKeyY, yBytes, JNI_ABORT);
+    if (dataBytes) (*env)->ReleaseByteArrayElements(env, data, dataBytes, JNI_ABORT);
+    if (sigBytes) (*env)->ReleaseByteArrayElements(env, signature, sigBytes, JNI_ABORT);
+    throw_exception(env, "java/lang/OutOfMemoryError", "Failed to get byte arrays");
+    return JNI_FALSE;
+}
+```
+
+---
+
+### sm2Decrypt copies 32 bytes from an unchecked private-key array
+`sdf4j-jce/src/main/native/src/sdf_jce_sm2.c:279-298`
+```
+jsize privKeyLen = (*env)->GetArrayLength(env, privateKey);
+jbyte *privKeyBytes = (*env)->GetByteArrayElements(env, privateKey, NULL);
+...
+ECCrefPrivateKey eccPrivKey;
+memset(&eccPrivKey, 0, sizeof(eccPrivKey));
+eccPrivKey.bits = SM2_KEY_BITS;
+memcpy(eccPrivKey.K + ECCref_MAX_LEN - SM2_KEY_BYTES, privKeyBytes, SM2_KEY_BYTES);
+```
+**Issue**: `sm2Decrypt` never verifies that `privateKey` is 32 bytes long before copying it into `ECCrefPrivateKey`. Passing a shorter array causes an out-of-bounds native read, which can crash the JVM or use unrelated memory as key material.
+**Fix**:
+```
 jsize privKeyLen = (*env)->GetArrayLength(env, privateKey);
 if (privKeyLen != SM2_KEY_BYTES) {
-    throw_exception(env, "java/lang/IllegalArgumentException",
-                    "Private key must be 32 bytes");
+    throw_exception(env, "java/lang/IllegalArgumentException", "Private key must be 32 bytes");
     return NULL;
 }
 
-/* Apply the same length checks in sm2Encrypt/sm2Decrypt/sm2DecryptWithIndex
- * before every fixed-size memcpy. */
+jbyte *privKeyBytes = (*env)->GetByteArrayElements(env, privateKey, NULL);
+jbyte *cipherBytes = (*env)->GetByteArrayElements(env, ciphertext, NULL);
+if (privKeyBytes == NULL || cipherBytes == NULL) {
+    if (privKeyBytes) {
+        memset(privKeyBytes, 0, (size_t)privKeyLen);
+        (*env)->ReleaseByteArrayElements(env, privateKey, privKeyBytes, 0);
+    }
+    if (cipherBytes) (*env)->ReleaseByteArrayElements(env, ciphertext, cipherBytes, JNI_ABORT);
+    throw_exception(env, "java/lang/OutOfMemoryError", "Failed to get byte arrays");
+    return NULL;
+}
 ```
 
 ---
 
-### Short IVs cause out-of-bounds reads in SM4 native methods
-`sdf4j-jce/src/main/native/src/sdf_jce_sm4.c:98-100`
+### SM4 streaming init reads past short key or IV arrays
+`sdf4j-jce/src/main/native/src/sdf_jce_sm4.c:243-265`
 ```
-if (ivBytes && mode != SM4_MODE_ECB) {
-    memcpy(ivCopy, ivBytes, SM4_IV_LENGTH);
-}
-
+jbyte *keyBytes = (*env)->GetByteArrayElements(env, key, NULL);
+jbyte *ivBytes = iv ? (*env)->GetByteArrayElements(env, iv, NULL) : NULL;
+...
 if (ivBytes) {
     memcpy(ctx->iv, ivBytes, SM4_IV_LENGTH);
 }
-```
-**Issue**: The SM4 JNI layer copies 16 bytes from `ivBytes` whenever an IV is present, but it never verifies that the Java `iv` array is actually 16 bytes long. Passing a short IV from Java reaches a raw `memcpy` and can read past the array boundary.
-**Fix**:
-```
-if (iv != NULL) {
-    jsize ivLen = (*env)->GetArrayLength(env, iv);
-    if (ivLen != SM4_IV_LENGTH) {
-        throw_exception(env, "java/lang/IllegalArgumentException",
-                        "IV must be 16 bytes");
-        goto ERR;
-    }
-}
-
-if (ivBytes && mode != SM4_MODE_ECB) {
-    memcpy(ivCopy, ivBytes, SM4_IV_LENGTH);
-}
-
-/* Apply the same ivLen check in sm4Encrypt, sm4Decrypt,
- * sm4EncryptInit, and sm4DecryptInit. */
-```
-
----
-
-### Internal SM2 operations ignore the supplied PIN completely
-`sdf4j-jce/src/main/native/src/sdf_jce_sm2.c:151-170`
-```
-if (pin != NULL) {
-    pinLen = (*env)->GetArrayLength(env, pin);
-    pinStr = (char *)malloc((size_t)(pinLen + 1));
-    ...
-    (*env)->GetByteArrayRegion(env, pin, 0, pinLen, (jbyte *)pinStr);
-    pinStr[pinLen] = '\0';
-}
-
-LONG ret = g_sdf_functions.SDF_InternalSign_ECC(g_session_handle, (ULONG)keyIndex,
-    (BYTE *)dataBytes, (ULONG)dataLen, &signature);
-```
-**Issue**: `sm2SignWithIndex` and `sm2DecryptWithIndex` allocate and copy the caller's PIN, but never use it to acquire private-key access rights. On devices that require `SDF_GetPrivateKeyAccessRight`, these APIs will fail with access-denied errors while misleading callers into thinking the PIN was honored.
-**Fix**:
-```
-CHECK_FUNCTION_RET(SDF_GetPrivateKeyAccessRight, env,
-                   "SDF_GetPrivateKeyAccessRight", NULL);
-CHECK_FUNCTION_RET(SDF_ReleasePrivateKeyAccessRight, env,
-                   "SDF_ReleasePrivateKeyAccessRight", NULL);
-
-int accessGranted = 0;
-if (pinStr != NULL) {
-    ret = g_sdf_functions.SDF_GetPrivateKeyAccessRight(
-        g_session_handle, (ULONG)keyIndex, pinStr, (ULONG)strlen(pinStr));
-    if (ret != SDR_OK) {
-        throw_jce_exception(env, (int)ret, "Get private key access right failed");
-        goto ERR;
-    }
-    accessGranted = 1;
-}
-
-ret = g_sdf_functions.SDF_InternalSign_ECC(
-    g_session_handle, (ULONG)keyIndex, (BYTE *)dataBytes, (ULONG)dataLen, &signature);
-
-ERR:
-if (accessGranted) {
-    g_sdf_functions.SDF_ReleasePrivateKeyAccessRight(g_session_handle, (ULONG)keyIndex);
-}
-```
-
----
-
-### SM4-MAC is wired to the HMAC API and ignores the IV
-`sdf4j-jce/src/main/native/src/sdf_jce_mac.c:30-32`
-```
-CHECK_FUNCTION_RET(SDF_ExternalKeyHMACInit, env, "SDF_ExternalKeyHMACInit", NULL);
-CHECK_FUNCTION_RET(SDF_HMACUpdate, env, "SDF_HMACUpdate", NULL);
-CHECK_FUNCTION_RET(SDF_HMACFinal, env, "SDF_HMACFinal", NULL);
-
-BYTE ivCopy[SM4_IV_LENGTH] = {0};
 ...
-if (ivBytes) {
-    memcpy(ivCopy, ivBytes, SM4_IV_LENGTH);
-}
-
-LONG ret = g_sdf_functions.SDF_ExternalKeyHMACInit(
-    g_session_handle, SGD_SM4_MAC, (BYTE *)keyBytes, SM4_KEY_LENGTH);
+LONG ret = g_sdf_functions.SDF_ImportKey(ctx->session_handle, (BYTE *)keyBytes, SM4_KEY_LENGTH, &keyHandle);
 ```
-**Issue**: The new `SM4-MAC` implementation does not call the SDF MAC API at all. It initializes `SDF_ExternalKeyHMACInit`/`SDF_HMACUpdate`/`SDF_HMACFinal` with `SGD_SM4_MAC`, and the copied IV is never passed anywhere. That means `Mac.getInstance("SM4-MAC")` is not performing the advertised SM4 CBC-MAC operation.
+**Issue**: Both `sm4EncryptInit` and `sm4DecryptInit` import a fixed 16-byte key and copy a fixed 16-byte IV without checking the Java array lengths first. Direct callers of the public `SDFJceNative` streaming API can trigger native out-of-bounds reads with undersized buffers.
 **Fix**:
 ```
-CHECK_FUNCTION_RET(SDF_ImportKey, env, "SDF_ImportKey", NULL);
-CHECK_FUNCTION_RET(SDF_CalculateMAC, env, "SDF_CalculateMAC", NULL);
-CHECK_FUNCTION_RET(SDF_DestroyKey, env, "SDF_DestroyKey", NULL);
-
-HANDLE keyHandle = 0;
-LONG ret = g_sdf_functions.SDF_ImportKey(
-    g_session_handle, (BYTE *)keyBytes, SM4_KEY_LENGTH, &keyHandle);
-if (ret != SDR_OK) {
-    throw_jce_exception(env, (int)ret, "SM4 MAC import key failed");
-    goto ERR;
+jsize keyLen = (*env)->GetArrayLength(env, key);
+if (keyLen != SM4_KEY_LENGTH) {
+    throw_exception(env, "java/lang/IllegalArgumentException", "Key must be 16 bytes");
+    return 0;
+}
+if (iv != NULL && (*env)->GetArrayLength(env, iv) != SM4_IV_LENGTH) {
+    throw_exception(env, "java/lang/IllegalArgumentException", "IV must be 16 bytes");
+    return 0;
 }
 
-ret = g_sdf_functions.SDF_CalculateMAC(
-    g_session_handle, keyHandle, SGD_SM4_MAC, ivCopy,
-    (BYTE *)dataBytes, (ULONG)dataLen, mac, &macLen);
-
-g_sdf_functions.SDF_DestroyKey(g_session_handle, keyHandle);
-```
-
----
-
-### The provider uses a single global SDF session for all operations
-`sdf4j-jce/src/main/native/src/sdf_jce_init.c:18-21`
-```
-HANDLE g_device_handle = NULL;
-HANDLE g_session_handle = NULL;
-int g_sdf_initialized = 0;
-...
-ret = g_sdf_functions.SDF_OpenSession(g_device_handle, &g_session_handle);
-...
-g_sdf_initialized = 1;
-```
-**Issue**: The PR opens one session once and stores it in `g_session_handle` for the lifetime of the JVM. SDF hash/MAC/encrypt-init state is session-scoped, so independent JCA objects will trample each other's in-flight state and concurrent callers race on the same hardware session.
-**Fix**:
-```
-HANDLE g_device_handle = NULL;
-int g_sdf_initialized = 0;
-
-int sdf_jce_open_session(HANDLE *session) {
-    return g_sdf_functions.SDF_OpenSession(g_device_handle, session);
+jbyte *keyBytes = (*env)->GetByteArrayElements(env, key, NULL);
+jbyte *ivBytes = iv ? (*env)->GetByteArrayElements(env, iv, NULL) : NULL;
+if (keyBytes == NULL || (iv != NULL && ivBytes == NULL)) {
+    if (keyBytes) (*env)->ReleaseByteArrayElements(env, key, keyBytes, JNI_ABORT);
+    if (ivBytes) (*env)->ReleaseByteArrayElements(env, iv, ivBytes, JNI_ABORT);
+    throw_exception(env, "java/lang/OutOfMemoryError", "Failed to get byte arrays");
+    return 0;
 }
-
-void sdf_jce_close_session(HANDLE session) {
-    if (session != NULL && g_sdf_functions.SDF_CloseSession != NULL) {
-        g_sdf_functions.SDF_CloseSession(session);
-    }
-}
-
-/* Stateful operations (SM3, streaming SM4, MAC) should open their own session
- * in init and close it in final/free instead of reusing a global session. */
 ```
 
 ---
@@ -443,118 +429,31 @@ void sdf_jce_close_session(HANDLE session) {
 
 ## Medium
 
-### Streaming SM4 contexts leak imported key handles
-`sdf4j-jce/src/main/native/src/sdf_jce_sm4.c:20-25`
+### Provider registration hard-fails without a live SDF library
+`sdf4j-jce/src/main/java/org/openhitls/sdf4j/jce/SDFProvider.java:52-57`
 ```
-typedef struct {
-    int mode;
-    int encrypt;
-    BYTE iv[SM4_IV_LENGTH];
-    int initialized;
-} SM4Context;
-
-HANDLE keyHandle = 0;
-LONG ret = g_sdf_functions.SDF_ImportKey(
-    g_session_handle, (BYTE *)keyBytes, SM4_KEY_LENGTH, &keyHandle);
-...
-ctx->initialized = 1;
-return (jlong)(uintptr_t)ctx;
+public SDFProvider() {
+    super(PROVIDER_NAME, VERSION, INFO);
+    registerAlgorithms();
+    // Trigger native library loading, which auto-initializes SDF via SDF_LIBRARY_PATH
+    ensureNativeLoaded();
+}
 ```
-**Issue**: `sm4EncryptInit` and `sm4DecryptInit` import a device key handle, but the handle is neither stored in `SM4Context` nor destroyed on success. The `Final` and `Free` paths only free the heap context, so every streaming init leaks a device key handle until the session is torn down.
+**Issue**: Constructing the provider immediately loads the native bridge and initializes the SDF device. That means simple provider discovery and registration fail on machines without hardware or a configured library. The new `SDFProviderTest` already errors on a clean checkout for this reason.
 **Fix**:
 ```
-typedef struct {
-    int mode;
-    int encrypt;
-    BYTE iv[SM4_IV_LENGTH];
-    HANDLE keyHandle;
-    int initialized;
-} SM4Context;
-
-ctx->keyHandle = 0;
-ret = g_sdf_functions.SDF_ImportKey(
-    g_session_handle, (BYTE *)keyBytes, SM4_KEY_LENGTH, &ctx->keyHandle);
-...
-ret = g_sdf_functions.SDF_EncryptInit(
-    g_session_handle, ctx->keyHandle, algId, ctx->iv, SM4_IV_LENGTH);
-
-...
-
-if (ctx->keyHandle != 0) {
-    g_sdf_functions.SDF_DestroyKey(g_session_handle, ctx->keyHandle);
-    ctx->keyHandle = 0;
+public SDFProvider() {
+    super(PROVIDER_NAME, VERSION, INFO);
+    registerAlgorithms();
 }
-free(ctx);
+
+// Let the SPI implementations trigger NativeLoader.load() on first real use.
 ```
 
 ---
 
-### Provider shutdown never releases the native device/session
-`sdf4j-jce/src/main/java/org/openhitls/sdf4j/jce/SDFProvider.java:81-86`
-```
-/**
- * Shutdown the provider and release resources.
- * Resources are automatically released when JVM unloads the native library.
- */
-public void shutdown() {
-    // No-op - resources are cleaned up in JNI_OnUnload
-}
-```
-**Issue**: `shutdown()` is documented as a resource-release hook, but it is a no-op. In practice the native device and session stay open until the JNI library is unloaded at JVM shutdown, which leaks scarce hardware resources in long-running processes.
-**Fix**:
-```
-public void shutdown() {
-    NativeLoader.shutdown();
-}
-
-final class NativeLoader {
-    private static native void shutdown();
-}
-```
-
----
-
-### CBC/CTR decryption silently invents a random IV when none is supplied
-`sdf4j-jce/src/main/java/org/openhitls/sdf4j/jce/cipher/SM4Cipher.java:131-142`
-```
-if (params != null) {
-    if (params instanceof IvParameterSpec) {
-        this.iv = ((IvParameterSpec) params).getIV();
-    } else {
-        throw new InvalidAlgorithmParameterException("Unsupported parameter type");
-    }
-} else if (cipherMode != MODE_ECB) {
-    // Generate random IV for non-ECB modes
-    this.iv = new byte[BLOCK_SIZE];
-    SecureRandom rng = (random != null) ? random : new SecureRandom();
-    rng.nextBytes(this.iv);
-}
-```
-**Issue**: For every non-ECB mode, `engineInit` generates a random IV whenever `params == null`, regardless of whether the cipher is being initialized for encryption or decryption. A caller who forgets to supply the IV for decrypt gets garbage plaintext instead of an immediate error.
-**Fix**:
-```
-if (params != null) {
-    if (!(params instanceof IvParameterSpec)) {
-        throw new InvalidAlgorithmParameterException("Unsupported parameter type");
-    }
-    this.iv = ((IvParameterSpec) params).getIV();
-    if (this.iv == null || this.iv.length != BLOCK_SIZE) {
-        throw new InvalidAlgorithmParameterException("IV must be 16 bytes");
-    }
-} else if (cipherMode != MODE_ECB) {
-    if (opmode == Cipher.DECRYPT_MODE || opmode == Cipher.UNWRAP_MODE) {
-        throw new InvalidAlgorithmParameterException("IV required for decryption");
-    }
-    this.iv = new byte[BLOCK_SIZE];
-    SecureRandom rng = (random != null) ? random : new SecureRandom();
-    rng.nextBytes(this.iv);
-}
-```
-
----
-
-### SM2PrivateKey exposes and aliases mutable private-key material
-`sdf4j-jce/src/main/java/org/openhitls/sdf4j/jce/key/SM2PrivateKey.java:29-33`
+### SM2PrivateKey exposes mutable private-key state
+`sdf4j-jce/src/main/java/org/openhitls/sdf4j/jce/key/SM2PrivateKey.java:29-48`
 ```
 public SM2PrivateKey(byte[] keyBytes) {
     if (keyBytes == null || keyBytes.length != 32) {
@@ -562,20 +461,20 @@ public SM2PrivateKey(byte[] keyBytes) {
     }
     this.keyBytes = keyBytes;
 }
-
+...
 @Override
 public byte[] getEncoded() {
     return keyBytes;
 }
 ```
-**Issue**: The constructor stores the caller's array directly, and `getEncoded()` returns the internal array directly. Any caller holding either reference can modify the live private key in place, zero it unexpectedly, or observe subsequent mutations.
+**Issue**: The constructor stores the caller's array directly, and `getEncoded()` returns the same internal array. Any caller can mutate or zero the private key after construction, which can silently corrupt later signatures and leak key state across code paths.
 **Fix**:
 ```
 public SM2PrivateKey(byte[] keyBytes) {
     if (keyBytes == null || keyBytes.length != 32) {
         throw new IllegalArgumentException("Key must be 32 bytes");
     }
-    this.keyBytes = keyBytes.clone();
+    this.keyBytes = Arrays.copyOf(keyBytes, keyBytes.length);
 }
 
 @Override
@@ -586,101 +485,108 @@ public byte[] getEncoded() {
 
 ---
 
-### Integration helper swallows non-SDF exceptions and lets broken tests pass
-`sdf4j-jce/src/test/java/org/openhitls/sdf4j/jce/SDFJceIntegrationTest.java:75-85`
+### SM2 output-size calculation is off by one byte
+`sdf4j-jce/src/main/java/org/openhitls/sdf4j/jce/cipher/SM2Cipher.java:72-79`
 ```
-private void handleSdfException(Exception e, String testName) throws Exception {
-    if (e instanceof SDFJceException) {
-        SDFJceException sdfEx = (SDFJceException) e;
-        if (sdfEx.getErrorCode() == SDFJceErrorCode.SDR_NOTSUPPORT) {
-            System.out.println("[跳过] " + testName + ": 操作不支持");
-            Assume.assumeTrue(testName + " not supported", false);
-            return;
-        }
-        System.err.println("[错误] " + testName + ": " + e.getMessage());
-        throw e;
+protected int engineGetOutputSize(int inputLen) {
+    if (opmode == Cipher.ENCRYPT_MODE) {
+        // SM2 ciphertext: 0x04(1) + C1_X(32) + C1_Y(32) + C2(plaintext) + C3(32) = 97 + plaintext
+        return inputLen + 97;
+    } else {
+        // Plaintext is ciphertext - 97 bytes overhead (1 + 32 + 32 + 32)
+        return Math.max(0, inputLen - 97);
     }
 }
 ```
-**Issue**: Every integration test catches `Exception` and delegates to `handleSdfException`, but the helper only acts on `SDFJceException`. Any `AssertionError`, `SignatureException`, `ProviderException`, or plain `RuntimeException` is silently ignored, so the test method returns green even though it actually failed.
+**Issue**: The native code produces `C1_X || C1_Y || C3 || C2`, which has 96 bytes of overhead. `engineGetOutputSize()` assumes a nonexistent leading `0x04` byte and uses 97 instead. For decryption, `Cipher.getOutputSize()` underestimates by one byte, so `doFinal(input, output, off)` can throw `ShortBufferException` even when the caller allocates the advertised size.
 **Fix**:
 ```
-private void handleSdfException(Exception e, String testName) throws Exception {
-    if (e instanceof SDFJceException) {
-        SDFJceException sdfEx = (SDFJceException) e;
-        if (sdfEx.getErrorCode() == SDFJceErrorCode.SDR_NOTSUPPORT) {
-            System.out.println("[跳过] " + testName + ": 操作不支持");
-            Assume.assumeTrue(testName + " not supported", false);
-            return;
-        }
-        System.err.println("[错误] " + testName + ": " + e.getMessage());
+protected int engineGetOutputSize(int inputLen) {
+    final int overhead = 96; // C1_X(32) + C1_Y(32) + C3(32)
+    if (opmode == Cipher.ENCRYPT_MODE || opmode == Cipher.WRAP_MODE) {
+        return inputLen + overhead;
     }
-    throw e;
+    return Math.max(0, inputLen - overhead);
 }
 ```
 
 ---
 
-### Example tests also suppress unexpected failures
-`sdf4j-jce/src/test/java/org/openhitls/sdf4j/jce/SDFJceExamples.java:45-55`
+### SM2 cipher advertises unsupported PKCS1Padding
+`sdf4j-jce/src/main/java/org/openhitls/sdf4j/jce/cipher/SM2Cipher.java:60-63`
 ```
-private void handleSdfException(Exception e, String testName) throws Exception {
-    if (e instanceof SDFJceException) {
-        SDFJceException sdfEx = (SDFJceException) e;
-        if (sdfEx.getErrorCode() == SDFJceErrorCode.SDR_NOTSUPPORT) {
-            System.out.println("[跳过] " + testName + ": 操作不支持");
-            Assume.assumeTrue(testName + " not supported", false);
-            return;
-        }
-        System.err.println("[错误] " + testName + ": " + e.getMessage());
-        throw e;
+@Override
+protected void engineSetPadding(String padding) throws NoSuchPaddingException {
+    if (!"NoPadding".equalsIgnoreCase(padding) && !"PKCS1Padding".equalsIgnoreCase(padding)) {
+        throw new NoSuchPaddingException("SM2 only supports NoPadding");
     }
 }
 ```
-**Issue**: The example suite has the same helper bug as the integration suite: it catches `Exception` everywhere, but only rethrows `SDFJceException`. That means example regressions can fail internally and still report success, defeating the point of shipping them as executable documentation.
+**Issue**: `engineSetPadding()` accepts `PKCS1Padding`, but the implementation never applies any PKCS#1-style formatting. `Cipher.getInstance("SM2/ECB/PKCS1Padding", "SDF")` therefore behaves like raw SM2 while claiming a padding mode it does not implement.
 **Fix**:
 ```
-private void handleSdfException(Exception e, String testName) throws Exception {
-    if (e instanceof SDFJceException) {
-        SDFJceException sdfEx = (SDFJceException) e;
-        if (sdfEx.getErrorCode() == SDFJceErrorCode.SDR_NOTSUPPORT) {
-            System.out.println("[跳过] " + testName + ": 操作不支持");
-            Assume.assumeTrue(testName + " not supported", false);
-            return;
-        }
-        System.err.println("[错误] " + testName + ": " + e.getMessage());
+@Override
+protected void engineSetPadding(String padding) throws NoSuchPaddingException {
+    if (!"NoPadding".equalsIgnoreCase(padding)) {
+        throw new NoSuchPaddingException("SM2 only supports NoPadding");
     }
-    throw e;
 }
 ```
 
 ---
 
-
-## Low
-
-### The documented SM2 signing flow omits the required public-key parameter
-`sdf4j-jce/README.md:61-67`
+### DER signature parsing accepts malformed encodings
+`sdf4j-jce/src/main/java/org/openhitls/sdf4j/jce/util/DERCodec.java:71-95`
 ```
-// SM2 签名（遵循 GM/T 0009-2012 标准）
-KeyPairGenerator kpg = KeyPairGenerator.getInstance("SM2", "SDF");
-KeyPair keyPair = kpg.generateKeyPair();
-Signature signer = Signature.getInstance("SM3withSM2", "SDF");
-signer.initSign(keyPair.getPrivate());
-signer.update("Hello".getBytes());
-byte[] signature = signer.sign();
+int length = in.readLength();
+if (in.available() < length) {
+    throw new IllegalArgumentException("DER length mismatch");
+}
+...
+byte[] raw = new byte[64];
+copyToFixedBuffer(rBytes, raw, 0);
+copyToFixedBuffer(sBytes, raw, 32);
+...
+if (srcLen > fixedLen) {
+    // 截断高位
+    System.arraycopy(src, srcLen - fixedLen, dest, offset, fixedLen);
+}
 ```
-**Issue**: The README shows `SM3withSM2` signing without ever setting `SM2ParameterSpec`. The implementation in this PR explicitly requires the public key to compute `Z`, so following the documented snippet throws `SignatureException` at runtime instead of producing a signature.
+**Issue**: `derToRaw()` only rejects lengths that are too short, not extra trailing data, and `copyToFixedBuffer()` silently truncates oversized INTEGERs. That means malformed signatures with trailing bytes or non-canonical 33-byte integers are normalized into the same raw `r || s` value instead of being rejected.
 **Fix**:
 ```
-// SM2 签名（遵循 GM/T 0009-2012 标准）
-KeyPairGenerator kpg = KeyPairGenerator.getInstance("SM2", "SDF");
-KeyPair keyPair = kpg.generateKeyPair();
-Signature signer = Signature.getInstance("SM3withSM2", "SDF");
-signer.initSign(keyPair.getPrivate());
-signer.setParameter(new SM2ParameterSpec((SM2PublicKey) keyPair.getPublic()));
-signer.update("Hello".getBytes());
-byte[] signature = signer.sign();
+int length = in.readLength();
+if (in.available() != length) {
+    throw new IllegalArgumentException("DER length mismatch");
+}
+...
+validateDerInteger(rBytes);
+validateDerInteger(sBytes);
+if (in.available() != 0) {
+    throw new IllegalArgumentException("Trailing DER data");
+}
+byte[] raw = new byte[64];
+copyToFixedBuffer(rBytes, raw, 0);
+copyToFixedBuffer(sBytes, raw, 32);
+
+private static void validateDerInteger(byte[] value) {
+    if (value.length == 0 || value.length > 33) {
+        throw new IllegalArgumentException("Invalid INTEGER length");
+    }
+    if (value.length == 33 && value[0] != 0) {
+        throw new IllegalArgumentException("INTEGER too large");
+    }
+    if (value.length > 1 && value[0] == 0 && (value[1] & 0x80) == 0) {
+        throw new IllegalArgumentException("Non-canonical INTEGER encoding");
+    }
+}
+
+private static void copyToFixedBuffer(byte[] src, byte[] dest, int offset) {
+    validateDerInteger(src);
+    int start = (src.length == 33) ? 1 : 0;
+    int srcLen = src.length - start;
+    System.arraycopy(src, start, dest, offset + (32 - srcLen), srcLen);
+}
 ```
 
 ---

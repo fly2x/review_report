@@ -3,9 +3,9 @@
 You are reviewing PR #22 for openHiTLS/sdf4j.
 
 
-## Changed Files (38 files)
+## Changed Files (45 files)
 
-**Source** (29 files):
+**Source** (31 files):
   - sdf4j-jce/src/main/java/org/openhitls/sdf4j/jce/NativeLoader.java
   - sdf4j-jce/src/main/java/org/openhitls/sdf4j/jce/SDFJceErrorCode.java
   - sdf4j-jce/src/main/java/org/openhitls/sdf4j/jce/SDFJceException.java
@@ -23,15 +23,20 @@ You are reviewing PR #22 for openHiTLS/sdf4j.
   - sdf4j-jce/src/main/java/org/openhitls/sdf4j/jce/random/SDFSecureRandom.java
   - sdf4j-jce/src/main/java/org/openhitls/sdf4j/jce/signature/SM2Signature.java
   - sdf4j-jce/src/main/java/org/openhitls/sdf4j/jce/spec/SM2ParameterSpec.java
+  - sdf4j-jce/src/main/java/org/openhitls/sdf4j/jce/util/DERCodec.java
   - sdf4j-jce/src/main/java/org/openhitls/sdf4j/jce/util/SM2Util.java
   - sdf4j-jce/src/main/native/include/jce_common.h
-  - sdf4j-jce/src/main/native/include/sdf_jce_functions.h
-  - ... and 9 more
+  - ... and 11 more
 
-**Test** (4 files):
-  - sdf4j-jce/src/test/java/org/openhitls/sdf4j/jce/SDFJceExamples.java
-  - sdf4j-jce/src/test/java/org/openhitls/sdf4j/jce/SDFJceIntegrationTest.java
+**Test** (9 files):
+  - examples/src/test/java/org/openhitls/SM2ExampleTest.java
+  - examples/src/test/java/org/openhitls/SM3ExampleTest.java
+  - examples/src/test/java/org/openhitls/SM4ExampleTest.java
+  - sdf4j-jce/src/test/java/org/openhitls/sdf4j/jce/SDFJceAlgorithmTest.java
+  - sdf4j-jce/src/test/java/org/openhitls/sdf4j/jce/SDFJceExamplesTest.java
   - sdf4j-jce/src/test/java/org/openhitls/sdf4j/jce/SDFProviderTest.java
+  - sdf4j-jce/src/test/java/org/openhitls/sdf4j/jce/SM2InnerTest.java
+  - sdf4j-jce/src/test/java/org/openhitls/sdf4j/jce/SM4VectorTest.java
   - sdf4j-jce/src/test/java/org/openhitls/sdf4j/jce/key/SM2KeyTest.java
 
 **Docs** (2 files):
@@ -49,11 +54,11 @@ You are reviewing PR #22 for openHiTLS/sdf4j.
 Perform a thorough change review by:
 
 1. **Understand the Change**
-   - Read the diff stats: `git diff --stat 368f5951c47a7c4785395a2e9266925609bde120 mr-22`
+   - Read the diff stats: `git diff --stat 73f492f08081f9fa7d08c7c03869459a6e629426 mr-22`
    - Understand what this PR is trying to achieve
 
 2. **Review Each File**
-   - For each changed file, view its diff: `git diff 368f5951c47a7c4785395a2e9266925609bde120 mr-22 -- <file>`
+   - For each changed file, view its diff: `git diff 73f492f08081f9fa7d08c7c03869459a6e629426 mr-22 -- <file>`
    - If you need more context, read the full file or search for related code
    - Look for: security issues, logic errors, edge cases, error handling
    - For non-code files (docs/config), focus on correctness and safety of the content

@@ -1,0 +1,49 @@
+===ISSUE===
+FILE: sdf4j/src/main/java/org/openhitls/sdf4j/types/HybridSignature.java
+LINE: 141-143
+SEVERITY: medium
+TITLE: Missing validation in HybridSignature.setL()
+PROBLEM: The setL() method does not validate that the input value is non-negative or consistent with sigM.length. Similar methods in ECCCipher.setL() and HybridCipher.setL1() perform this validation to prevent invalid state.
+CODE:
+```
+    public void setL(int l) {
+        this.l = l;
+    }
+```
+FIX:
+```
+    public void setL(int l) {
+        if (l < 0) {
+            throw new IllegalArgumentException("Signature length cannot be negative");
+        }
+        if (sigM != null && l > sigM.length) {
+            throw new IllegalArgumentException("Signature length cannot exceed data length");
+        }
+        this.l = l;
+    }
+```
+===END===
+
+===ISSUE===
+FILE: docs/开发指南.md
+LINE: 334-335, 347-348
+SEVERITY: high
+TITLE: Incorrect method names in documentation example
+PROBLEM: The documentation uses non-existent method names getSponsorPubKey() and getSponsorTmpPubKey(). The actual method names in KeyAgreementResult are getPublicKey() and getTmpPublicKey(). Code copied from this documentation will fail to compile.
+CODE:
+```
+ECCPublicKey sponsorPubKey = sponsorResult.getSponsorPubKey();
+ECCPublicKey sponsorTmpPubKey = sponsorResult.getSponsorTmpPubKey();
+...
+ECCPublicKey responsePubKey = responseResult.getSponsorPubKey();
+ECCPublicKey responseTmpPubKey = responseResult.getSponsorTmpPubKey();
+```
+FIX:
+```
+ECCPublicKey sponsorPubKey = sponsorResult.getPublicKey();
+ECCPublicKey sponsorTmpPubKey = sponsorResult.getTmpPublicKey();
+...
+ECCPublicKey responsePubKey = responseResult.getPublicKey();
+ECCPublicKey responseTmpPubKey = responseResult.getTmpPublicKey();
+```
+===END===

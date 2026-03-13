@@ -1,0 +1,42 @@
+[
+  {
+    "source": "claude",
+    "file": "sdf4j/src/main/java/org/openhitls/sdf4j/types/HybridSignature.java",
+    "line": "141-143",
+    "severity": "medium",
+    "title": "Missing validation in setL() method",
+    "problem": "The setL() method has no validation, unlike the constructor which checks `if (l < 0 || l > sigM.length)`. This allows setting an invalid length that could cause unexpected behavior. Calling setL(Integer.MAX_VALUE) followed by setSigM(new byte[100]) would succeed, leaving the object in an inconsistent state where l > sigM.length.",
+    "code": "public void setL(int l) {\n        this.l = l;\n    }",
+    "fix": "public void setL(int l) {\n        if (l < 0) {\n            throw new IllegalArgumentException(\"Signature length cannot be negative\");\n        }\n        if (sigM != null && l > sigM.length) {\n            throw new IllegalArgumentException(\"Signature length cannot exceed data length\");\n        }\n        this.l = l;\n    }"
+  },
+  {
+    "source": "claude",
+    "file": "examples/src/test/java/org/openhitls/SM4ExampleTest.java",
+    "line": "70-84",
+    "severity": "low",
+    "title": "Potential KEK access release without successful acquisition",
+    "problem": "If SDF_GetKEKAccessRight() fails in setUp(), tearDown() still attempts to release KEK access. While the SDF library may handle this gracefully, it's not guaranteed and could cause test instability. A flag should track whether KEK access was successfully acquired.",
+    "code": "@After\n    public void tearDown() throws SDFException {\n        if (sdf != null) {\n            if (ecbKeyHandle != 0) {\n                sdf.SDF_DestroyKey(sessionHandle, ecbKeyHandle);\n            }\n            if (sessionHandle != 0) {\n                sdf.SDF_ReleaseKEKAccessRight(sessionHandle, KEY_INDEX);\n                sdf.SDF_CloseSession(sessionHandle);\n            }\n            if (deviceHandle != 0) {\n                sdf.SDF_CloseDevice(deviceHandle);\n            }\n        }\n    }",
+    "fix": "private boolean kekAccessAcquired = false;\n\n    @Before\n    public void setUp() throws SDFException {\n        sdf = new SDF();\n        deviceHandle = sdf.SDF_OpenDevice();\n        sessionHandle = sdf.SDF_OpenSession(deviceHandle);\n        loadConfig();\n        // 获取KEK访问权限并生成密钥\n        sdf.SDF_GetKEKAccessRight(sessionHandle, KEY_INDEX, KEY_PASSWORD);\n        kekAccessAcquired = true;\n        KeyEncryptionResult result = sdf.SDF_GenerateKeyWithKEK(sessionHandle, SM4_KEY_BITS, AlgorithmID.SGD_SM4_ECB, KEY_INDEX);\n        ecbKeyHandle = result.getKeyHandle();\n    }\n\n    @After\n    public void tearDown() throws SDFException {\n        if (sdf != null) {\n            if (ecbKeyHandle != 0) {\n                sdf.SDF_DestroyKey(sessionHandle, ecbKeyHandle);\n            }\n            if (sessionHandle != 0) {\n                if (kekAccessAcquired) {\n                    sdf.SDF_ReleaseKEKAccessRight(sessionHandle, KEY_INDEX);\n                }\n                sdf.SDF_CloseSession(sessionHandle);\n            }\n            if (deviceHandle != 0) {\n                sdf.SDF_CloseDevice(deviceHandle);\n            }\n        }\n    }"
+  },
+  {
+    "source": "claude",
+    "file": "examples/src/test/java/org/openhitls/SM4ExampleTest.java",
+    "line": "42-56",
+    "severity": "low",
+    "title": "Non-threadsafe static config loading with mutable static state",
+    "problem": "The loadConfig() method modifies static fields KEY_INDEX and KEY_PASSWORD without synchronization. If tests run in parallel, this could cause race conditions where one test overwrites config values used by another.",
+    "code": "private static int KEY_INDEX = 4;\n    private static String KEY_PASSWORD = \"123abc!@\";\n\n    public static void loadConfig() {\n        Properties testConfig = new Properties();\n        try (InputStream is = SM4ExampleTest.class.getClassLoader()\n                .getResourceAsStream(\"test-config.properties\")) {\n            if (is != null) {\n                testConfig.load(is);\n                KEY_INDEX = Integer.parseInt(\n                        testConfig.getProperty(\"sm4.internal.key.index\", String.valueOf(KEY_INDEX)));\n                KEY_PASSWORD = testConfig.getProperty(\"sm4.key.access.password\", KEY_PASSWORD);\n                return;\n            }\n        } catch (IOException e) {\n            System.err.println(\"读取配置文件失败: \" + e.getMessage());\n        }\n    }",
+    "fix": "private static final int KEY_INDEX;\n    private static final String KEY_PASSWORD;\n\n    static {\n        int keyIndex = 4;\n        String keyPassword = \"123abc!@\";\n        Properties testConfig = new Properties();\n        try (InputStream is = SM4ExampleTest.class.getClassLoader()\n                .getResourceAsStream(\"test-config.properties\")) {\n            if (is != null) {\n                testConfig.load(is);\n                keyIndex = Integer.parseInt(\n                        testConfig.getProperty(\"sm4.internal.key.index\", \"4\"));\n                keyPassword = testConfig.getProperty(\"sm4.key.access.password\", \"123abc!@\");\n            }\n        } catch (IOException e) {\n            System.err.println(\"读取配置文件失败: \" + e.getMessage());\n        }\n        KEY_INDEX = keyIndex;\n        KEY_PASSWORD = keyPassword;\n    }"
+  },
+  {
+    "source": "claude",
+    "file": "sdf4j/src/main/java/org/openhitls/sdf4j/types/HybridCipher.java",
+    "line": "114-122",
+    "severity": "low",
+    "title": "Missing upper bound validation for ciphertext length",
+    "problem": "The setL1() method validates that l1 is not negative and doesn't exceed ctM.length, but doesn't validate against Integer.MAX_VALUE. Since l1 is a long but array lengths are limited to Integer.MAX_VALUE, a very large l1 value could theoretically cause issues in native code that expects array indices.",
+    "code": "public void setL1(long l1) {\n        if (l1 < 0) {\n            throw new IllegalArgumentException(\"Ciphertext length cannot be negative\");\n        }\n        if (ctM != null && l1 > ctM.length) {\n            throw new IllegalArgumentException(\"len cannot exceed data length\");\n        }\n        this.l1 = l1;\n    }",
+    "fix": "public void setL1(long l1) {\n        if (l1 < 0) {\n            throw new IllegalArgumentException(\"Ciphertext length cannot be negative\");\n        }\n        if (l1 > Integer.MAX_VALUE) {\n            throw new IllegalArgumentException(\"Ciphertext length cannot exceed Integer.MAX_VALUE\");\n        }\n        if (ctM != null && l1 > ctM.length) {\n            throw new IllegalArgumentException(\"len cannot exceed data length\");\n        }\n        this.l1 = l1;\n    }"
+  }
+]
