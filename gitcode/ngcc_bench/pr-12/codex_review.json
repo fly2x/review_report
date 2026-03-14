@@ -1,0 +1,62 @@
+[
+  {
+    "source": "codex",
+    "file": "ngcc_bench/src/main.c",
+    "line": "68-75",
+    "severity": "high",
+    "title": "`sig` KAT mode only validates `sig_verify`",
+    "problem": "The new aggregate `sig` test is wired to `ngcc_sig_verify_correctness_kat_file()`. When `--test sig --mode correctness --kat ...` is used, `sig_keygen()` and `sig_sign()` are never exercised, so a library with broken key generation/signing can still report `[sig][correctness] PASS`. I reproduced this with a mock where `sig_keygen()`/`sig_sign()` return `-1` and `sig_verify()` succeeds.",
+    "code": "static int sig_verify_kat_dispatch(const ngcc_api_t *api,\n                                   int digest_len_bits,\n                                   const char *kat_path,\n                                   unsigned long long *out_total,\n                                   unsigned long long *out_passed,\n                                   unsigned long long *out_failed) {\n    (void) digest_len_bits;\n    return ngcc_sig_verify_correctness_kat_file(api, kat_path, out_total, out_passed, out_failed);\n}\n\n#define NGCC_TEST_DISPATCH_TABLE(X) \\\n    X(TEST_MASK_HASH, NGCC_TEST_HASH, \"hash\", hash_correctness_dispatch, hash_kat_dispatch, hash_performance_dispatch, msg_len_bytes_per_case) \\\n    X(TEST_MASK_SIG, NGCC_TEST_SIG, \"sig\", sig_correctness_dispatch, sig_verify_kat_dispatch, NULL, msg_len_bytes_per_case) \\\n    X(TEST_MASK_KEM, NGCC_TEST_KEM, \"kem\", kem_correctness_dispatch, kem_kat_dispatch, NULL, kem_bytes_per_case) \\\n    X(TEST_MASK_KEX, NGCC_TEST_KEX, \"kex\", kex_correctness_dispatch, kex_kat_dispatch, NULL, kex_bytes_per_case)",
+    "fix": "static int kat_not_supported_dispatch(const ngcc_api_t *api,\n                                      int digest_len_bits,\n                                      const char *kat_path,\n                                      unsigned long long *out_total,\n                                      unsigned long long *out_passed,\n                                      unsigned long long *out_failed) {\n    (void) api;\n    (void) digest_len_bits;\n    (void) kat_path;\n    (void) out_total;\n    (void) out_passed;\n    (void) out_failed;\n    return 1; /* fall back to runtime correctness */\n}\n\n#define NGCC_TEST_DISPATCH_TABLE(X) \\\n    X(TEST_MASK_HASH, NGCC_TEST_HASH, \"hash\", hash_correctness_dispatch, hash_kat_dispatch, hash_performance_dispatch, msg_len_bytes_per_case) \\\n    X(TEST_MASK_SIG, NGCC_TEST_SIG, \"sig\", sig_correctness_dispatch, kat_not_supported_dispatch, NULL, msg_len_bytes_per_case) \\\n    X(TEST_MASK_KEM, NGCC_TEST_KEM, \"kem\", kem_correctness_dispatch, kem_kat_dispatch, NULL, kem_bytes_per_case) \\\n    X(TEST_MASK_KEX, NGCC_TEST_KEX, \"kex\", kex_correctness_dispatch, kex_kat_dispatch, NULL, kex_bytes_per_case)"
+  },
+  {
+    "source": "codex",
+    "file": "ngcc_bench/src/bench_kex.c",
+    "line": "121-134",
+    "severity": "high",
+    "title": "One-pass KEX correctness can pass with a broken A-side derive",
+    "problem": "For `kex_get_passes_num() == 1`, correctness returns success after only calling `kex_derive_ss_b()`. `kex_derive_ss_a()` is never checked and no shared-secret equality check is performed, so a library with a broken A-side derive is accepted. I reproduced this with a one-pass mock whose `kex_derive_ss_a()` always returns `-1`; correctness still reported `PASS`.",
+    "code": "if (mb == NULL) {\n    /* 1-pass: B derives from last A-msg, A has no B-msg to derive from.\n     * Only B-side derive is possible. */\n    if (api->kex_derive_ss_b(skb, skb_len, pka, pka_len, ma, ma_len, stb, stb_len, ssb, &ssb_len) != 0) {\n        return -1;\n    }\n    /* For 1-pass, we may not be able to verify A-side without a B-msg.\n     * Skip A-side derive and just check B output is valid. */\n    if (ssb_len == 0 || ssb_len > ss_cap) {\n        return -1;\n    }\n    return 0;\n}",
+    "fix": "if (mb == NULL) {\n    fprintf(stderr, \"[kex] error: 1-pass protocols cannot be fully validated by the current API contract\\n\");\n    return -1;\n}"
+  },
+  {
+    "source": "codex",
+    "file": "ngcc_bench/src/bench_kex.c",
+    "line": "693-745",
+    "severity": "medium",
+    "title": "KEX performance reuses mutable protocol state across all iterations",
+    "problem": "The benchmark runs the full KEX protocol once, then reuses the same `sta`/`stb` and last-message buffers for every `derive_ss` iteration. If `kex_derive_ss_a()` or `kex_derive_ss_b()` consumes or mutates that state, performance either fails after the first iteration or measures an invalid hot state. I reproduced this with a mock that zeroes `sta`/`stb` inside `derive_ss`; correctness passes, but performance immediately fails.",
+    "code": "/* ── Setup: run the full protocol once to get intermediate state ── */\n{\n    ...\n    if (api->kex_init_a(pka, &pka_len, ska, &ska_len, sta, &sta_len) != 0) { goto cleanup; }\n    if (api->kex_init_b(pkb, &pkb_len, skb, &skb_len, stb, &stb_len) != 0) { goto cleanup; }\n    ...\n}\n\n...\nctx_a.sta = sta;  ctx_a.sta_len = sta_len;\nctx_a.mb  = mb;   ctx_a.mb_len  = mb_len;\nif (ngcc_run_performance_op(&local_cfg, kex_derive_ss_a_op, &ctx_a, out_a) != 0) {\n    goto cleanup;\n}\n\n...\nctx_b.stb = stb;  ctx_b.stb_len = stb_len;\nctx_b.ma  = ma;   ctx_b.ma_len  = ma_len;\nif (ngcc_run_performance_op(&local_cfg, kex_derive_ss_b_op, &ctx_b, out_b) != 0) {\n    goto cleanup;\n}",
+    "fix": "typedef struct {\n    const ngcc_api_t *api;\n    unsigned char *ska;  unsigned long long ska_len;\n    unsigned char *pkb;  unsigned long long pkb_len;\n    unsigned char *skb;  unsigned long long skb_len;\n    unsigned char *pka;  unsigned long long pka_len;\n    unsigned char *sta_seed; unsigned long long sta_len;\n    unsigned char *stb_seed; unsigned long long stb_len;\n    unsigned char *ma_seed;  unsigned long long ma_len;\n    unsigned char *mb_seed;  unsigned long long mb_len;\n    unsigned char *ss;   unsigned long long ss_cap;\n} kex_derive_ctx_t;\n\nstatic int kex_derive_ss_a_op(void *ctx_ptr) {\n    kex_derive_ctx_t *c = (kex_derive_ctx_t *) ctx_ptr;\n    unsigned long long ss_len = c->ss_cap;\n    unsigned char *sta = (unsigned char *) malloc((size_t) c->sta_len);\n    unsigned char *mb = (unsigned char *) malloc((size_t) c->mb_len);\n    int rc;\n\n    if (sta == NULL || mb == NULL) {\n        free(sta);\n        free(mb);\n        return -1;\n    }\n\n    memcpy(sta, c->sta_seed, (size_t) c->sta_len);\n    memcpy(mb, c->mb_seed, (size_t) c->mb_len);\n    rc = c->api->kex_derive_ss_a(c->ska, c->ska_len, c->pkb, c->pkb_len,\n                                 mb, c->mb_len, sta, c->sta_len, c->ss, &ss_len);\n    free(sta);\n    free(mb);\n    return rc;\n}"
+  },
+  {
+    "source": "codex",
+    "file": "ngcc_bench/src/main.c",
+    "line": "398-400",
+    "severity": "medium",
+    "title": "Byte-throughput stability metrics are disabled for SIG/KEM/KEX",
+    "problem": "`ngcc_run_stability()` now receives `bytes_per_case_fn` only for hash. For `sig`, `kem`, and `kex`, `throughput_mean_bytes`, `throughput_max_bytes`, and the `[...][stability][throughput_bytes]` console line are never populated anymore. This is a behavior regression; for example, `kem` stability no longer prints byte-throughput output.",
+    "code": "rc = ngcc_run_stability(api,\n                        dispatch->correctness_fn,\n                        (test->kind == NGCC_TEST_HASH) ? dispatch->bytes_per_case_fn : NULL,\n                        (test->kind == NGCC_TEST_HASH) ? opts->digest_len_bits : 0,\n                        NGCC_STABILITY_MSG_LEN,\n                        1,\n                        opts->stability_sample_ms,\n                        opts->duration_hours,\n                        opts->stability_max_cases,\n                        &opts->stability_thresholds,\n                        &result);",
+    "fix": "rc = ngcc_run_stability(api,\n                        dispatch->correctness_fn,\n                        dispatch->bytes_per_case_fn,\n                        (test->kind == NGCC_TEST_HASH) ? opts->digest_len_bits : 0,\n                        NGCC_STABILITY_MSG_LEN,\n                        1,\n                        opts->stability_sample_ms,\n                        opts->duration_hours,\n                        opts->stability_max_cases,\n                        &opts->stability_thresholds,\n                        &result);"
+  },
+  {
+    "source": "codex",
+    "file": "ngcc_bench/src/bench_kex.c",
+    "line": "282-283",
+    "severity": "medium",
+    "title": "KEX KAT verification truncates protocols above 10 passes",
+    "problem": "The loader now accepts KEX libraries with up to 20 passes, but KAT verification still hard-codes a scan limit of 10. For an 11-20 pass protocol, the verifier stops at `M10` and derives the secret from incomplete transcript/state, causing false failures against valid vectors.",
+    "code": "/* Maximum number of KEX passes to scan for (M1..M{N}, Pass{N}_Sta/Stb). */\n#define KEX_MAX_PASS_SCAN 10\n\n...\n\nfor (pass = 1; pass <= KEX_MAX_PASS_SCAN; ++pass) {\n    char m_name[16];\n    ...\n    snprintf(m_name, sizeof(m_name), \"M%d\", pass);\n    msg = ngcc_kat_get_field(vec, m_name);\n    if (!kex_field_populated(msg)) {\n        break;  /* no more passes */\n    }",
+    "fix": "unsigned long long max_pass_scan = api->kex_passes_num;\nunsigned long long pass;\n\nfor (pass = 1; pass <= max_pass_scan; ++pass) {\n    char m_name[16];\n    ...\n    snprintf(m_name, sizeof(m_name), \"M%llu\", pass);\n    msg = ngcc_kat_get_field(vec, m_name);\n    if (!kex_field_populated(msg)) {\n        break;\n    }"
+  },
+  {
+    "source": "codex",
+    "file": "ngcc_bench/src/stability.c",
+    "line": "138-140",
+    "severity": "medium",
+    "title": "Stability memory fields now report heap bytes as RSS",
+    "problem": "The code switched stability memory sampling from RSS to `ngcc_mem_heap_bytes()`, but the public fields are still named `memory_*_bytes` and `memory_peak_rss_bytes`. This silently changes semantics and breaks portability: `ngcc_mem_heap_bytes()` returns `0` on macOS and on platforms without `mallinfo2`, so memory growth becomes permanently zero and leaks outside `malloc()` are invisible.",
+    "code": "memory_start = ngcc_mem_heap_bytes();\nmemory_min = memory_start;\nmemory_max = memory_start;\n\n...\n\ncurrent_mem = ngcc_mem_heap_bytes();\nif (current_mem < memory_min) {\n    memory_min = current_mem;\n}\nif (current_mem > memory_max) {\n    memory_max = current_mem;\n}\n\n...\n\nmemory_end = ngcc_mem_heap_bytes();\nif (memory_end < memory_min) {\n    memory_min = memory_end;\n}\nif (memory_end > memory_max) {\n    memory_max = memory_end;\n}\n\n...\n\nout_result->memory_start_bytes = memory_start;\nout_result->memory_end_bytes = memory_end;\nout_result->memory_min_bytes = memory_min;\nout_result->memory_max_bytes = memory_max;\nout_result->memory_peak_rss_bytes = memory_max;",
+    "fix": "memory_start = ngcc_mem_current_rss_bytes();\nmemory_min = memory_start;\nmemory_max = memory_start;\n\n...\n\ncurrent_mem = ngcc_mem_current_rss_bytes();\nif (current_mem < memory_min) {\n    memory_min = current_mem;\n}\nif (current_mem > memory_max) {\n    memory_max = current_mem;\n}\n{\n    uint64_t peak_rss = ngcc_mem_peak_rss_bytes();\n    if (peak_rss > memory_max) {\n        memory_max = peak_rss;\n    }\n}\n\n...\n\nmemory_end = ngcc_mem_current_rss_bytes();\nif (memory_end < memory_min) {\n    memory_min = memory_end;\n}\nif (memory_end > memory_max) {\n    memory_max = memory_end;\n}\n\n...\n\nout_result->memory_peak_rss_bytes = ngcc_mem_peak_rss_bytes();"
+  }
+]

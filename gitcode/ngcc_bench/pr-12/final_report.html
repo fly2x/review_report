@@ -1,0 +1,335 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Final Report: openHiTLS/ngcc_bench#12</title>
+    <style>
+        :root { --critical: #dc2626; --high: #ea580c; --medium: #ca8a04; --low: #65a30d;
+                 --trusted: #059669; --likely: #0284c7; --evaluate: #7c3aed; }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: system-ui, sans-serif; background: #f8fafc; color: #1e293b; padding: 2rem; line-height: 1.6; }
+        .container { max-width: 900px; margin: 0 auto; }
+        h1 { font-size: 1.75rem; margin-bottom: 0.5rem; }
+        .subtitle { color: #64748b; margin-bottom: 1rem; }
+        .stats { display: flex; gap: 1rem; margin-bottom: 2rem; flex-wrap: wrap; }
+        .stat { background: white; border: 1px solid #e2e8f0; border-radius: 0.5rem; padding: 1rem; min-width: 100px; text-align: center; }
+        .stat-value { font-size: 1.5rem; font-weight: 700; }
+        .stat-label { font-size: 0.875rem; color: #64748b; }
+        .stat.critical .stat-value { color: var(--critical); }
+        .stat.high .stat-value { color: var(--high); }
+        .stat.medium .stat-value { color: var(--medium); }
+        .stat.low .stat-value { color: var(--low); }
+        .reviewers { background: #e0e7ff; color: #3730a3; padding: 0.5rem 1rem; border-radius: 0.5rem; margin-bottom: 2rem; }
+        .section { margin-bottom: 2rem; }
+        .section-title { font-size: 1.1rem; font-weight: 600; padding: 0.5rem 1rem; border-radius: 0.5rem 0.5rem 0 0; color: white; }
+        .section-title.critical { background: var(--critical); }
+        .section-title.high { background: var(--high); }
+        .section-title.medium { background: var(--medium); }
+        .section-title.low { background: var(--low); }
+        .issue { background: white; border: 1px solid #e2e8f0; border-top: none; padding: 1rem; }
+        .issue:last-child { border-radius: 0 0 0.5rem 0.5rem; }
+        .issue-title { font-weight: 600; margin-bottom: 0.25rem; }
+        .issue-location { font-family: monospace; font-size: 0.875rem; color: #64748b; margin-bottom: 0.5rem; }
+        .issue-meta { font-size: 0.75rem; margin-bottom: 0.75rem; display: flex; gap: 0.75rem; align-items: center; }
+        .issue-meta .reviewers { background: #f1f5f9; color: #475569; padding: 0.25rem 0.5rem; border-radius: 0.25rem; margin: 0; }
+        .confidence-badge { padding: 0.25rem 0.5rem; border-radius: 0.25rem; font-weight: 500; }
+        .confidence-badge.trusted { background: #d1fae5; color: #065f46; }
+        .confidence-badge.likely { background: #dbeafe; color: #1e40af; }
+        .confidence-badge.evaluate { background: #ede9fe; color: #5b21b6; }
+        pre { background: #1e293b; color: #e2e8f0; padding: 0.75rem; border-radius: 0.375rem; overflow-x: auto; font-size: 0.875rem; margin: 0.5rem 0; }
+        .problem { margin: 0.75rem 0; }
+        .fix-label { font-weight: 600; margin-top: 0.75rem; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Final Code Review Report</h1>
+        <div class="subtitle">openHiTLS/ngcc_bench - PR #12</div>
+        <p style="margin-bottom: 1rem;"></p>
+
+        <div class="stats">
+            <div class="stat"><div class="stat-value">7</div><div class="stat-label">Total</div></div>
+            <div class="stat critical"><div class="stat-value">0</div><div class="stat-label">Critical</div></div>
+            <div class="stat high"><div class="stat-value">3</div><div class="stat-label">High</div></div>
+            <div class="stat medium"><div class="stat-value">4</div><div class="stat-label">Medium</div></div>
+            <div class="stat low"><div class="stat-value">0</div><div class="stat-label">Low</div></div>
+        </div>
+
+        <div class="reviewers">Reviewers: claude, codex</div>
+<div class="section"><div class="section-title high">High</div>
+<div class="issue">
+                <div class="issue-title">Breaking JSON schema change without version bump</div>
+                <div class="issue-location">docs/json_schema_v4.json:102-107</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CLAUDE</span>
+                    <span class="confidence-badge trusted">置信度: 可信</span>
+                </div>
+                <pre>"required": [
+  "hash",
+  "sig",
+  "kem",
+  "kex"
+],</pre>
+                <div class="problem"><strong>Issue:</strong> The JSON schema v4 changed the `tests.required` fields from `["hash", "dsa", "dsa-keygen", "dsa-sig", "dsa-verify", "kem", "kex", "kem-keygen", "kem-encap", "kem-decap"]` to `["hash", "sig", "kem", "kex"]`. This is a breaking change for external tools/CI pipelines that validate against schema v4, but the schema_version constant remains 4 in json_report.c:249. Semantic versioning requires incrementing the version for breaking changes.</div>
+                <div class="fix-label">Fix:</div><pre>Option 1: Increment schema_version to 5 in json_report.c:249 and update all schema file names
+Option 2: Keep backward compatibility by including old field names as optional (deprecated) fields</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">SIG KAT mode only validates sig_verify, missing keygen/sign tests</div>
+                <div class="issue-location">ngcc_bench/src/main.c:68-76</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CODEX</span>
+                    <span class="confidence-badge trusted">置信度: 可信</span>
+                </div>
+                <pre>static int sig_verify_kat_dispatch(const ngcc_api_t *api,
+                                   int digest_len_bits,
+                                   const char *kat_path,
+                                   unsigned long long *out_total,
+                                   unsigned long long *out_passed,
+                                   unsigned long long *out_failed) {
+    (void) digest_len_bits;
+    return ngcc_sig_verify_correctness_kat_file(api, kat_path, out_total, out_passed, out_failed);
+}</pre>
+                <div class="problem"><strong>Issue:</strong> The `sig_verify_kat_dispatch` function only calls `ngcc_sig_verify_correctness_kat_file()`. When `--test sig --mode correctness --kat ...` is used, `sig_keygen()` and `sig_sign()` operations are never exercised. A library with broken key generation or signing can report `[sig][correctness] PASS` as long as verify succeeds. No functions named `ngcc_sig_keygen_correctness_kat_file()` or `ngcc_sig_sign_correctness_kat_file()` exist in the codebase.</div>
+                <div class="fix-label">Fix:</div><pre>/* SIG KAT format does not support full keygen+sign+verify validation.
+ * Fall back to runtime correctness for SIG, or report unsupported. */
+static int sig_kat_not_supported_dispatch(const ngcc_api_t *api,
+                                         int digest_len_bits,
+                                         const char *kat_path,
+                                         unsigned long long *out_total,
+                                         unsigned long long *out_passed,
+                                         unsigned long long *out_failed) {
+    (void) api;
+    (void) digest_len_bits;
+    (void) kat_path;
+    (void) out_total;
+    (void) out_passed;
+    (void) out_failed;
+    return 1; /* KAT_NO_VECTOR: fall back to runtime correctness */
+}</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">1-pass KEX correctness passes without verifying A-side derive_ss_a</div>
+                <div class="issue-location">ngcc_bench/src/bench_kex.c:121-134</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CLAUDE, CODEX</span>
+                    <span class="confidence-badge trusted">置信度: 可信</span>
+                </div>
+                <pre>if (mb == NULL) {
+    /* 1-pass: B derives from last A-msg, A has no B-msg to derive from.
+     * Only B-side derive is possible. */
+    if (api-&gt;kex_derive_ss_b(skb, skb_len, pka, pka_len, ma, ma_len, stb, stb_len, ssb, &amp;ssb_len) != 0) {
+        return -1;
+    }
+    /* For 1-pass, we may not be able to verify A-side without a B-msg.
+     * Skip A-side derive and just check B output is valid. */
+    if (ssb_len == 0 || ssb_len &gt; ss_cap) {
+        return -1;
+    }
+    return 0;
+}</pre>
+                <div class="problem"><strong>Issue:</strong> For 1-pass KEX protocols (`mb == NULL`), correctness returns success after only calling `kex_derive_ss_b()`. The `kex_derive_ss_a()` function is never called, and no shared-secret equality check is performed. A library with a broken A-side derive will pass correctness. The comment "we may not be able to verify A-side without a B-msg" is incorrect - proper 1-pass KEX should allow both parties to derive matching secrets.</div>
+                <div class="fix-label">Fix:</div><pre>if (mb == NULL) {
+    /* 1-pass protocol: both parties should derive from available info.
+     * A-side uses NULL mb, B-side uses ma. Both must succeed and outputs must match. */
+    unsigned long long ssa_len = ss_cap;
+    if (api-&gt;kex_derive_ss_a(ska, ska_len, pkb, pkb_len, NULL, 0, sta, sta_len, ssa, &amp;ssa_len) != 0) {
+        return -1;
+    }
+    if (api-&gt;kex_derive_ss_b(skb, skb_len, pka, pka_len, ma, ma_len, stb, stb_len, ssb, &amp;ssb_len) != 0) {
+        return -1;
+    }
+    if (ssa_len == 0 || ssa_len &gt; ss_cap || ssb_len == 0 || ssb_len &gt; ss_cap || ssa_len != ssb_len) {
+        return -1;
+    }
+    if (memcmp(ssa, ssb, (size_t) ssa_len) != 0) {
+        return -1;
+    }
+    return 0;
+}</pre>
+            </div>
+</div>
+<div class="section"><div class="section-title medium">Medium</div>
+<div class="issue">
+                <div class="issue-title">KEX performance reuses mutable protocol state across all iterations</div>
+                <div class="issue-location">ngcc_bench/src/bench_kex.c:693-764</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CODEX</span>
+                    <span class="confidence-badge likely">置信度: 较可信</span>
+                </div>
+                <pre>/* ── Setup: run the full protocol once to get intermediate state ── */
+{
+    ...
+    if (api-&gt;kex_init_a(pka, &amp;pka_len, ska, &amp;ska_len, sta, &amp;sta_len) != 0) { goto cleanup; }
+    if (api-&gt;kex_init_b(pkb, &amp;pkb_len, skb, &amp;skb_len, stb, &amp;stb_len) != 0) { goto cleanup; }
+    ...
+}
+
+ctx_a.sta = sta;  ctx_a.sta_len = sta_len;
+ctx_a.mb  = mb;   ctx_a.mb_len  = mb_len;
+if (ngcc_run_performance_op(&amp;local_cfg, kex_derive_ss_a_op, &amp;ctx_a, out_a) != 0) {
+    goto cleanup;
+}</pre>
+                <div class="problem"><strong>Issue:</strong> The benchmark runs the full KEX protocol once (lines 693-729), stores intermediate state (`sta`, `stb`, `ma`, `mb`), then reuses the same pointers for every derive_ss iteration. If `kex_derive_ss_a()` or `kex_derive_ss_b()` consumes or mutates the state buffers, performance will fail after the first iteration or measure an invalid hot/cold state. The correctness test may pass while performance fails.</div>
+                <div class="fix-label">Fix:</div><pre>typedef struct {
+    const ngcc_api_t *api;
+    unsigned char *ska;  unsigned long long ska_len;
+    unsigned char *pkb;  unsigned long long pkb_len;
+    unsigned char *sta_seed; unsigned long long sta_len;
+    unsigned char *mb_seed;  unsigned long long mb_len;
+    unsigned char *ss;   unsigned long long ss_cap;
+} kex_derive_ctx_t;
+
+static int kex_derive_ss_a_op(void *ctx_ptr) {
+    kex_derive_ctx_t *c = (kex_derive_ctx_t *) ctx_ptr;
+    unsigned long long ss_len = c-&gt;ss_cap;
+    unsigned char *sta = (unsigned char *) malloc((size_t) c-&gt;sta_len);
+    unsigned char *mb = (unsigned char *) malloc((size_t) c-&gt;mb_len);
+    int rc;
+
+    if (sta == NULL || mb == NULL) {
+        free(sta);
+        free(mb);
+        return -1;
+    }
+
+    memcpy(sta, c-&gt;sta_seed, (size_t) c-&gt;sta_len);
+    memcpy(mb, c-&gt;mb_seed, (size_t) c-&gt;mb_len);
+    rc = c-&gt;api-&gt;kex_derive_ss_a(c-&gt;ska, c-&gt;ska_len, c-&gt;pkb, c-&gt;pkb_len,
+                                 mb, c-&gt;mb_len, sta, c-&gt;sta_len, c-&gt;ss, &amp;ss_len);
+    free(sta);
+    free(mb);
+    return rc;
+}</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">Byte-throughput stability metrics disabled for SIG/KEM/KEX tests</div>
+                <div class="issue-location">ngcc_bench/src/main.c:398-400</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CODEX</span>
+                    <span class="confidence-badge trusted">置信度: 可信</span>
+                </div>
+                <pre>rc = ngcc_run_stability(api,
+                        dispatch-&gt;correctness_fn,
+                        (test-&gt;kind == NGCC_TEST_HASH) ? dispatch-&gt;bytes_per_case_fn : NULL,
+                        (test-&gt;kind == NGCC_TEST_HASH) ? opts-&gt;digest_len_bits : 0,
+                        NGCC_STABILITY_MSG_LEN,
+                        1,
+                        opts-&gt;stability_sample_ms,
+                        opts-&gt;duration_hours,
+                        opts-&gt;stability_max_cases,
+                        &amp;opts-&gt;stability_thresholds,
+                        &amp;result);</pre>
+                <div class="problem"><strong>Issue:</strong> The `ngcc_run_stability()` call changed from passing `dispatch->bytes_per_case_fn` directly to only passing it for HASH tests: `(test->kind == NGCC_TEST_HASH) ? dispatch->bytes_per_case_fn : NULL`. This causes `throughput_mean_bytes`, `throughput_max_bytes`, and console output `[...][stability][throughput_bytes]` to never populate for SIG, KEM, and KEX tests. This is a behavior regression from the previous version.</div>
+                <div class="fix-label">Fix:</div><pre>rc = ngcc_run_stability(api,
+                        dispatch-&gt;correctness_fn,
+                        dispatch-&gt;bytes_per_case_fn,
+                        (test-&gt;kind == NGCC_TEST_HASH) ? opts-&gt;digest_len_bits : 0,
+                        NGCC_STABILITY_MSG_LEN,
+                        1,
+                        opts-&gt;stability_sample_ms,
+                        opts-&gt;duration_hours,
+                        opts-&gt;stability_max_cases,
+                        &amp;opts-&gt;stability_thresholds,
+                        &amp;result);</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">KEX KAT verification truncates protocols above 10 passes</div>
+                <div class="issue-location">ngcc_bench/src/bench_kex.c:282-283</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CODEX</span>
+                    <span class="confidence-badge trusted">置信度: 可信</span>
+                </div>
+                <pre>/* Maximum number of KEX passes to scan for (M1..M{N}, Pass{N}_Sta/Stb). */
+#define KEX_MAX_PASS_SCAN 10
+
+...
+
+for (pass = 1; pass &lt;= KEX_MAX_PASS_SCAN; ++pass) {
+    char m_name[16];
+    ...
+    snprintf(m_name, sizeof(m_name), "M%d", pass);
+    msg = ngcc_kat_get_field(vec, m_name);
+    if (!kex_field_populated(msg)) {
+        break;  /* no more passes */
+    }</pre>
+                <div class="problem"><strong>Issue:</strong> KAT verification hard-codes `KEX_MAX_PASS_SCAN 10` at line 283, but the loader now accepts KEX libraries with up to 20 passes (via `kex_passes_num` in ngcc_api.h). For protocols with 11-20 passes, the verifier stops at `M10` and derives the shared secret from an incomplete transcript, causing false failures against valid KAT vectors.</div>
+                <div class="fix-label">Fix:</div><pre>/* Use the library's reported pass count instead of hardcoded limit */
+unsigned long long max_pass_scan = api-&gt;kex_passes_num;
+unsigned long long pass;
+
+for (pass = 1; pass &lt;= max_pass_scan; ++pass) {
+    char m_name[16];
+    ...
+    snprintf(m_name, sizeof(m_name), "M%llu", pass);
+    msg = ngcc_kat_get_field(vec, m_name);
+    if (!kex_field_populated(msg)) {
+        break;
+    }</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">Stability memory metrics changed from RSS to heap without documentation</div>
+                <div class="issue-location">ngcc_bench/src/stability.c:138-140</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CODEX</span>
+                    <span class="confidence-badge trusted">置信度: 可信</span>
+                </div>
+                <pre>memory_start = ngcc_mem_heap_bytes();
+memory_min = memory_start;
+memory_max = memory_start;
+
+...
+
+current_mem = ngcc_mem_heap_bytes();
+if (current_mem &lt; memory_min) {
+    memory_min = current_mem;
+}
+if (current_mem &gt; memory_max) {
+    memory_max = current_mem;
+}
+
+...
+
+memory_end = ngcc_mem_heap_bytes();
+if (memory_end &lt; memory_min) {
+    memory_min = memory_end;
+}
+if (memory_end &gt; memory_max) {
+    memory_max = memory_end;
+}
+
+...
+
+out_result-&gt;memory_peak_rss_bytes = memory_max;</pre>
+                <div class="problem"><strong>Issue:</strong> The code changed from `ngcc_mem_current_rss_bytes()` to `ngcc_mem_heap_bytes()` but the public field names `memory_*_bytes` and `memory_peak_rss_bytes` imply RSS semantics. On macOS and platforms without `mallinfo2`, `ngcc_mem_heap_bytes()` returns 0, causing memory growth to permanently report as 0 and leaks outside malloc to be invisible. This silently changes semantics without updating the schema or field names.</div>
+                <div class="fix-label">Fix:</div><pre>/* Use RSS for cross-platform consistency; heap_bytes returns 0 on macOS */
+memory_start = ngcc_mem_current_rss_bytes();
+memory_min = memory_start;
+memory_max = memory_start;
+
+...
+
+current_mem = ngcc_mem_current_rss_bytes();
+if (current_mem &lt; memory_min) {
+    memory_min = current_mem;
+}
+if (current_mem &gt; memory_max) {
+    memory_max = current_mem;
+}
+{
+    uint64_t peak_rss = ngcc_mem_peak_rss_bytes();
+    if (peak_rss &gt; memory_max) {
+        memory_max = peak_rss;
+    }
+}
+
+...
+
+memory_end = ngcc_mem_current_rss_bytes();
+/* ... min/max updates ... */
+
+out_result-&gt;memory_peak_rss_bytes = ngcc_mem_peak_rss_bytes();</pre>
+            </div>
+</div>
+</div></body></html>
