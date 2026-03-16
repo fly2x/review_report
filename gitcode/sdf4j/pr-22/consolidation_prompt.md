@@ -17,21 +17,34 @@ You are consolidating change review findings from multiple AI reviewers.
 
 ## High
 
-### Private key material exposure through getEncoded()
-`sdf4j-jce/src/main/java/org/openhitls/sdf4j/jce/key/SM2PrivateKey.java:45`
+### Missing IV length validation in sm4EncryptInit
+`sdf4j-jce/src/main/native/src/sdf_jce_sm4.c:224-238`
 ```
-@Override
-    public byte[] getEncoded() {
-        return keyBytes;
+jbyte *ivBytes = NULL;
+if (iv != NULL) {
+    jsize ivLen = (*env)->GetArrayLength(env, iv);
+    if (ivLen != SM4_IV_LENGTH) {
+        (*env)->ReleaseByteArrayElements(env, key, keyBytes, JNI_ABORT);
+        throw_exception(env, "java/lang/IllegalArgumentException", "IV must be 16 bytes");
+        return 0;
     }
+    ivBytes = (*env)->GetByteArrayElements(env, iv, NULL);
+}
 ```
-**Issue**: The getEncoded() method returns the internal keyBytes array directly instead of a clone. This allows external code to modify the private key material, which is a security vulnerability.
+**Issue**: When iv parameter is non-NULL, the code checks IV length in decryptInit but not in encryptInit. This could lead to buffer over-read if an incorrectly sized IV is passed.
 **Fix**:
 ```
-@Override
-    public byte[] getEncoded() {
-        return keyBytes.clone();
+jbyte *ivBytes = NULL;
+jsize ivLen = 0;
+if (iv != NULL) {
+    ivLen = (*env)->GetArrayLength(env, iv);
+    if (ivLen != SM4_IV_LENGTH) {
+        (*env)->ReleaseByteArrayElements(env, key, keyBytes, JNI_ABORT);
+        throw_exception(env, "java/lang/IllegalArgumentException", "IV must be 16 bytes");
+        return 0;
     }
+    ivBytes = (*env)->GetByteArrayElements(env, iv, NULL);
+}
 ```
 
 ---
@@ -39,431 +52,221 @@ You are consolidating change review findings from multiple AI reviewers.
 
 ## Medium
 
-### Public key coordinates exposed without cloning
-`sdf4j-jce/src/main/java/org/openhitls/sdf4j/jce/key/SM2PublicKey.java:64-68`
+### SM2PublicKey exposes internal key arrays
+`sdf4j-jce/src/main/java/org/openhitls/sdf4j/jce/key/SM2PublicKey.java:65-68`
 ```
 public byte[] getX() {
-        return x;
-    }
+    return x;
+}
 
-    public byte[] getY() {
-        return y;
-    }
+public byte[] getY() {
+    return y;
+}
 ```
-**Issue**: The getX() and getY() methods return the internal x and y arrays directly without cloning. This allows external code to modify the public key coordinates.
+**Issue**: getX() and getY() methods return the internal byte arrays directly instead of clones, allowing external code to modify the key material.
 **Fix**:
 ```
 public byte[] getX() {
-        return x.clone();
-    }
+    return x.clone();
+}
 
-    public byte[] getY() {
-        return y.clone();
-    }
+public byte[] getY() {
+    return y.clone();
+}
 ```
 
 ---
 
-### Native library extracted to temp directory without restrictive permissions
-`sdf4j-jce/src/main/java/org/openhitls/sdf4j/jce/NativeLoader.java:94-98`
+### DERCodec copyToFixedBuffer has incorrect truncation logic
+`sdf4j-jce/src/main/java/org/openhitls/sdf4j/jce/util/DERCodec.java:173-193`
 ```
-// Extract the library (always re-extract to ensure using latest version)
-            Files.copy(is, tempLib, StandardCopyOption.REPLACE_EXISTING);
-
-            // Load the extracted library
-            System.load(tempLib.toAbsolutePath().toString());
+if (srcLen > fixedLen) {
+    // 截断高位，因为interger的编码在高bit=0的时候会增加00, 导致编码长度是33
+    System.arraycopy(src, srcLen - fixedLen, dest, offset, fixedLen);
+}
 ```
-**Issue**: The loadLibraryFromResources() method extracts the native library to /tmp/sdf4j-jce-native without setting restrictive file permissions. On multi-user systems, another user could potentially replace the library before it's loaded.
+**Issue**: When srcLen > fixedLen (32 bytes), the code truncates from the end. However, for properly encoded DER integers, when high bit is 0 and there's a leading 0x00 byte (making 33 bytes), this would truncate the wrong byte (the 0x00 prefix should be removed, not trailing bytes).
 **Fix**:
 ```
-// Extract the library (always re-extract to ensure using latest version)
-            Files.copy(is, tempLib, StandardCopyOption.REPLACE_EXISTING);
-
-            // Set restrictive permissions (owner read-only)
-            try {
-                Files.setPosixFilePermissions(tempLib, PosixFilePermissions.fromString("r--------"));
-            } catch (UnsupportedOperationException e) {
-                // Not a POSIX system, skip
-            }
-
-            // Load the extracted library
-            System.load(tempLib.toAbsolutePath().toString());
+if (srcLen > fixedLen) {
+    // If first byte is 0x00 (sign byte for positive integers with high bit set), skip it
+    if (src[0] == 0 && srcLen == fixedLen + 1) {
+        System.arraycopy(src, 1, dest, offset, fixedLen);
+    } else {
+        throw new IllegalArgumentException("Integer value too large for " + fixedLen + " bytes");
+    }
+}
 ```
 
 ---
 
-### Resource cleanup relies on finalize() which is unreliable
-`sdf4j-jce/src/main/java/org/openhitls/sdf4j/jce/cipher/SM4Cipher.java:531-543`
+### sm3Update lacks null data array check
+`sdf4j-jce/src/main/native/src/sdf_jce_sm3.c:90-97`
+```
+SM3Context *ctx = (SM3Context *)(uintptr_t)ctxHandle;
+if (ctx == NULL || !ctx->initialized) {
+    throw_exception(env, "java/lang/IllegalStateException", "Context not initialized");
+    return;
+}
+
+jbyte *dataBytes = (*env)->GetByteArrayElements(env, data, NULL);
+```
+**Issue**: The function doesn't check if data is NULL before calling GetByteArrayElements. If an empty byte array is passed, GetByteArrayElements could return NULL, leading to null pointer dereference.
+**Fix**:
+```
+SM3Context *ctx = (SM3Context *)(uintptr_t)ctxHandle;
+if (ctx == NULL || !ctx->initialized) {
+    throw_exception(env, "java/lang/IllegalStateException", "Context not initialized");
+    return;
+}
+
+if (data == NULL) {
+    throw_exception(env, "java/lang/NullPointerException", "data is null");
+    return;
+}
+
+jbyte *dataBytes = (*env)->GetByteArrayElements(env, data, NULL);
+if (dataBytes == NULL) {
+    throw_exception(env, "java/lang/OutOfMemoryError", "Failed to get byte array");
+    return;
+}
+```
+
+---
+
+### SM4Cipher uses deprecated finalize() for cleanup
+`sdf4j-jce/src/main/java/org/openhitls/sdf4j/jce/cipher/SM4Cipher.java:531-562`
 ```
 @Override
-    protected void finalize() throws Throwable {
-        try {
-            cleanup();
-            if (sessionHandle != 0) {
-                SDFJceNative.closeSession(sessionHandle);
-            }
-        } finally {
-            super.finalize();
-        }
-    }
-```
-**Issue**: The sessionHandle is only cleaned up in finalize(), which is not guaranteed to run and may run arbitrarily late. This can lead to resource leaks. There should be an explicit close() method or implement AutoCloseable.
-**Fix**:
-```
-// Implement AutoCloseable for explicit resource management
-    public void close() {
+protected void finalize() throws Throwable {
+    try {
         cleanup();
         if (sessionHandle != 0) {
             SDFJceNative.closeSession(sessionHandle);
-            sessionHandle = 0;
         }
+    } finally {
+        super.finalize();
     }
-
-    @Override
-    protected void finalize() throws Throwable {
-        try {
-            close();
-        } finally {
-            super.finalize();
-        }
-    }
+}
 ```
-
----
-
-### Resource cleanup relies on finalize() which is unreliable
-`sdf4j-jce/src/main/java/org/openhitls/sdf4j/jce/signature/SM2Signature.java:178-186`
-```
-@Override
-    protected void finalize() throws Throwable {
-        try {
-            if (sessionHandle != 0) {
-                SDFJceNative.closeSession(sessionHandle);
-            }
-        } finally {
-            super.finalize();
-        }
-    }
-```
-**Issue**: The sessionHandle is only cleaned up in finalize(). This class should implement AutoCloseable to provide explicit resource cleanup.
+**Issue**: The finalize() method is deprecated and unreliable. Resources may not be released properly. The class should implement AutoCloseable instead.
 **Fix**:
 ```
 public void close() {
-        if (sessionHandle != 0) {
-            SDFJceNative.closeSession(sessionHandle);
-            sessionHandle = 0;
-        }
+    cleanup();
+    if (sessionHandle != 0) {
+        SDFJceNative.closeSession(sessionHandle);
+        sessionHandle = 0;
     }
+}
 
-    @Override
-    protected void finalize() throws Throwable {
-        try {
-            close();
-        } finally {
-            super.finalize();
-        }
+@Override
+@Deprecated
+protected void finalize() throws Throwable {
+    try {
+        close();
+    } finally {
+        super.finalize();
     }
+}
 ```
 
 ---
 
-### Silent truncation of signature values in copyToFixedBuffer
-`sdf4j-jce/src/main/java/org/openhitls/sdf4j/jce/util/DERCodec.java:196-209`
-```
-private static void copyToFixedBuffer(byte[] src, byte[] dest, int offset) {
-        int srcLen = src.length;
-        int fixedLen = 32;
-
-        if (srcLen > fixedLen) {
-            // 截断高位
-            System.arraycopy(src, srcLen - fixedLen, dest, offset, fixedLen);
-        } else {
-            // 前导零填充
-            int padLen = fixedLen - srcLen;
-            for (int i = 0; i < padLen; i++) {
-                dest[offset + i] = 0;
-            }
-            System.arraycopy(src, 0, dest, offset + padLen, srcLen);
-        }
-    }
-```
-**Issue**: The copyToFixedBuffer function silently truncates data if srcLen > 32 bytes. This could lead to incorrect signature verification or encoding issues without any error indication.
-**Fix**:
-```
-private static void copyToFixedBuffer(byte[] src, byte[] dest, int offset) {
-        int srcLen = src.length;
-        int fixedLen = 32;
-
-        if (srcLen > fixedLen) {
-            // Truncation indicates invalid signature - throw exception
-            throw new IllegalArgumentException("Signature component too large: " + srcLen + " bytes");
-        } else {
-            // 前导零填充
-            int padLen = fixedLen - srcLen;
-            for (int i = 0; i < padLen; i++) {
-                dest[offset + i] = 0;
-            }
-            System.arraycopy(src, 0, dest, offset + padLen, srcLen);
-        }
-    }
-```
-
----
-
-### Resource cleanup relies on finalize()
-`sdf4j-jce/src/main/java/org/openhitls/sdf4j/jce/digest/SM3MessageDigest.java:104-115`
+### SM3MessageDigest uses deprecated finalize() for cleanup
+`sdf4j-jce/src/main/java/org/openhitls/sdf4j/jce/digest/SM3MessageDigest.java:97-107`
 ```
 @Override
-    protected void finalize() throws Throwable {
-        try {
-            cleanupContext();
-            if (sessionHandle != 0) {
-                SDFJceNative.closeSession(sessionHandle);
-            }
-        } finally {
-            super.finalize();
-        }
-    }
-```
-**Issue**: Like other JCE classes, this class uses finalize() for cleanup. Implementing AutoCloseable would provide better resource management.
-**Fix**:
-```
-public void close() {
+protected void finalize() throws Throwable {
+    try {
         cleanupContext();
         if (sessionHandle != 0) {
             SDFJceNative.closeSession(sessionHandle);
-            sessionHandle = 0;
         }
+    } finally {
+        super.finalize();
     }
-
-    @Override
-    protected void finalize() throws Throwable {
-        try {
-            close();
-        } finally {
-            super.finalize();
+}
+```
+**Issue**: The finalize() method is deprecated and unreliable. Resources may not be released properly. The class should extend a cleanup pattern.
+**Fix**:
+```
+@Override
+@Deprecated
+protected void finalize() throws Throwable {
+    try {
+        cleanupContext();
+        if (sessionHandle != 0) {
+            SDFJceNative.closeSession(sessionHandle);
         }
+    } finally {
+        super.finalize();
     }
+}
 ```
 
 ---
 
-### Resource cleanup relies on finalize()
-`sdf4j-jce/src/main/java/org/openhitls/sdf4j/jce/keygen/SM2KeyPairGenerator.java:73-80`
+### SM2Signature uses deprecated finalize() for cleanup
+`sdf4j-jce/src/main/java/org/openhitls/sdf4j/jce/signature/SM2Signature.java:175-183`
 ```
 @Override
-    protected void finalize() throws Throwable {
-        try {
-            if (sessionHandle != 0) {
-                SDFJceNative.closeSession(sessionHandle);
-            }
-        } finally {
-            super.finalize();
-        }
-    }
-```
-**Issue**: This class uses finalize() for session cleanup. The sessionHandle should be explicitly closable.
-**Fix**:
-```
-public void close() {
+protected void finalize() throws Throwable {
+    try {
         if (sessionHandle != 0) {
             SDFJceNative.closeSession(sessionHandle);
-            sessionHandle = 0;
         }
+    } finally {
+        super.finalize();
     }
-
-    @Override
-    protected void finalize() throws Throwable {
-        try {
-            close();
-        } finally {
-            super.finalize();
+}
+```
+**Issue**: The finalize() method is deprecated and unreliable. Session resources may leak.
+**Fix**:
+```
+@Override
+@Deprecated
+protected void finalize() throws Throwable {
+    try {
+        if (sessionHandle != 0) {
+            SDFJceNative.closeSession(sessionHandle);
         }
+    } finally {
+        super.finalize();
     }
+}
 ```
 
 ---
 
-### Resource cleanup relies on finalize()
-`sdf4j-jce/src/main/java/org/openhitls/sdf4j/jce/cipher/SM2Cipher.java:206-213`
+### SM2KeyPairGenerator uses deprecated finalize() for cleanup
+`sdf4j-jce/src/main/java/org/openhitls/sdf4j/jce/keygen/SM2KeyPairGenerator.java:73-81`
 ```
 @Override
-    protected void finalize() throws Throwable {
-        try {
-            if (sessionHandle != 0) {
-                SDFJceNative.closeSession(sessionHandle);
-            }
-        } finally {
-            super.finalize();
-        }
-    }
-```
-**Issue**: SM2Cipher also uses finalize() for session cleanup.
-**Fix**:
-```
-public void close() {
+protected void finalize() throws Throwable {
+    try {
         if (sessionHandle != 0) {
             SDFJceNative.closeSession(sessionHandle);
-            sessionHandle = 0;
         }
+    } finally {
+        super.finalize();
     }
-
-    @Override
-    protected void finalize() throws Throwable {
-        try {
-            close();
-        } finally {
-            super.finalize();
-        }
-    }
+}
 ```
-
----
-
-### Resource cleanup relies on finalize()
-`sdf4j-jce/src/main/java/org/openhitls/sdf4j/jce/random/SDFSecureRandom.java:57-64`
+**Issue**: The finalize() method is deprecated and unreliable. Session resources may leak.
+**Fix**:
 ```
 @Override
-    protected void finalize() throws Throwable {
-        try {
-            if (sessionHandle != 0) {
-                SDFJceNative.closeSession(sessionHandle);
-            }
-        } finally {
-            super.finalize();
-        }
-    }
-```
-**Issue**: SDFSecureRandom uses finalize() for session cleanup. This is particularly problematic since SecureRandom instances are often long-lived.
-**Fix**:
-```
-public void close() {
+@Deprecated
+protected void finalize() throws Throwable {
+    try {
         if (sessionHandle != 0) {
             SDFJceNative.closeSession(sessionHandle);
-            sessionHandle = 0;
         }
+    } finally {
+        super.finalize();
     }
-
-    @Override
-    protected void finalize() throws Throwable {
-        try {
-            close();
-        } finally {
-            super.finalize();
-        }
-    }
-```
-
----
-
-### Resource cleanup relies on finalize()
-`sdf4j-jce/src/main/java/org/openhitls/sdf4j/jce/keygen/SM4KeyGenerator.java:65-72`
-```
-@Override
-    protected void finalize() throws Throwable {
-        try {
-            if (sessionHandle != 0) {
-                SDFJceNative.closeSession(sessionHandle);
-            }
-        } finally {
-            super.finalize();
-        }
-    }
-```
-**Issue**: SM4KeyGenerator uses finalize() for session cleanup.
-**Fix**:
-```
-public void close() {
-        if (sessionHandle != 0) {
-            SDFJceNative.closeSession(sessionHandle);
-            sessionHandle = 0;
-        }
-    }
-
-    @Override
-    protected void finalize() throws Throwable {
-        try {
-            close();
-        } finally {
-            super.finalize();
-        }
-    }
-```
-
----
-
-### Resource cleanup relies on finalize()
-`sdf4j-jce/src/main/java/org/openhitls/sdf4j/jce/mac/HmacSM3.java:94-102`
-```
-@Override
-    protected void finalize() throws Throwable {
-        try {
-            cleanupKey();
-            if (sessionHandle != 0) {
-                SDFJceNative.closeSession(sessionHandle);
-            }
-        } finally {
-            super.finalize();
-        }
-    }
-```
-**Issue**: HmacSM3 uses finalize() for session cleanup.
-**Fix**:
-```
-public void close() {
-        cleanupKey();
-        if (sessionHandle != 0) {
-            SDFJceNative.closeSession(sessionHandle);
-            sessionHandle = 0;
-        }
-    }
-
-    @Override
-    protected void finalize() throws Throwable {
-        try {
-            close();
-        } finally {
-            super.finalize();
-        }
-    }
-```
-
----
-
-### Resource cleanup relies on finalize()
-`sdf4j-jce/src/main/java/org/openhitls/sdf4j/jce/mac/SM4Mac.java:119-128`
-```
-@Override
-    protected void finalize() throws Throwable {
-        try {
-            cleanupKey();
-            if (sessionHandle != 0) {
-                SDFJceNative.closeSession(sessionHandle);
-            }
-        } finally {
-            super.finalize();
-        }
-    }
-```
-**Issue**: SM4Mac uses finalize() for session cleanup.
-**Fix**:
-```
-public void close() {
-        cleanupKey();
-        if (sessionHandle != 0) {
-            SDFJceNative.closeSession(sessionHandle);
-            sessionHandle = 0;
-        }
-    }
-
-    @Override
-    protected void finalize() throws Throwable {
-        try {
-            close();
-        } finally {
-            super.finalize();
-        }
-    }
+}
 ```
 
 ---
@@ -471,79 +274,82 @@ public void close() {
 
 ## Low
 
-### Potential race condition in initialization check
-`sdf4j-jce/src/main/native/src/sdf_jce_init.c:28-36`
+### hexToBytes doesn't validate input length
+`sdf4j-jce/src/main/java/org/openhitls/sdf4j/jce/util/SM2Util.java:151-157`
 ```
-int sdf_jce_initialize(const char *library_path) {
-    if (g_sdf_initialized) {
-        /* 检查句柄是否有效（简单检查：不为NULL）*/
-        if (g_device_handle != NULL) {
-            return SDR_OK;  // 已初始化且句柄有效
-        }
-        /* 句柄无效，先清理 */
-        sdf_jce_cleanup();
+private static byte[] hexToBytes(String hex) {
+    int len = hex.length();
+    byte[] data = new byte[len / 2];
+    for (int i = 0; i < len; i += 2) {
+        data[i / 2] = (byte) ((Character.digit(hex.charAt(i), 16) << 4)
+                             + Character.digit(hex.charAt(i + 1), 16));
     }
+    return data;
+}
 ```
-**Issue**: The g_sdf_initialized flag is checked before checking g_device_handle validity, but the flag is set after successful initialization. Between the check and the set, another thread could see an inconsistent state.
+**Issue**: The method assumes the hex string has even length. If an odd-length string is passed, it will throw IndexOutOfBoundsException instead of a more descriptive error.
 **Fix**:
 ```
-int sdf_jce_initialize(const char *library_path) {
-    /* Use mutex to protect initialization */
-    static pthread_mutex_t init_mutex = PTHREAD_MUTEX_INITIALIZER;
-    pthread_mutex_lock(&init_mutex);
-
-    if (g_sdf_initialized) {
-        /* 检查句柄是否有效（简单检查：不为NULL）*/
-        if (g_device_handle != NULL) {
-            pthread_mutex_unlock(&init_mutex);
-            return SDR_OK;  // 已初始化且句柄有效
-        }
-        /* 句柄无效，先清理 */
-        sdf_jce_cleanup();
+private static byte[] hexToBytes(String hex) {
+    if (hex == null) {
+        throw new IllegalArgumentException("Hex string cannot be null");
     }
-    /* ... rest of function ... */
-    pthread_mutex_unlock(&init_mutex);
+    if (hex.length() % 2 != 0) {
+        throw new IllegalArgumentException("Hex string must have even length");
+    }
+    int len = hex.length();
+    byte[] data = new byte[len / 2];
+    for (int i = 0; i < len; i += 2) {
+        int high = Character.digit(hex.charAt(i), 16);
+        int low = Character.digit(hex.charAt(i + 1), 16);
+        if (high == -1 || low == -1) {
+            throw new IllegalArgumentException("Invalid hex string: " + hex);
+        }
+        data[i / 2] = (byte) ((high << 4) + low);
+    }
+    return data;
+}
 ```
 
 ---
 
-### Memory leak when strdup fails in SetLibraryPath
-`sdf4j-jce/src/main/native/src/sdf_jce_register.c:175-187`
-```
-/* 获取并保存新路径 */
-    const char *path_str = (*env)->GetStringUTFChars(env, path, NULL);
-    if (path_str != NULL) {
-        g_library_path = strdup(path_str);
-        (*env)->ReleaseStringUTFChars(env, path, path_str);
-    }
-```
-**Issue**: When GetStringUTFChars succeeds but strdup fails, the code returns without freeing the string from GetStringUTFChars, causing a memory leak.
-**Fix**:
-```
-/* 获取并保存新路径 */
-    const char *path_str = (*env)->GetStringUTFChars(env, path, NULL);
-    if (path_str != NULL) {
-        g_library_path = strdup(path_str);
-        (*env)->ReleaseStringUTFChars(env, path, path_str);
-        if (g_library_path == NULL) {
-            throw_exception(env, "java/lang/OutOfMemoryError", "Failed to allocate library path");
-        }
-    }
-```
-
----
-
-### forkCount changed from 0 to 1 may affect test behavior
+### Maven forkCount changed from 0 to 1
 `pom.xml:65`
 ```
--                        <!-- 禁用fork，在Maven主进程中运行测试，避免surefire临时文件 -->
--                        <forkCount>0</forkCount>
-+                        <forkCount>1</forkCount>
+<forkCount>1</forkCount>
 ```
-**Issue**: The forkCount is changed from 0 (no fork, run in Maven process) to 1 (fork new process). The original comment stated this was to "avoid surefire temporary files" and use "system class loader". This change may break tests that relied on the previous behavior.
+**Issue**: Changing forkCount from 0 (no fork) to 1 (forked process) may cause issues with stateful providers like JCE providers where provider registration needs to be shared.
 **Fix**:
 ```
-Keep the original forkCount=0 behavior if tests depend on running in the Maven process with system class loader. If the change is intentional, add a comment explaining why the change was made and what the implications are.
+<forkCount>0</forkCount>
+```
+
+---
+
+### Loaded flag visibility issue in double-checked locking
+`sdf4j-jce/src/main/java/org/openhitls/sdf4j/jce/NativeLoader.java:59`
+```
+public static synchronized void load() {
+    if (loaded) {
+        return;
+    }
+```
+**Issue**: The `loaded` flag is checked outside the synchronized block without proper volatile semantics. While volatile is declared, the double-check pattern could still have visibility issues on some JVMs.
+**Fix**:
+```
+private static volatile boolean loaded = false;
+
+public static void load() {
+    if (loaded) {
+        return;
+    }
+    synchronized (NativeLoader.class) {
+        if (loaded) {
+            return;
+        }
+        // ... loading logic
+    }
+}
 ```
 
 ---
@@ -557,305 +363,98 @@ Keep the original forkCount=0 behavior if tests depend on running in the Maven p
 **Reviewer**: GEMINI
 
 
+## Critical
+
+### Resource Leak: SDF Sessions exhausted due to per-instance allocation
+`sdf4j-jce/src/main/java/org/openhitls/sdf4j/jce/cipher/SM4Cipher.java:64-67`
+```
+public SM4Cipher() {
+        this.sessionHandle = SDFJceNative.openSession();
+        if (sessionHandle == 0) {
+            throw new IllegalStateException("Failed to open SDF session");
+        }
+```
+**Issue**: `SDFJceNative.openSession()` is called in the constructor, tying the SDF session lifecycle to the Java object lifecycle, relying on `finalize()` to close the session. Cryptographic hardware devices typically have a strict limit on concurrent sessions (e.g., 256 or 1024). Since `Cipher` objects are instantiated frequently and their garbage collection is non-deterministic (and `finalize` is deprecated/unreliable), this design will quickly exhaust device sessions, leading to application-wide cryptographic failures.
+**Fix**:
+```
+// Implement a shared session pool, or defer session opening until strictly necessary and release promptly.
+    // Example for delayed initialization:
+    public SM4Cipher() {
+        this.cipherMode = MODE_CBC;
+        // Do not open session in the constructor. Obtain it during engineInit/engineUpdate from a pool or per-operation.
+    }
+```
+
+---
+
+
 ## High
 
-### Cipher context is not implicitly reset for updates
-`sdf4j-jce/src/main/java/org/openhitls/sdf4j/jce/cipher/SM4Cipher.java:232-236`
-```
-if (ctx == 0) {
-            throw new IllegalStateException("Cipher not initialized");
-        }
-
-        if (opmode == Cipher.ENCRYPT_MODE || opmode == Cipher.WRAP_MODE) {
-```
-**Issue**: The JCE `Cipher` specification requires the cipher to be implicitly reset after `doFinal`. Since `doFinalStreaming` frees the context and sets `ctx = 0`, a subsequent `update` call will incorrectly throw an `IllegalStateException` instead of re-initializing the context.
-**Fix**:
-```
-if (ctx == 0) {
-            initStreamingContext();
-        }
-
-        if (opmode == Cipher.ENCRYPT_MODE || opmode == Cipher.WRAP_MODE) {
-```
-
----
-
-### Cipher context is not implicitly reset for doFinal
-`sdf4j-jce/src/main/java/org/openhitls/sdf4j/jce/cipher/SM4Cipher.java:326-331`
-```
-private byte[] doFinalStreaming() throws IllegalBlockSizeException, BadPaddingException {
-        if (ctx == 0) {
-            throw new IllegalStateException("Cipher not initialized");
-        }
-
-        ByteArrayOutputStream result = new ByteArrayOutputStream();
-```
-**Issue**: The JCE `Cipher` specification requires the cipher to be implicitly reset after `doFinal`. A subsequent `doFinal` call will incorrectly throw an `IllegalStateException` because `ctx` is 0. Re-initializing the context lazily allows subsequent operations without explicit re-initialization.
-**Fix**:
-```
-private byte[] doFinalStreaming() throws IllegalBlockSizeException, BadPaddingException {
-        if (ctx == 0) {
-            initStreamingContext();
-        }
-
-        ByteArrayOutputStream result = new ByteArrayOutputStream();
-```
-
----
-
-### Key handle leak in SM4 streaming operations
-`sdf4j-jce/src/main/native/include/jce_common.h:63-69`
-```
-/* SM4上下文 */
-typedef struct {
-    int mode;
-    int encrypt;
-    BYTE iv[SM4_IV_LENGTH];
-    int initialized;
-    HANDLE session_handle;  /* Session handle for this crypto operation */
-} SM4Context;
-```
-**Issue**: The imported symmetric key handle is not stored in `SM4Context`, meaning it is never destroyed when the streaming encryption/decryption context is freed. This causes a memory and resource leak on the SDF cryptographic hardware device.
-**Fix**:
-```
-/* SM4上下文 */
-typedef struct {
-    int mode;
-    int encrypt;
-    BYTE iv[SM4_IV_LENGTH];
-    int initialized;
-    HANDLE session_handle;  /* Session handle for this crypto operation */
-    HANDLE key_handle;      /* Key handle for this crypto operation */
-} SM4Context;
-```
-
----
-
-### Missing key handle storage in SM4 encrypt init
-`sdf4j-jce/src/main/native/src/sdf_jce_sm4.c:349-354`
-```
-ret = g_sdf_functions.SDF_ImportKey(ctx->session_handle, (BYTE *)keyBytes, SM4_KEY_LENGTH, &keyHandle);
-    if (ret != SDR_OK) {
-        throw_jce_exception(env, (int)ret, "SM4 import key failed");
-        goto ERR;
-    }
-
-    ret = g_sdf_functions.SDF_EncryptInit(
-```
-**Issue**: The successfully imported key handle must be stored in the context so it can be destroyed later.
-**Fix**:
-```
-ret = g_sdf_functions.SDF_ImportKey(ctx->session_handle, (BYTE *)keyBytes, SM4_KEY_LENGTH, &keyHandle);
-    if (ret != SDR_OK) {
-        throw_jce_exception(env, (int)ret, "SM4 import key failed");
-        goto ERR;
-    }
-    ctx->key_handle = keyHandle;
-
-    ret = g_sdf_functions.SDF_EncryptInit(
-```
-
----
-
-### Missing key handle storage in SM4 decrypt init
-`sdf4j-jce/src/main/native/src/sdf_jce_sm4.c:509-514`
-```
-ret = g_sdf_functions.SDF_ImportKey(ctx->session_handle, (BYTE *)keyBytes, SM4_KEY_LENGTH, &keyHandle);
-    if (ret != SDR_OK) {
-        throw_jce_exception(env, (int)ret, "SM4 import key failed");
-        goto ERR;
-    }
-
-    ret = g_sdf_functions.SDF_DecryptInit(ctx->session_handle, keyHandle, algId, ctx->iv, SM4_IV_LENGTH);
-```
-**Issue**: The successfully imported key handle must be stored in the context so it can be destroyed later.
-**Fix**:
-```
-ret = g_sdf_functions.SDF_ImportKey(ctx->session_handle, (BYTE *)keyBytes, SM4_KEY_LENGTH, &keyHandle);
-    if (ret != SDR_OK) {
-        throw_jce_exception(env, (int)ret, "SM4 import key failed");
-        goto ERR;
-    }
-    ctx->key_handle = keyHandle;
-
-    ret = g_sdf_functions.SDF_DecryptInit(ctx->session_handle, keyHandle, algId, ctx->iv, SM4_IV_LENGTH);
-```
-
----
-
-### Missing SDF_DestroyKey in SM4 free
-`sdf4j-jce/src/main/native/src/sdf_jce_sm4.c:636-641`
-```
-SM4Context *ctx = (SM4Context *)(uintptr_t)ctxHandle;
-    if (ctx == NULL) {
-        return;
-    }
-
-    memset(ctx, 0, sizeof(SM4Context));
-    free(ctx);
-```
-**Issue**: The imported key handle must be destroyed to free hardware device resources when the cipher context is closed.
-**Fix**:
-```
-SM4Context *ctx = (SM4Context *)(uintptr_t)ctxHandle;
-    if (ctx == NULL) {
-        return;
-    }
-
-    if (ctx->key_handle != NULL && g_sdf_functions.SDF_DestroyKey != NULL) {
-        g_sdf_functions.SDF_DestroyKey(ctx->session_handle, ctx->key_handle);
-    }
-
-    memset(ctx, 0, sizeof(SM4Context));
-    free(ctx);
-```
-
----
-
-
-## Medium
-
-### Race condition in native library extraction
-`sdf4j-jce/src/main/java/org/openhitls/sdf4j/jce/NativeLoader.java:99-106`
+### Insecure Temporary File Creation for Native Library
+`sdf4j-jce/src/main/java/org/openhitls/sdf4j/jce/NativeLoader.java:99-101`
 ```
 Path baseDir = Paths.get(System.getProperty("java.io.tmpdir"), "sdf4j-jce-native");
             Files.createDirectories(baseDir);
             Path tempLib = baseDir.resolve(platform + "-" + libraryFileName);
-
-            // Extract the library (always re-extract to ensure using latest version)
-            Files.copy(is, tempLib, StandardCopyOption.REPLACE_EXISTING);
-
-            // Load the extracted library
-            System.load(tempLib.toAbsolutePath().toString());
-
-            // Clean up on JVM exit
-            tempLib.toFile().deleteOnExit();
 ```
-**Issue**: Using a static temporary file name can cause concurrent write conflicts and corrupted native libraries if multiple JVMs initialize the provider simultaneously.
+**Issue**: The native library is extracted to a predictable directory name in `java.io.tmpdir`. In a shared temporary directory like `/tmp` on Unix systems, a malicious user can pre-create this directory or use symlinks. This leads to a Time-of-Check to Time-of-Use (TOCTOU) race condition where an attacker can replace the `.so` file between `Files.copy` and `System.load`, potentially achieving arbitrary code execution within the JVM process.
 **Fix**:
 ```
-Path baseDir = Paths.get(System.getProperty("java.io.tmpdir"), "sdf4j-jce-native");
-            Files.createDirectories(baseDir);
-            Path tempLib = Files.createTempFile(baseDir, platform + "-", "-" + libraryFileName);
-
-            // Extract the library
-            Files.copy(is, tempLib, StandardCopyOption.REPLACE_EXISTING);
-
-            // Load the extracted library
-            System.load(tempLib.toAbsolutePath().toString());
-
-            // Clean up on JVM exit
-            tempLib.toFile().deleteOnExit();
+Path baseDir = Files.createTempDirectory("sdf4j-jce-native-");
+            baseDir.toFile().deleteOnExit();
+            Path tempLib = baseDir.resolve(platform + "-" + libraryFileName);
 ```
 
 ---
 
-### engineGetOutputSize ignores buffered data size
-`sdf4j-jce/src/main/java/org/openhitls/sdf4j/jce/cipher/SM2Cipher.java:74-81`
+### Missing NULL check after GetByteArrayElements in sm4EncryptInit
+`sdf4j-jce/src/main/native/src/sdf_jce_sm4.c:313-317`
 ```
-@Override
-    protected int engineGetOutputSize(int inputLen) {
-        if (opmode == Cipher.ENCRYPT_MODE) {
-            // SM2 ciphertext: 0x04(1) + C1_X(32) + C1_Y(32) + C2(plaintext) + C3(32) = 97 + plaintext
-            return inputLen + 97;
-        } else {
-            // Plaintext is ciphertext - 97 bytes overhead (1 + 32 + 32 + 32)
-            return Math.max(0, inputLen - 97);
-        }
+jbyte *keyBytes = (*env)->GetByteArrayElements(env, key, NULL);
+    jsize keyLen = (*env)->GetArrayLength(env, key);
+    if (keyLen != SM4_KEY_LENGTH) {
+        (*env)->ReleaseByteArrayElements(env, key, keyBytes, JNI_ABORT);
+        throw_exception(env, "java/lang/IllegalArgumentException", "Key must be 16 bytes");
+        return 0;
     }
 ```
-**Issue**: According to the CipherSpi contract, `engineGetOutputSize` must account for any data currently held in the internal buffer. Failing to include `buffer.size()` can cause the caller to allocate too small an output array.
+**Issue**: `GetByteArrayElements` can return NULL if it fails to allocate memory (e.g., OutOfMemoryError). If it returns NULL, a JNI exception is scheduled, but C execution continues. The NULL pointer `keyBytes` will subsequently be dereferenced by `SDF_ImportKey` or passed to `ReleaseByteArrayElements`, causing a segmentation fault and crashing the entire JVM process instead of throwing a catchable Java exception.
 **Fix**:
 ```
-@Override
-    protected int engineGetOutputSize(int inputLen) {
-        int totalLen = inputLen + (buffer != null ? buffer.size() : 0);
-        if (opmode == Cipher.ENCRYPT_MODE) {
-            // SM2 ciphertext: 0x04(1) + C1_X(32) + C1_Y(32) + C2(plaintext) + C3(32) = 97 + plaintext
-            return totalLen + 97;
-        } else {
-            // Plaintext is ciphertext - 97 bytes overhead (1 + 32 + 32 + 32)
-            return Math.max(0, totalLen - 97);
-        }
+jbyte *keyBytes = (*env)->GetByteArrayElements(env, key, NULL);
+    if (keyBytes == NULL) {
+        return 0;
+    }
+    jsize keyLen = (*env)->GetArrayLength(env, key);
+    if (keyLen != SM4_KEY_LENGTH) {
+        (*env)->ReleaseByteArrayElements(env, key, keyBytes, JNI_ABORT);
+        throw_exception(env, "java/lang/IllegalArgumentException", "Key must be 16 bytes");
+        return 0;
     }
 ```
 
 ---
 
-### engineGetOutputSize ignores buffered data size
-`sdf4j-jce/src/main/java/org/openhitls/sdf4j/jce/cipher/SM4Cipher.java:118-135`
+### Missing NULL check after GetByteArrayElements in sm4EncryptUpdate
+`sdf4j-jce/src/main/native/src/sdf_jce_sm4.c:393-397`
 ```
-@Override
-    protected int engineGetOutputSize(int inputLen) {
-        if (isAeadMode()) {
-            int tagBytes = gcmTagLenBits / 8;
-            if (opmode == Cipher.ENCRYPT_MODE) {
-                return inputLen + tagBytes;
-            } else {
-                return Math.max(0, inputLen - tagBytes);
-            }
-        }
-        if (opmode == Cipher.ENCRYPT_MODE) {
-            if (paddingMode == PADDING_PKCS5) {
-                return ((inputLen / BLOCK_SIZE) + 1) * BLOCK_SIZE;
-            }
-            return inputLen;
-        } else {
-            return inputLen;
-        }
-    }
+jbyte *dataBytes = (*env)->GetByteArrayElements(env, data, NULL);
+    ULONG outputBufLen = (ULONG)(len + SM4_BLOCK_SIZE);
+    BYTE *output = (BYTE *)malloc((size_t)outputBufLen);
+    if (output == NULL) {
+        (*env)->ReleaseByteArrayElements(env, data, dataBytes, JNI_ABORT);
 ```
-**Issue**: According to the CipherSpi contract, `engineGetOutputSize` must account for any data currently held in the internal buffer. Failing to include `buffer.size()` can cause the caller to allocate too small an output array.
+**Issue**: `GetByteArrayElements` can return NULL on OutOfMemoryError. The C code fails to verify the return value and subsequently dereferences the NULL `dataBytes` pointer in `SDF_EncryptUpdate` via `dataBytes + offset` and attempts to release it via `ReleaseByteArrayElements`. This will cause a segmentation fault, crashing the JVM.
 **Fix**:
 ```
-@Override
-    protected int engineGetOutputSize(int inputLen) {
-        int totalLen = inputLen + (buffer != null ? buffer.size() : 0);
-        if (isAeadMode()) {
-            int tagBytes = gcmTagLenBits / 8;
-            if (opmode == Cipher.ENCRYPT_MODE) {
-                return totalLen + tagBytes;
-            } else {
-                return Math.max(0, totalLen - tagBytes);
-            }
-        }
-        if (opmode == Cipher.ENCRYPT_MODE) {
-            if (paddingMode == PADDING_PKCS5) {
-                return ((totalLen / BLOCK_SIZE) + 1) * BLOCK_SIZE;
-            }
-            return totalLen;
-        } else {
-            return totalLen;
-        }
-    }
-```
-
----
-
-
-## Low
-
-### Incorrect exception type for empty plaintext in SM2 encrypt
-`sdf4j-jce/src/main/native/src/sdf_jce_sm2.c:224-229`
-```
-if (plainLen == 0) {
-        (*env)->ReleaseByteArrayElements(env, plaintext, plainBytes, JNI_ABORT);
-        (*env)->ReleaseByteArrayElements(env, publicKeyX, xBytes, JNI_ABORT);
-        (*env)->ReleaseByteArrayElements(env, publicKeyY, yBytes, JNI_ABORT);
-        throw_exception(env, "java/lang/OutOfMemoryError", "plain len is invalid");
+jbyte *dataBytes = (*env)->GetByteArrayElements(env, data, NULL);
+    if (dataBytes == NULL) {
         return NULL;
     }
-```
-**Issue**: When `plainLen` is 0, the code throws `OutOfMemoryError` instead of `IllegalArgumentException`, which is misleading for developers trying to debug.
-**Fix**:
-```
-if (plainLen == 0) {
-        (*env)->ReleaseByteArrayElements(env, plaintext, plainBytes, JNI_ABORT);
-        (*env)->ReleaseByteArrayElements(env, publicKeyX, xBytes, JNI_ABORT);
-        (*env)->ReleaseByteArrayElements(env, publicKeyY, yBytes, JNI_ABORT);
-        throw_exception(env, "java/lang/IllegalArgumentException", "plain len is invalid");
-        return NULL;
-    }
+    ULONG outputBufLen = (ULONG)(len + SM4_BLOCK_SIZE);
+    BYTE *output = (BYTE *)malloc((size_t)outputBufLen);
+    if (output == NULL) {
+        (*env)->ReleaseByteArrayElements(env, data, dataBytes, JNI_ABORT);
 ```
 
 ---
@@ -871,7 +470,47 @@ if (plainLen == 0) {
 
 ## High
 
-### Native library is loaded from a predictable shared temp path
+### Provider constructors eagerly initialize hardware and ignore the explicit path argument
+`sdf4j-jce/src/main/java/org/openhitls/sdf4j/jce/SDFProvider.java:52-69`
+```
+public SDFProvider() {
+    super(PROVIDER_NAME, VERSION, INFO);
+    registerAlgorithms();
+    // Trigger native library loading, which auto-initializes SDF via SDF_LIBRARY_PATH
+    ensureNativeLoaded();
+}
+
+/**
+ * Create provider with SDF library path (backward compatibility).
+ * <p>
+ * Note: The libraryPath parameter is ignored. SDF library is now initialized
+ * automatically via the SDF_LIBRARY_PATH environment variable.
+ *
+ * @param libraryPath ignored, use SDF_LIBRARY_PATH environment variable instead
+ */
+public SDFProvider(String libraryPath) {
+    this();
+}
+```
+**Issue**: `SDFProvider()` immediately calls into native initialization, so simple provider registration fails on machines without a configured SDF device/library. The new `SDFProviderTest` suite reproduces this: `mvn -pl sdf4j-jce -Dtest=SDFProviderTest test` fails before any cryptographic operation is requested. At the same time, `SDFProvider(String libraryPath)` claims backward compatibility but discards `libraryPath`, so existing callers that passed a path directly no longer work unless they also set external properties or environment variables.
+**Fix**:
+```
+public SDFProvider() {
+    this(null);
+}
+
+public SDFProvider(String libraryPath) {
+    super(PROVIDER_NAME, VERSION, INFO);
+    if (libraryPath != null && !libraryPath.trim().isEmpty()) {
+        System.setProperty("sdf.library.path", libraryPath.trim());
+    }
+    registerAlgorithms();
+}
+```
+
+---
+
+### Native library is extracted to a predictable shared temp path
 `sdf4j-jce/src/main/java/org/openhitls/sdf4j/jce/NativeLoader.java:98-106`
 ```
 Path baseDir = Paths.get(System.getProperty("java.io.tmpdir"), "sdf4j-jce-native");
@@ -884,39 +523,37 @@ Files.copy(is, tempLib, StandardCopyOption.REPLACE_EXISTING);
 // Load the extracted library
 System.load(tempLib.toAbsolutePath().toString());
 ```
-**Issue**: The bridge library is always extracted to `/tmp/sdf4j-jce-native/<platform>-libsdf4j-jce.so` and then loaded with `System.load()`. That predictable, shared location makes the load path vulnerable to local file-replacement/race attacks, so a malicious user on the same host can potentially get arbitrary native code loaded into the JVM.
+**Issue**: The bridge library is always written to `${java.io.tmpdir}/sdf4j-jce-native/<platform>-libsdf4j-jce.so`. On a multi-user system, that predictable shared path lets another local user pre-create or replace the file and get arbitrary native code loaded into the JVM. The existing core loader avoids this by using a fresh temp directory per load.
 **Fix**:
 ```
-Path baseDir = Files.createTempDirectory("sdf4j-jce-",
-        java.nio.file.attribute.PosixFilePermissions.asFileAttribute(
-                java.nio.file.attribute.PosixFilePermissions.fromString("rwx------")));
-Path tempLib = Files.createTempFile(baseDir, LIBRARY_NAME + "-", ".so");
-Files.setPosixFilePermissions(tempLib,
-        java.nio.file.attribute.PosixFilePermissions.fromString("rwx------"));
+Path tempDir = Files.createTempDirectory("sdf4j-jce-native-");
+Path tempLib = Files.createTempFile(tempDir, LIBRARY_NAME + "-", ".so");
 
 Files.copy(is, tempLib, StandardCopyOption.REPLACE_EXISTING);
-System.load(tempLib.toRealPath().toString());
+tempLib.toFile().deleteOnExit();
+tempDir.toFile().deleteOnExit();
+
+System.load(tempLib.toAbsolutePath().toString());
 ```
 
 ---
 
-### Decrypt init reads past Java key and IV buffers
-`sdf4j-jce/src/main/native/src/sdf_jce_sm4.c:488-505`
+### `sm4DecryptInit` returns a live context even after native init fails
+`sdf4j-jce/src/main/native/src/sdf_jce_sm4.c:466-522`
 ```
-jbyte *keyBytes = (*env)->GetByteArrayElements(env, key, NULL);
-jbyte *ivBytes = iv ? (*env)->GetByteArrayElements(env, iv, NULL) : NULL;
-
-SM4Context *ctx = (SM4Context *)malloc(sizeof(SM4Context));
-...
-if (ivBytes) {
-    memcpy(ctx->iv, ivBytes, SM4_IV_LENGTH);
+ret = g_sdf_functions.SDF_DecryptInit(ctx->session_handle, keyHandle, algId, (BYTE *)ivBytes, (ivBytes ? SM4_IV_LENGTH : 0));
+if (ret != SDR_OK) {
+    g_sdf_functions.SDF_DestroyKey(ctx->session_handle, keyHandle);
+    throw_jce_exception(env, (int)ret, "SM4 decrypt init failed");
 }
 
-algId = sm4_mode_to_alg_id(mode);
+(*env)->ReleaseByteArrayElements(env, key, keyBytes, JNI_ABORT);
+if (ivBytes) (*env)->ReleaseByteArrayElements(env, iv, ivBytes, JNI_ABORT);
 
-ret = g_sdf_functions.SDF_ImportKey(ctx->session_handle, (BYTE *)keyBytes, SM4_KEY_LENGTH, &keyHandle);
+ctx->initialized = 1;
+return (jlong)(uintptr_t)ctx;
 ```
-**Issue**: `sm4DecryptInit` pulls raw pointers for `key` and `iv` and immediately copies/imports 16 bytes without first checking the Java array lengths. Because `SM4Cipher.engineInit()` also accepts any `IvParameterSpec`, a short key or IV reaches this code path and causes out-of-bounds JNI reads inside the JVM process.
+**Issue**: When `SDF_DecryptInit` fails, the function throws an exception but still falls through, marks the context initialized, and returns it to Java. The caller then proceeds with a half-initialized context whose key handle may already have been destroyed. This turns a clean initialization failure into follow-on decryption errors and use-after-destroy behavior.
 **Fix**:
 ```
 jsize keyLen = (*env)->GetArrayLength(env, key);
@@ -924,7 +561,12 @@ if (keyLen != SM4_KEY_LENGTH) {
     throw_exception(env, "java/lang/IllegalArgumentException", "Key must be 16 bytes");
     return 0;
 }
+
 jbyte *keyBytes = (*env)->GetByteArrayElements(env, key, NULL);
+if (keyBytes == NULL) {
+    throw_exception(env, "java/lang/OutOfMemoryError", "Failed to get key bytes");
+    return 0;
+}
 
 jbyte *ivBytes = NULL;
 if (iv != NULL) {
@@ -935,40 +577,57 @@ if (iv != NULL) {
         return 0;
     }
     ivBytes = (*env)->GetByteArrayElements(env, iv, NULL);
+    if (ivBytes == NULL) {
+        (*env)->ReleaseByteArrayElements(env, key, keyBytes, JNI_ABORT);
+        throw_exception(env, "java/lang/OutOfMemoryError", "Failed to get iv bytes");
+        return 0;
+    }
 }
+
+ret = g_sdf_functions.SDF_DecryptInit(
+    ctx->session_handle, keyHandle, algId, (BYTE *)ivBytes, (ivBytes ? SM4_IV_LENGTH : 0));
+if (ret != SDR_OK) {
+    g_sdf_functions.SDF_DestroyKey(ctx->session_handle, keyHandle);
+    throw_jce_exception(env, (int)ret, "SM4 decrypt init failed");
+    goto ERR;
+}
+
+(*env)->ReleaseByteArrayElements(env, key, keyBytes, JNI_ABORT);
+if (ivBytes) (*env)->ReleaseByteArrayElements(env, iv, ivBytes, JNI_ABORT);
+
+ctx->initialized = 1;
+return (jlong)(uintptr_t)ctx;
 ```
 
 ---
 
-### SM2 private key state is externally mutable
-`sdf4j-jce/src/main/java/org/openhitls/sdf4j/jce/key/SM2PrivateKey.java:29-48`
+### Public native update APIs trust caller-controlled offsets and lengths
+`sdf4j-jce/src/main/native/src/sdf_jce_sm4.c:393-405`
 ```
-public SM2PrivateKey(byte[] keyBytes) {
-    if (keyBytes == null || keyBytes.length != 32) {
-        throw new IllegalArgumentException("Key must be 32 bytes");
-    }
-    this.keyBytes = keyBytes;
-}
+jbyte *dataBytes = (*env)->GetByteArrayElements(env, data, NULL);
+ULONG outputBufLen = (ULONG)(len + SM4_BLOCK_SIZE);
+BYTE *output = (BYTE *)malloc((size_t)outputBufLen);
 
-@Override
-public byte[] getEncoded() {
-    return keyBytes;
-}
+LONG ret = g_sdf_functions.SDF_EncryptUpdate(ctx->session_handle, (BYTE *)(dataBytes + offset), (ULONG)len,
+    output, &outputLen);
 ```
-**Issue**: The constructor keeps the caller's byte array by reference, and `getEncoded()` returns the same internal array. Any code holding either array can modify the live private key in place, which breaks key immutability and exposes secret material to accidental or hostile mutation.
+**Issue**: `sm4EncryptUpdate` and `sm4DecryptUpdate` do raw pointer arithmetic with `dataBytes + offset` but never verify that `offset` and `len` are within the Java array bounds. Because `SDFJceNative` is a public API, a bad caller can drive these methods into out-of-bounds native reads and crash the JVM.
 **Fix**:
 ```
-public SM2PrivateKey(byte[] keyBytes) {
-    if (keyBytes == null || keyBytes.length != 32) {
-        throw new IllegalArgumentException("Key must be 32 bytes");
-    }
-    this.keyBytes = keyBytes.clone();
+jsize dataLen = (*env)->GetArrayLength(env, data);
+if (offset < 0 || len < 0 || offset > dataLen || dataLen - offset < len) {
+    throw_exception(env, "java/lang/ArrayIndexOutOfBoundsException", "offset/len out of bounds");
+    return NULL;
 }
 
-@Override
-public byte[] getEncoded() {
-    return keyBytes.clone();
+jbyte *dataBytes = (*env)->GetByteArrayElements(env, data, NULL);
+if (dataBytes == NULL) {
+    throw_exception(env, "java/lang/OutOfMemoryError", "Failed to get data bytes");
+    return NULL;
 }
+
+LONG ret = g_sdf_functions.SDF_EncryptUpdate(
+    ctx->session_handle, (BYTE *)(dataBytes + offset), (ULONG)len, output, &outputLen);
 ```
 
 ---
@@ -976,109 +635,113 @@ public byte[] getEncoded() {
 
 ## Medium
 
-### Streaming SM4 initialization leaks imported key handles
-`sdf4j-jce/src/main/native/src/sdf_jce_sm4.c:349-366`
-```
-ret = g_sdf_functions.SDF_ImportKey(ctx->session_handle, (BYTE *)keyBytes, SM4_KEY_LENGTH, &keyHandle);
-if (ret != SDR_OK) {
-    throw_jce_exception(env, (int)ret, "SM4 import key failed");
-    goto ERR;
-}
-
-ret = g_sdf_functions.SDF_EncryptInit(
-    ctx->session_handle, keyHandle, algId, ctx->iv, SM4_IV_LENGTH);
-...
-ctx->initialized = 1;
-return (jlong)(uintptr_t)ctx;
-```
-**Issue**: Both streaming init paths import an SM4 key, pass the returned handle into `SDF_EncryptInit`/`SDF_DecryptInit`, and then drop the handle on success. Since the handle is not stored in `SM4Context` and never destroyed in `sm4Free` or the final paths, repeated cipher initializations leak device-side key objects until the session is exhausted.
-**Fix**:
-```
-ret = g_sdf_functions.SDF_ImportKey(ctx->session_handle, (BYTE *)keyBytes, SM4_KEY_LENGTH, &keyHandle);
-if (ret != SDR_OK) {
-    throw_jce_exception(env, (int)ret, "SM4 import key failed");
-    goto ERR;
-}
-
-ret = g_sdf_functions.SDF_DecryptInit(ctx->session_handle, keyHandle, algId, ctx->iv, SM4_IV_LENGTH);
-...
-ctx->initialized = 1;
-return (jlong)(uintptr_t)ctx;
-```
-
----
-
-### Provider construction now requires working hardware configuration and discards the explicit path argument
-`sdf4j-jce/src/main/java/org/openhitls/sdf4j/jce/SDFProvider.java:52-68`
-```
-public SDFProvider() {
-    super(PROVIDER_NAME, VERSION, INFO);
-    registerAlgorithms();
-    // Trigger native library loading, which auto-initializes SDF via SDF_LIBRARY_PATH
-    ensureNativeLoaded();
-}
-
-public SDFProvider(String libraryPath) {
-    this();
-}
-```
-**Issue**: The default constructor eagerly calls `NativeLoader.load()`, so simply registering the provider now fails if the device library is not already configured. On top of that, `SDFProvider(String libraryPath)` ignores its argument entirely. This breaks provider-only use cases and makes the new `SDFProviderTest` fail immediately.
-**Fix**:
-```
-public SDFProvider() {
-    super(PROVIDER_NAME, VERSION, INFO);
-    registerAlgorithms();
-}
-
-public SDFProvider(String libraryPath) {
-    this();
-    if (libraryPath != null && !libraryPath.isEmpty()) {
-        System.setProperty("sdf.library.path", libraryPath);
-    }
-}
-```
-
----
-
-### GCM tag length from GCMParameterSpec is accepted but not actually supported
-`sdf4j-jce/src/main/java/org/openhitls/sdf4j/jce/cipher/SM4Cipher.java:172-178`
-```
-GCMParameterSpec gcmSpec = (GCMParameterSpec) params;
-this.iv = gcmSpec.getIV();
-this.gcmTagLenBits = gcmSpec.getTLen();
-```
-**Issue**: The cipher accepts any `GCMParameterSpec` tag length and uses it to size buffers and split the tag on decrypt, but the native bridge always generates and expects a fixed 16-byte tag. Requests for 96/104/112/120-bit tags therefore produce wrong `getOutputSize()` calculations on encrypt and broken authentication on decrypt.
-**Fix**:
-```
-int tagBytes = gcmTagLenBits / 8;
-...
-byte[] ciphertext = new byte[data.length - tagBytes];
-byte[] tag = new byte[tagBytes];
-...
-byte[] plaintext = SDFJceNative.sm4AuthDec(sessionHandle, cipherMode, key, iv,
-        aad.length > 0 ? aad : null, tag, ciphertext);
-```
-
----
-
-### DER parser normalizes malformed signatures instead of rejecting them
-`sdf4j-jce/src/main/java/org/openhitls/sdf4j/jce/util/DERCodec.java:71-95`
+### DER parser accepts signatures with trailing garbage
+`sdf4j-jce/src/main/java/org/openhitls/sdf4j/jce/util/DERCodec.java:71-99`
 ```
 int length = in.readLength();
 if (in.available() < length) {
     throw new IllegalArgumentException("DER length mismatch");
 }
-...
-byte[] raw = new byte[64];
-copyToFixedBuffer(rBytes, raw, 0);
-copyToFixedBuffer(sBytes, raw, 32);
+
+// INTEGER r
+if (in.readTag() != 0x02) {
+    throw new IllegalArgumentException("Expected INTEGER for r");
+}
+int rLength = in.readLength();
+byte[] rBytes = in.readBytes(rLength);
+
+// INTEGER s
+if (in.readTag() != 0x02) {
+    throw new IllegalArgumentException("Expected INTEGER for s");
+}
+int sLength = in.readLength();
+byte[] sBytes = in.readBytes(sLength);
 ```
-**Issue**: `derToRaw()` only checks that at least the declared SEQUENCE length remains, so trailing garbage is accepted, and `copyToFixedBuffer()` silently truncates oversized INTEGER encodings to 32 bytes. That means malformed DER input can be transformed into a different `(r,s)` pair instead of being rejected as invalid.
+**Issue**: `derToRaw` only checks `in.available() < length`, then parses two INTEGERs and returns without verifying that the SEQUENCE length matched exactly or that no bytes remain. A blob like `valid_signature || attacker_controlled_suffix` is therefore accepted as a valid SM2 signature encoding, which is not DER-canonical and can cause signature-format bypasses between layers.
 **Fix**:
 ```
-if (srcLen > fixedLen) {
-    // 截断高位
-    System.arraycopy(src, srcLen - fixedLen, dest, offset, fixedLen);
+int length = in.readLength();
+if (length != in.available()) {
+    throw new IllegalArgumentException("DER length mismatch");
+}
+
+if (in.readTag() != 0x02) {
+    throw new IllegalArgumentException("Expected INTEGER for r");
+}
+int rLength = in.readLength();
+byte[] rBytes = in.readBytes(rLength);
+
+if (in.readTag() != 0x02) {
+    throw new IllegalArgumentException("Expected INTEGER for s");
+}
+int sLength = in.readLength();
+byte[] sBytes = in.readBytes(sLength);
+
+if (in.available() != 0) {
+    throw new IllegalArgumentException("Trailing data after DER signature");
+}
+```
+
+---
+
+### Cipher sessions are leaked until GC runs
+`sdf4j-jce/src/main/java/org/openhitls/sdf4j/jce/cipher/SM4Cipher.java:64-78`
+```
+public SM4Cipher() {
+    this.sessionHandle = SDFJceNative.openSession();
+    if (sessionHandle == 0) {
+        throw new IllegalStateException("Failed to open SDF session");
+    }
+    this.cipherMode = MODE_CBC;
+}
+
+@Override
+protected void finalize() throws Throwable {
+    try {
+        cleanup();
+        if (sessionHandle != 0) {
+            SDFJceNative.closeSession(sessionHandle);
+        }
+    } finally {
+        super.finalize();
+    }
+}
+```
+**Issue**: Every `SM4Cipher` instance opens a device session in its constructor and only closes it from `finalize()`. JCE code tends to create many short-lived cipher instances, and hardware session counts are limited; under load this will exhaust the device long before the GC decides to run. The test suite already has to force `System.gc()` to release sessions, which is a clear sign the lifecycle is wrong.
+**Fix**:
+```
+protected long sessionHandle;
+
+@Override
+protected void engineInit(int opmode, Key key, AlgorithmParameterSpec params, SecureRandom random)
+        throws InvalidKeyException, InvalidAlgorithmParameterException {
+    cleanup();
+    this.sessionHandle = SDFJceNative.openSession();
+    if (sessionHandle == 0) {
+        throw new InvalidKeyException("Failed to open SDF session");
+    }
+    this.opmode = opmode;
+    this.key = key.getEncoded();
+    ...
+}
+
+protected void cleanup() {
+    if (key != null) {
+        Arrays.fill(key, (byte) 0);
+        key = null;
+    }
+    if (iv != null) {
+        Arrays.fill(iv, (byte) 0);
+        iv = null;
+    }
+    if (ctx != 0) {
+        SDFJceNative.sm4Free(ctx);
+        ctx = 0;
+    }
+    if (sessionHandle != 0) {
+        SDFJceNative.closeSession(sessionHandle);
+        sessionHandle = 0;
+    }
 }
 ```
 

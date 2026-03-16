@@ -31,254 +31,78 @@
     <div class="container">
         <h1>Code Review: openHiTLS/sdf4j#22 - GEMINI</h1>
         <div class="subtitle"></div>
+<div class="section"><div class="section-title critical">Critical</div>
+<div class="issue">
+                <div class="issue-title">Resource Leak: SDF Sessions exhausted due to per-instance allocation</div>
+                <div class="issue-location">sdf4j-jce/src/main/java/org/openhitls/sdf4j/jce/cipher/SM4Cipher.java:64-67</div>
+                <pre>public SM4Cipher() {
+        this.sessionHandle = SDFJceNative.openSession();
+        if (sessionHandle == 0) {
+            throw new IllegalStateException("Failed to open SDF session");
+        }</pre>
+                <div class="problem"><strong>Issue:</strong> `SDFJceNative.openSession()` is called in the constructor, tying the SDF session lifecycle to the Java object lifecycle, relying on `finalize()` to close the session. Cryptographic hardware devices typically have a strict limit on concurrent sessions (e.g., 256 or 1024). Since `Cipher` objects are instantiated frequently and their garbage collection is non-deterministic (and `finalize` is deprecated/unreliable), this design will quickly exhaust device sessions, leading to application-wide cryptographic failures.</div>
+                <div class="fix-label">Fix:</div><pre>// Implement a shared session pool, or defer session opening until strictly necessary and release promptly.
+    // Example for delayed initialization:
+    public SM4Cipher() {
+        this.cipherMode = MODE_CBC;
+        // Do not open session in the constructor. Obtain it during engineInit/engineUpdate from a pool or per-operation.
+    }</pre>
+                <div class="issue-source">Reviewer: gemini</div>
+            </div>
+</div>
 <div class="section"><div class="section-title high">High</div>
 <div class="issue">
-                <div class="issue-title">Cipher context is not implicitly reset for updates</div>
-                <div class="issue-location">sdf4j-jce/src/main/java/org/openhitls/sdf4j/jce/cipher/SM4Cipher.java:232-236</div>
-                <pre>if (ctx == 0) {
-            throw new IllegalStateException("Cipher not initialized");
-        }
-
-        if (opmode == Cipher.ENCRYPT_MODE || opmode == Cipher.WRAP_MODE) {</pre>
-                <div class="problem"><strong>Issue:</strong> The JCE `Cipher` specification requires the cipher to be implicitly reset after `doFinal`. Since `doFinalStreaming` frees the context and sets `ctx = 0`, a subsequent `update` call will incorrectly throw an `IllegalStateException` instead of re-initializing the context.</div>
-                <div class="fix-label">Fix:</div><pre>if (ctx == 0) {
-            initStreamingContext();
-        }
-
-        if (opmode == Cipher.ENCRYPT_MODE || opmode == Cipher.WRAP_MODE) {</pre>
-                <div class="issue-source">Reviewer: gemini</div>
-            </div>
-<div class="issue">
-                <div class="issue-title">Cipher context is not implicitly reset for doFinal</div>
-                <div class="issue-location">sdf4j-jce/src/main/java/org/openhitls/sdf4j/jce/cipher/SM4Cipher.java:326-331</div>
-                <pre>private byte[] doFinalStreaming() throws IllegalBlockSizeException, BadPaddingException {
-        if (ctx == 0) {
-            throw new IllegalStateException("Cipher not initialized");
-        }
-
-        ByteArrayOutputStream result = new ByteArrayOutputStream();</pre>
-                <div class="problem"><strong>Issue:</strong> The JCE `Cipher` specification requires the cipher to be implicitly reset after `doFinal`. A subsequent `doFinal` call will incorrectly throw an `IllegalStateException` because `ctx` is 0. Re-initializing the context lazily allows subsequent operations without explicit re-initialization.</div>
-                <div class="fix-label">Fix:</div><pre>private byte[] doFinalStreaming() throws IllegalBlockSizeException, BadPaddingException {
-        if (ctx == 0) {
-            initStreamingContext();
-        }
-
-        ByteArrayOutputStream result = new ByteArrayOutputStream();</pre>
-                <div class="issue-source">Reviewer: gemini</div>
-            </div>
-<div class="issue">
-                <div class="issue-title">Key handle leak in SM4 streaming operations</div>
-                <div class="issue-location">sdf4j-jce/src/main/native/include/jce_common.h:63-69</div>
-                <pre>/* SM4上下文 */
-typedef struct {
-    int mode;
-    int encrypt;
-    BYTE iv[SM4_IV_LENGTH];
-    int initialized;
-    HANDLE session_handle;  /* Session handle for this crypto operation */
-} SM4Context;</pre>
-                <div class="problem"><strong>Issue:</strong> The imported symmetric key handle is not stored in `SM4Context`, meaning it is never destroyed when the streaming encryption/decryption context is freed. This causes a memory and resource leak on the SDF cryptographic hardware device.</div>
-                <div class="fix-label">Fix:</div><pre>/* SM4上下文 */
-typedef struct {
-    int mode;
-    int encrypt;
-    BYTE iv[SM4_IV_LENGTH];
-    int initialized;
-    HANDLE session_handle;  /* Session handle for this crypto operation */
-    HANDLE key_handle;      /* Key handle for this crypto operation */
-} SM4Context;</pre>
-                <div class="issue-source">Reviewer: gemini</div>
-            </div>
-<div class="issue">
-                <div class="issue-title">Missing key handle storage in SM4 encrypt init</div>
-                <div class="issue-location">sdf4j-jce/src/main/native/src/sdf_jce_sm4.c:349-354</div>
-                <pre>ret = g_sdf_functions.SDF_ImportKey(ctx-&gt;session_handle, (BYTE *)keyBytes, SM4_KEY_LENGTH, &amp;keyHandle);
-    if (ret != SDR_OK) {
-        throw_jce_exception(env, (int)ret, "SM4 import key failed");
-        goto ERR;
-    }
-
-    ret = g_sdf_functions.SDF_EncryptInit(</pre>
-                <div class="problem"><strong>Issue:</strong> The successfully imported key handle must be stored in the context so it can be destroyed later.</div>
-                <div class="fix-label">Fix:</div><pre>ret = g_sdf_functions.SDF_ImportKey(ctx-&gt;session_handle, (BYTE *)keyBytes, SM4_KEY_LENGTH, &amp;keyHandle);
-    if (ret != SDR_OK) {
-        throw_jce_exception(env, (int)ret, "SM4 import key failed");
-        goto ERR;
-    }
-    ctx-&gt;key_handle = keyHandle;
-
-    ret = g_sdf_functions.SDF_EncryptInit(</pre>
-                <div class="issue-source">Reviewer: gemini</div>
-            </div>
-<div class="issue">
-                <div class="issue-title">Missing key handle storage in SM4 decrypt init</div>
-                <div class="issue-location">sdf4j-jce/src/main/native/src/sdf_jce_sm4.c:509-514</div>
-                <pre>ret = g_sdf_functions.SDF_ImportKey(ctx-&gt;session_handle, (BYTE *)keyBytes, SM4_KEY_LENGTH, &amp;keyHandle);
-    if (ret != SDR_OK) {
-        throw_jce_exception(env, (int)ret, "SM4 import key failed");
-        goto ERR;
-    }
-
-    ret = g_sdf_functions.SDF_DecryptInit(ctx-&gt;session_handle, keyHandle, algId, ctx-&gt;iv, SM4_IV_LENGTH);</pre>
-                <div class="problem"><strong>Issue:</strong> The successfully imported key handle must be stored in the context so it can be destroyed later.</div>
-                <div class="fix-label">Fix:</div><pre>ret = g_sdf_functions.SDF_ImportKey(ctx-&gt;session_handle, (BYTE *)keyBytes, SM4_KEY_LENGTH, &amp;keyHandle);
-    if (ret != SDR_OK) {
-        throw_jce_exception(env, (int)ret, "SM4 import key failed");
-        goto ERR;
-    }
-    ctx-&gt;key_handle = keyHandle;
-
-    ret = g_sdf_functions.SDF_DecryptInit(ctx-&gt;session_handle, keyHandle, algId, ctx-&gt;iv, SM4_IV_LENGTH);</pre>
-                <div class="issue-source">Reviewer: gemini</div>
-            </div>
-<div class="issue">
-                <div class="issue-title">Missing SDF_DestroyKey in SM4 free</div>
-                <div class="issue-location">sdf4j-jce/src/main/native/src/sdf_jce_sm4.c:636-641</div>
-                <pre>SM4Context *ctx = (SM4Context *)(uintptr_t)ctxHandle;
-    if (ctx == NULL) {
-        return;
-    }
-
-    memset(ctx, 0, sizeof(SM4Context));
-    free(ctx);</pre>
-                <div class="problem"><strong>Issue:</strong> The imported key handle must be destroyed to free hardware device resources when the cipher context is closed.</div>
-                <div class="fix-label">Fix:</div><pre>SM4Context *ctx = (SM4Context *)(uintptr_t)ctxHandle;
-    if (ctx == NULL) {
-        return;
-    }
-
-    if (ctx-&gt;key_handle != NULL &amp;&amp; g_sdf_functions.SDF_DestroyKey != NULL) {
-        g_sdf_functions.SDF_DestroyKey(ctx-&gt;session_handle, ctx-&gt;key_handle);
-    }
-
-    memset(ctx, 0, sizeof(SM4Context));
-    free(ctx);</pre>
-                <div class="issue-source">Reviewer: gemini</div>
-            </div>
-</div>
-<div class="section"><div class="section-title medium">Medium</div>
-<div class="issue">
-                <div class="issue-title">Race condition in native library extraction</div>
-                <div class="issue-location">sdf4j-jce/src/main/java/org/openhitls/sdf4j/jce/NativeLoader.java:99-106</div>
+                <div class="issue-title">Insecure Temporary File Creation for Native Library</div>
+                <div class="issue-location">sdf4j-jce/src/main/java/org/openhitls/sdf4j/jce/NativeLoader.java:99-101</div>
                 <pre>Path baseDir = Paths.get(System.getProperty("java.io.tmpdir"), "sdf4j-jce-native");
             Files.createDirectories(baseDir);
-            Path tempLib = baseDir.resolve(platform + "-" + libraryFileName);
-
-            // Extract the library (always re-extract to ensure using latest version)
-            Files.copy(is, tempLib, StandardCopyOption.REPLACE_EXISTING);
-
-            // Load the extracted library
-            System.load(tempLib.toAbsolutePath().toString());
-
-            // Clean up on JVM exit
-            tempLib.toFile().deleteOnExit();</pre>
-                <div class="problem"><strong>Issue:</strong> Using a static temporary file name can cause concurrent write conflicts and corrupted native libraries if multiple JVMs initialize the provider simultaneously.</div>
-                <div class="fix-label">Fix:</div><pre>Path baseDir = Paths.get(System.getProperty("java.io.tmpdir"), "sdf4j-jce-native");
-            Files.createDirectories(baseDir);
-            Path tempLib = Files.createTempFile(baseDir, platform + "-", "-" + libraryFileName);
-
-            // Extract the library
-            Files.copy(is, tempLib, StandardCopyOption.REPLACE_EXISTING);
-
-            // Load the extracted library
-            System.load(tempLib.toAbsolutePath().toString());
-
-            // Clean up on JVM exit
-            tempLib.toFile().deleteOnExit();</pre>
+            Path tempLib = baseDir.resolve(platform + "-" + libraryFileName);</pre>
+                <div class="problem"><strong>Issue:</strong> The native library is extracted to a predictable directory name in `java.io.tmpdir`. In a shared temporary directory like `/tmp` on Unix systems, a malicious user can pre-create this directory or use symlinks. This leads to a Time-of-Check to Time-of-Use (TOCTOU) race condition where an attacker can replace the `.so` file between `Files.copy` and `System.load`, potentially achieving arbitrary code execution within the JVM process.</div>
+                <div class="fix-label">Fix:</div><pre>Path baseDir = Files.createTempDirectory("sdf4j-jce-native-");
+            baseDir.toFile().deleteOnExit();
+            Path tempLib = baseDir.resolve(platform + "-" + libraryFileName);</pre>
                 <div class="issue-source">Reviewer: gemini</div>
             </div>
 <div class="issue">
-                <div class="issue-title">engineGetOutputSize ignores buffered data size</div>
-                <div class="issue-location">sdf4j-jce/src/main/java/org/openhitls/sdf4j/jce/cipher/SM2Cipher.java:74-81</div>
-                <pre>@Override
-    protected int engineGetOutputSize(int inputLen) {
-        if (opmode == Cipher.ENCRYPT_MODE) {
-            // SM2 ciphertext: 0x04(1) + C1_X(32) + C1_Y(32) + C2(plaintext) + C3(32) = 97 + plaintext
-            return inputLen + 97;
-        } else {
-            // Plaintext is ciphertext - 97 bytes overhead (1 + 32 + 32 + 32)
-            return Math.max(0, inputLen - 97);
-        }
+                <div class="issue-title">Missing NULL check after GetByteArrayElements in sm4EncryptInit</div>
+                <div class="issue-location">sdf4j-jce/src/main/native/src/sdf_jce_sm4.c:313-317</div>
+                <pre>jbyte *keyBytes = (*env)-&gt;GetByteArrayElements(env, key, NULL);
+    jsize keyLen = (*env)-&gt;GetArrayLength(env, key);
+    if (keyLen != SM4_KEY_LENGTH) {
+        (*env)-&gt;ReleaseByteArrayElements(env, key, keyBytes, JNI_ABORT);
+        throw_exception(env, "java/lang/IllegalArgumentException", "Key must be 16 bytes");
+        return 0;
     }</pre>
-                <div class="problem"><strong>Issue:</strong> According to the CipherSpi contract, `engineGetOutputSize` must account for any data currently held in the internal buffer. Failing to include `buffer.size()` can cause the caller to allocate too small an output array.</div>
-                <div class="fix-label">Fix:</div><pre>@Override
-    protected int engineGetOutputSize(int inputLen) {
-        int totalLen = inputLen + (buffer != null ? buffer.size() : 0);
-        if (opmode == Cipher.ENCRYPT_MODE) {
-            // SM2 ciphertext: 0x04(1) + C1_X(32) + C1_Y(32) + C2(plaintext) + C3(32) = 97 + plaintext
-            return totalLen + 97;
-        } else {
-            // Plaintext is ciphertext - 97 bytes overhead (1 + 32 + 32 + 32)
-            return Math.max(0, totalLen - 97);
-        }
+                <div class="problem"><strong>Issue:</strong> `GetByteArrayElements` can return NULL if it fails to allocate memory (e.g., OutOfMemoryError). If it returns NULL, a JNI exception is scheduled, but C execution continues. The NULL pointer `keyBytes` will subsequently be dereferenced by `SDF_ImportKey` or passed to `ReleaseByteArrayElements`, causing a segmentation fault and crashing the entire JVM process instead of throwing a catchable Java exception.</div>
+                <div class="fix-label">Fix:</div><pre>jbyte *keyBytes = (*env)-&gt;GetByteArrayElements(env, key, NULL);
+    if (keyBytes == NULL) {
+        return 0;
+    }
+    jsize keyLen = (*env)-&gt;GetArrayLength(env, key);
+    if (keyLen != SM4_KEY_LENGTH) {
+        (*env)-&gt;ReleaseByteArrayElements(env, key, keyBytes, JNI_ABORT);
+        throw_exception(env, "java/lang/IllegalArgumentException", "Key must be 16 bytes");
+        return 0;
     }</pre>
                 <div class="issue-source">Reviewer: gemini</div>
             </div>
 <div class="issue">
-                <div class="issue-title">engineGetOutputSize ignores buffered data size</div>
-                <div class="issue-location">sdf4j-jce/src/main/java/org/openhitls/sdf4j/jce/cipher/SM4Cipher.java:118-135</div>
-                <pre>@Override
-    protected int engineGetOutputSize(int inputLen) {
-        if (isAeadMode()) {
-            int tagBytes = gcmTagLenBits / 8;
-            if (opmode == Cipher.ENCRYPT_MODE) {
-                return inputLen + tagBytes;
-            } else {
-                return Math.max(0, inputLen - tagBytes);
-            }
-        }
-        if (opmode == Cipher.ENCRYPT_MODE) {
-            if (paddingMode == PADDING_PKCS5) {
-                return ((inputLen / BLOCK_SIZE) + 1) * BLOCK_SIZE;
-            }
-            return inputLen;
-        } else {
-            return inputLen;
-        }
-    }</pre>
-                <div class="problem"><strong>Issue:</strong> According to the CipherSpi contract, `engineGetOutputSize` must account for any data currently held in the internal buffer. Failing to include `buffer.size()` can cause the caller to allocate too small an output array.</div>
-                <div class="fix-label">Fix:</div><pre>@Override
-    protected int engineGetOutputSize(int inputLen) {
-        int totalLen = inputLen + (buffer != null ? buffer.size() : 0);
-        if (isAeadMode()) {
-            int tagBytes = gcmTagLenBits / 8;
-            if (opmode == Cipher.ENCRYPT_MODE) {
-                return totalLen + tagBytes;
-            } else {
-                return Math.max(0, totalLen - tagBytes);
-            }
-        }
-        if (opmode == Cipher.ENCRYPT_MODE) {
-            if (paddingMode == PADDING_PKCS5) {
-                return ((totalLen / BLOCK_SIZE) + 1) * BLOCK_SIZE;
-            }
-            return totalLen;
-        } else {
-            return totalLen;
-        }
-    }</pre>
-                <div class="issue-source">Reviewer: gemini</div>
-            </div>
-</div>
-<div class="section"><div class="section-title low">Low</div>
-<div class="issue">
-                <div class="issue-title">Incorrect exception type for empty plaintext in SM2 encrypt</div>
-                <div class="issue-location">sdf4j-jce/src/main/native/src/sdf_jce_sm2.c:224-229</div>
-                <pre>if (plainLen == 0) {
-        (*env)-&gt;ReleaseByteArrayElements(env, plaintext, plainBytes, JNI_ABORT);
-        (*env)-&gt;ReleaseByteArrayElements(env, publicKeyX, xBytes, JNI_ABORT);
-        (*env)-&gt;ReleaseByteArrayElements(env, publicKeyY, yBytes, JNI_ABORT);
-        throw_exception(env, "java/lang/OutOfMemoryError", "plain len is invalid");
+                <div class="issue-title">Missing NULL check after GetByteArrayElements in sm4EncryptUpdate</div>
+                <div class="issue-location">sdf4j-jce/src/main/native/src/sdf_jce_sm4.c:393-397</div>
+                <pre>jbyte *dataBytes = (*env)-&gt;GetByteArrayElements(env, data, NULL);
+    ULONG outputBufLen = (ULONG)(len + SM4_BLOCK_SIZE);
+    BYTE *output = (BYTE *)malloc((size_t)outputBufLen);
+    if (output == NULL) {
+        (*env)-&gt;ReleaseByteArrayElements(env, data, dataBytes, JNI_ABORT);</pre>
+                <div class="problem"><strong>Issue:</strong> `GetByteArrayElements` can return NULL on OutOfMemoryError. The C code fails to verify the return value and subsequently dereferences the NULL `dataBytes` pointer in `SDF_EncryptUpdate` via `dataBytes + offset` and attempts to release it via `ReleaseByteArrayElements`. This will cause a segmentation fault, crashing the JVM.</div>
+                <div class="fix-label">Fix:</div><pre>jbyte *dataBytes = (*env)-&gt;GetByteArrayElements(env, data, NULL);
+    if (dataBytes == NULL) {
         return NULL;
-    }</pre>
-                <div class="problem"><strong>Issue:</strong> When `plainLen` is 0, the code throws `OutOfMemoryError` instead of `IllegalArgumentException`, which is misleading for developers trying to debug.</div>
-                <div class="fix-label">Fix:</div><pre>if (plainLen == 0) {
-        (*env)-&gt;ReleaseByteArrayElements(env, plaintext, plainBytes, JNI_ABORT);
-        (*env)-&gt;ReleaseByteArrayElements(env, publicKeyX, xBytes, JNI_ABORT);
-        (*env)-&gt;ReleaseByteArrayElements(env, publicKeyY, yBytes, JNI_ABORT);
-        throw_exception(env, "java/lang/IllegalArgumentException", "plain len is invalid");
-        return NULL;
-    }</pre>
+    }
+    ULONG outputBufLen = (ULONG)(len + SM4_BLOCK_SIZE);
+    BYTE *output = (BYTE *)malloc((size_t)outputBufLen);
+    if (output == NULL) {
+        (*env)-&gt;ReleaseByteArrayElements(env, data, dataBytes, JNI_ABORT);</pre>
                 <div class="issue-source">Reviewer: gemini</div>
             </div>
 </div>

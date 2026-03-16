@@ -33,452 +33,283 @@
         <div class="subtitle"></div>
 <div class="section"><div class="section-title high">High</div>
 <div class="issue">
-                <div class="issue-title">Private key material exposure through getEncoded()</div>
-                <div class="issue-location">sdf4j-jce/src/main/java/org/openhitls/sdf4j/jce/key/SM2PrivateKey.java:45</div>
-                <pre>@Override
-    public byte[] getEncoded() {
-        return keyBytes;
-    }</pre>
-                <div class="problem"><strong>Issue:</strong> The getEncoded() method returns the internal keyBytes array directly instead of a clone. This allows external code to modify the private key material, which is a security vulnerability.</div>
-                <div class="fix-label">Fix:</div><pre>@Override
-    public byte[] getEncoded() {
-        return keyBytes.clone();
-    }</pre>
+                <div class="issue-title">Missing IV length validation in sm4EncryptInit</div>
+                <div class="issue-location">sdf4j-jce/src/main/native/src/sdf_jce_sm4.c:224-238</div>
+                <pre>jbyte *ivBytes = NULL;
+if (iv != NULL) {
+    jsize ivLen = (*env)-&gt;GetArrayLength(env, iv);
+    if (ivLen != SM4_IV_LENGTH) {
+        (*env)-&gt;ReleaseByteArrayElements(env, key, keyBytes, JNI_ABORT);
+        throw_exception(env, "java/lang/IllegalArgumentException", "IV must be 16 bytes");
+        return 0;
+    }
+    ivBytes = (*env)-&gt;GetByteArrayElements(env, iv, NULL);
+}</pre>
+                <div class="problem"><strong>Issue:</strong> When iv parameter is non-NULL, the code checks IV length in decryptInit but not in encryptInit. This could lead to buffer over-read if an incorrectly sized IV is passed.</div>
+                <div class="fix-label">Fix:</div><pre>jbyte *ivBytes = NULL;
+jsize ivLen = 0;
+if (iv != NULL) {
+    ivLen = (*env)-&gt;GetArrayLength(env, iv);
+    if (ivLen != SM4_IV_LENGTH) {
+        (*env)-&gt;ReleaseByteArrayElements(env, key, keyBytes, JNI_ABORT);
+        throw_exception(env, "java/lang/IllegalArgumentException", "IV must be 16 bytes");
+        return 0;
+    }
+    ivBytes = (*env)-&gt;GetByteArrayElements(env, iv, NULL);
+}</pre>
                 <div class="issue-source">Reviewer: claude</div>
             </div>
 </div>
 <div class="section"><div class="section-title medium">Medium</div>
 <div class="issue">
-                <div class="issue-title">Public key coordinates exposed without cloning</div>
-                <div class="issue-location">sdf4j-jce/src/main/java/org/openhitls/sdf4j/jce/key/SM2PublicKey.java:64-68</div>
+                <div class="issue-title">SM2PublicKey exposes internal key arrays</div>
+                <div class="issue-location">sdf4j-jce/src/main/java/org/openhitls/sdf4j/jce/key/SM2PublicKey.java:65-68</div>
                 <pre>public byte[] getX() {
-        return x;
-    }
+    return x;
+}
 
-    public byte[] getY() {
-        return y;
-    }</pre>
-                <div class="problem"><strong>Issue:</strong> The getX() and getY() methods return the internal x and y arrays directly without cloning. This allows external code to modify the public key coordinates.</div>
+public byte[] getY() {
+    return y;
+}</pre>
+                <div class="problem"><strong>Issue:</strong> getX() and getY() methods return the internal byte arrays directly instead of clones, allowing external code to modify the key material.</div>
                 <div class="fix-label">Fix:</div><pre>public byte[] getX() {
-        return x.clone();
+    return x.clone();
+}
+
+public byte[] getY() {
+    return y.clone();
+}</pre>
+                <div class="issue-source">Reviewer: claude</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">DERCodec copyToFixedBuffer has incorrect truncation logic</div>
+                <div class="issue-location">sdf4j-jce/src/main/java/org/openhitls/sdf4j/jce/util/DERCodec.java:173-193</div>
+                <pre>if (srcLen &gt; fixedLen) {
+    // 截断高位，因为interger的编码在高bit=0的时候会增加00, 导致编码长度是33
+    System.arraycopy(src, srcLen - fixedLen, dest, offset, fixedLen);
+}</pre>
+                <div class="problem"><strong>Issue:</strong> When srcLen > fixedLen (32 bytes), the code truncates from the end. However, for properly encoded DER integers, when high bit is 0 and there's a leading 0x00 byte (making 33 bytes), this would truncate the wrong byte (the 0x00 prefix should be removed, not trailing bytes).</div>
+                <div class="fix-label">Fix:</div><pre>if (srcLen &gt; fixedLen) {
+    // If first byte is 0x00 (sign byte for positive integers with high bit set), skip it
+    if (src[0] == 0 &amp;&amp; srcLen == fixedLen + 1) {
+        System.arraycopy(src, 1, dest, offset, fixedLen);
+    } else {
+        throw new IllegalArgumentException("Integer value too large for " + fixedLen + " bytes");
     }
-
-    public byte[] getY() {
-        return y.clone();
-    }</pre>
+}</pre>
                 <div class="issue-source">Reviewer: claude</div>
             </div>
 <div class="issue">
-                <div class="issue-title">Native library extracted to temp directory without restrictive permissions</div>
-                <div class="issue-location">sdf4j-jce/src/main/java/org/openhitls/sdf4j/jce/NativeLoader.java:94-98</div>
-                <pre>// Extract the library (always re-extract to ensure using latest version)
-            Files.copy(is, tempLib, StandardCopyOption.REPLACE_EXISTING);
+                <div class="issue-title">sm3Update lacks null data array check</div>
+                <div class="issue-location">sdf4j-jce/src/main/native/src/sdf_jce_sm3.c:90-97</div>
+                <pre>SM3Context *ctx = (SM3Context *)(uintptr_t)ctxHandle;
+if (ctx == NULL || !ctx-&gt;initialized) {
+    throw_exception(env, "java/lang/IllegalStateException", "Context not initialized");
+    return;
+}
 
-            // Load the extracted library
-            System.load(tempLib.toAbsolutePath().toString());</pre>
-                <div class="problem"><strong>Issue:</strong> The loadLibraryFromResources() method extracts the native library to /tmp/sdf4j-jce-native without setting restrictive file permissions. On multi-user systems, another user could potentially replace the library before it's loaded.</div>
-                <div class="fix-label">Fix:</div><pre>// Extract the library (always re-extract to ensure using latest version)
-            Files.copy(is, tempLib, StandardCopyOption.REPLACE_EXISTING);
+jbyte *dataBytes = (*env)-&gt;GetByteArrayElements(env, data, NULL);</pre>
+                <div class="problem"><strong>Issue:</strong> The function doesn't check if data is NULL before calling GetByteArrayElements. If an empty byte array is passed, GetByteArrayElements could return NULL, leading to null pointer dereference.</div>
+                <div class="fix-label">Fix:</div><pre>SM3Context *ctx = (SM3Context *)(uintptr_t)ctxHandle;
+if (ctx == NULL || !ctx-&gt;initialized) {
+    throw_exception(env, "java/lang/IllegalStateException", "Context not initialized");
+    return;
+}
 
-            // Set restrictive permissions (owner read-only)
-            try {
-                Files.setPosixFilePermissions(tempLib, PosixFilePermissions.fromString("r--------"));
-            } catch (UnsupportedOperationException e) {
-                // Not a POSIX system, skip
-            }
+if (data == NULL) {
+    throw_exception(env, "java/lang/NullPointerException", "data is null");
+    return;
+}
 
-            // Load the extracted library
-            System.load(tempLib.toAbsolutePath().toString());</pre>
+jbyte *dataBytes = (*env)-&gt;GetByteArrayElements(env, data, NULL);
+if (dataBytes == NULL) {
+    throw_exception(env, "java/lang/OutOfMemoryError", "Failed to get byte array");
+    return;
+}</pre>
                 <div class="issue-source">Reviewer: claude</div>
             </div>
 <div class="issue">
-                <div class="issue-title">Resource cleanup relies on finalize() which is unreliable</div>
-                <div class="issue-location">sdf4j-jce/src/main/java/org/openhitls/sdf4j/jce/cipher/SM4Cipher.java:531-543</div>
+                <div class="issue-title">SM4Cipher uses deprecated finalize() for cleanup</div>
+                <div class="issue-location">sdf4j-jce/src/main/java/org/openhitls/sdf4j/jce/cipher/SM4Cipher.java:531-562</div>
                 <pre>@Override
-    protected void finalize() throws Throwable {
-        try {
-            cleanup();
-            if (sessionHandle != 0) {
-                SDFJceNative.closeSession(sessionHandle);
-            }
-        } finally {
-            super.finalize();
-        }
-    }</pre>
-                <div class="problem"><strong>Issue:</strong> The sessionHandle is only cleaned up in finalize(), which is not guaranteed to run and may run arbitrarily late. This can lead to resource leaks. There should be an explicit close() method or implement AutoCloseable.</div>
-                <div class="fix-label">Fix:</div><pre>// Implement AutoCloseable for explicit resource management
-    public void close() {
+protected void finalize() throws Throwable {
+    try {
         cleanup();
         if (sessionHandle != 0) {
             SDFJceNative.closeSession(sessionHandle);
-            sessionHandle = 0;
         }
+    } finally {
+        super.finalize();
     }
-
-    @Override
-    protected void finalize() throws Throwable {
-        try {
-            close();
-        } finally {
-            super.finalize();
-        }
-    }</pre>
-                <div class="issue-source">Reviewer: claude</div>
-            </div>
-<div class="issue">
-                <div class="issue-title">Resource cleanup relies on finalize() which is unreliable</div>
-                <div class="issue-location">sdf4j-jce/src/main/java/org/openhitls/sdf4j/jce/signature/SM2Signature.java:178-186</div>
-                <pre>@Override
-    protected void finalize() throws Throwable {
-        try {
-            if (sessionHandle != 0) {
-                SDFJceNative.closeSession(sessionHandle);
-            }
-        } finally {
-            super.finalize();
-        }
-    }</pre>
-                <div class="problem"><strong>Issue:</strong> The sessionHandle is only cleaned up in finalize(). This class should implement AutoCloseable to provide explicit resource cleanup.</div>
+}</pre>
+                <div class="problem"><strong>Issue:</strong> The finalize() method is deprecated and unreliable. Resources may not be released properly. The class should implement AutoCloseable instead.</div>
                 <div class="fix-label">Fix:</div><pre>public void close() {
-        if (sessionHandle != 0) {
-            SDFJceNative.closeSession(sessionHandle);
-            sessionHandle = 0;
-        }
+    cleanup();
+    if (sessionHandle != 0) {
+        SDFJceNative.closeSession(sessionHandle);
+        sessionHandle = 0;
     }
+}
 
-    @Override
-    protected void finalize() throws Throwable {
-        try {
-            close();
-        } finally {
-            super.finalize();
-        }
-    }</pre>
+@Override
+@Deprecated
+protected void finalize() throws Throwable {
+    try {
+        close();
+    } finally {
+        super.finalize();
+    }
+}</pre>
                 <div class="issue-source">Reviewer: claude</div>
             </div>
 <div class="issue">
-                <div class="issue-title">Silent truncation of signature values in copyToFixedBuffer</div>
-                <div class="issue-location">sdf4j-jce/src/main/java/org/openhitls/sdf4j/jce/util/DERCodec.java:196-209</div>
-                <pre>private static void copyToFixedBuffer(byte[] src, byte[] dest, int offset) {
-        int srcLen = src.length;
-        int fixedLen = 32;
-
-        if (srcLen &gt; fixedLen) {
-            // 截断高位
-            System.arraycopy(src, srcLen - fixedLen, dest, offset, fixedLen);
-        } else {
-            // 前导零填充
-            int padLen = fixedLen - srcLen;
-            for (int i = 0; i &lt; padLen; i++) {
-                dest[offset + i] = 0;
-            }
-            System.arraycopy(src, 0, dest, offset + padLen, srcLen);
-        }
-    }</pre>
-                <div class="problem"><strong>Issue:</strong> The copyToFixedBuffer function silently truncates data if srcLen > 32 bytes. This could lead to incorrect signature verification or encoding issues without any error indication.</div>
-                <div class="fix-label">Fix:</div><pre>private static void copyToFixedBuffer(byte[] src, byte[] dest, int offset) {
-        int srcLen = src.length;
-        int fixedLen = 32;
-
-        if (srcLen &gt; fixedLen) {
-            // Truncation indicates invalid signature - throw exception
-            throw new IllegalArgumentException("Signature component too large: " + srcLen + " bytes");
-        } else {
-            // 前导零填充
-            int padLen = fixedLen - srcLen;
-            for (int i = 0; i &lt; padLen; i++) {
-                dest[offset + i] = 0;
-            }
-            System.arraycopy(src, 0, dest, offset + padLen, srcLen);
-        }
-    }</pre>
-                <div class="issue-source">Reviewer: claude</div>
-            </div>
-<div class="issue">
-                <div class="issue-title">Resource cleanup relies on finalize()</div>
-                <div class="issue-location">sdf4j-jce/src/main/java/org/openhitls/sdf4j/jce/digest/SM3MessageDigest.java:104-115</div>
+                <div class="issue-title">SM3MessageDigest uses deprecated finalize() for cleanup</div>
+                <div class="issue-location">sdf4j-jce/src/main/java/org/openhitls/sdf4j/jce/digest/SM3MessageDigest.java:97-107</div>
                 <pre>@Override
-    protected void finalize() throws Throwable {
-        try {
-            cleanupContext();
-            if (sessionHandle != 0) {
-                SDFJceNative.closeSession(sessionHandle);
-            }
-        } finally {
-            super.finalize();
-        }
-    }</pre>
-                <div class="problem"><strong>Issue:</strong> Like other JCE classes, this class uses finalize() for cleanup. Implementing AutoCloseable would provide better resource management.</div>
-                <div class="fix-label">Fix:</div><pre>public void close() {
+protected void finalize() throws Throwable {
+    try {
         cleanupContext();
         if (sessionHandle != 0) {
             SDFJceNative.closeSession(sessionHandle);
-            sessionHandle = 0;
         }
+    } finally {
+        super.finalize();
     }
-
-    @Override
-    protected void finalize() throws Throwable {
-        try {
-            close();
-        } finally {
-            super.finalize();
+}</pre>
+                <div class="problem"><strong>Issue:</strong> The finalize() method is deprecated and unreliable. Resources may not be released properly. The class should extend a cleanup pattern.</div>
+                <div class="fix-label">Fix:</div><pre>@Override
+@Deprecated
+protected void finalize() throws Throwable {
+    try {
+        cleanupContext();
+        if (sessionHandle != 0) {
+            SDFJceNative.closeSession(sessionHandle);
         }
-    }</pre>
+    } finally {
+        super.finalize();
+    }
+}</pre>
                 <div class="issue-source">Reviewer: claude</div>
             </div>
 <div class="issue">
-                <div class="issue-title">Resource cleanup relies on finalize()</div>
-                <div class="issue-location">sdf4j-jce/src/main/java/org/openhitls/sdf4j/jce/keygen/SM2KeyPairGenerator.java:73-80</div>
+                <div class="issue-title">SM2Signature uses deprecated finalize() for cleanup</div>
+                <div class="issue-location">sdf4j-jce/src/main/java/org/openhitls/sdf4j/jce/signature/SM2Signature.java:175-183</div>
                 <pre>@Override
-    protected void finalize() throws Throwable {
-        try {
-            if (sessionHandle != 0) {
-                SDFJceNative.closeSession(sessionHandle);
-            }
-        } finally {
-            super.finalize();
-        }
-    }</pre>
-                <div class="problem"><strong>Issue:</strong> This class uses finalize() for session cleanup. The sessionHandle should be explicitly closable.</div>
-                <div class="fix-label">Fix:</div><pre>public void close() {
+protected void finalize() throws Throwable {
+    try {
         if (sessionHandle != 0) {
             SDFJceNative.closeSession(sessionHandle);
-            sessionHandle = 0;
         }
+    } finally {
+        super.finalize();
     }
-
-    @Override
-    protected void finalize() throws Throwable {
-        try {
-            close();
-        } finally {
-            super.finalize();
+}</pre>
+                <div class="problem"><strong>Issue:</strong> The finalize() method is deprecated and unreliable. Session resources may leak.</div>
+                <div class="fix-label">Fix:</div><pre>@Override
+@Deprecated
+protected void finalize() throws Throwable {
+    try {
+        if (sessionHandle != 0) {
+            SDFJceNative.closeSession(sessionHandle);
         }
-    }</pre>
+    } finally {
+        super.finalize();
+    }
+}</pre>
                 <div class="issue-source">Reviewer: claude</div>
             </div>
 <div class="issue">
-                <div class="issue-title">Resource cleanup relies on finalize()</div>
-                <div class="issue-location">sdf4j-jce/src/main/java/org/openhitls/sdf4j/jce/cipher/SM2Cipher.java:206-213</div>
+                <div class="issue-title">SM2KeyPairGenerator uses deprecated finalize() for cleanup</div>
+                <div class="issue-location">sdf4j-jce/src/main/java/org/openhitls/sdf4j/jce/keygen/SM2KeyPairGenerator.java:73-81</div>
                 <pre>@Override
-    protected void finalize() throws Throwable {
-        try {
-            if (sessionHandle != 0) {
-                SDFJceNative.closeSession(sessionHandle);
-            }
-        } finally {
-            super.finalize();
-        }
-    }</pre>
-                <div class="problem"><strong>Issue:</strong> SM2Cipher also uses finalize() for session cleanup.</div>
-                <div class="fix-label">Fix:</div><pre>public void close() {
+protected void finalize() throws Throwable {
+    try {
         if (sessionHandle != 0) {
             SDFJceNative.closeSession(sessionHandle);
-            sessionHandle = 0;
         }
+    } finally {
+        super.finalize();
     }
-
-    @Override
-    protected void finalize() throws Throwable {
-        try {
-            close();
-        } finally {
-            super.finalize();
-        }
-    }</pre>
-                <div class="issue-source">Reviewer: claude</div>
-            </div>
-<div class="issue">
-                <div class="issue-title">Resource cleanup relies on finalize()</div>
-                <div class="issue-location">sdf4j-jce/src/main/java/org/openhitls/sdf4j/jce/random/SDFSecureRandom.java:57-64</div>
-                <pre>@Override
-    protected void finalize() throws Throwable {
-        try {
-            if (sessionHandle != 0) {
-                SDFJceNative.closeSession(sessionHandle);
-            }
-        } finally {
-            super.finalize();
-        }
-    }</pre>
-                <div class="problem"><strong>Issue:</strong> SDFSecureRandom uses finalize() for session cleanup. This is particularly problematic since SecureRandom instances are often long-lived.</div>
-                <div class="fix-label">Fix:</div><pre>public void close() {
+}</pre>
+                <div class="problem"><strong>Issue:</strong> The finalize() method is deprecated and unreliable. Session resources may leak.</div>
+                <div class="fix-label">Fix:</div><pre>@Override
+@Deprecated
+protected void finalize() throws Throwable {
+    try {
         if (sessionHandle != 0) {
             SDFJceNative.closeSession(sessionHandle);
-            sessionHandle = 0;
         }
+    } finally {
+        super.finalize();
     }
-
-    @Override
-    protected void finalize() throws Throwable {
-        try {
-            close();
-        } finally {
-            super.finalize();
-        }
-    }</pre>
-                <div class="issue-source">Reviewer: claude</div>
-            </div>
-<div class="issue">
-                <div class="issue-title">Resource cleanup relies on finalize()</div>
-                <div class="issue-location">sdf4j-jce/src/main/java/org/openhitls/sdf4j/jce/keygen/SM4KeyGenerator.java:65-72</div>
-                <pre>@Override
-    protected void finalize() throws Throwable {
-        try {
-            if (sessionHandle != 0) {
-                SDFJceNative.closeSession(sessionHandle);
-            }
-        } finally {
-            super.finalize();
-        }
-    }</pre>
-                <div class="problem"><strong>Issue:</strong> SM4KeyGenerator uses finalize() for session cleanup.</div>
-                <div class="fix-label">Fix:</div><pre>public void close() {
-        if (sessionHandle != 0) {
-            SDFJceNative.closeSession(sessionHandle);
-            sessionHandle = 0;
-        }
-    }
-
-    @Override
-    protected void finalize() throws Throwable {
-        try {
-            close();
-        } finally {
-            super.finalize();
-        }
-    }</pre>
-                <div class="issue-source">Reviewer: claude</div>
-            </div>
-<div class="issue">
-                <div class="issue-title">Resource cleanup relies on finalize()</div>
-                <div class="issue-location">sdf4j-jce/src/main/java/org/openhitls/sdf4j/jce/mac/HmacSM3.java:94-102</div>
-                <pre>@Override
-    protected void finalize() throws Throwable {
-        try {
-            cleanupKey();
-            if (sessionHandle != 0) {
-                SDFJceNative.closeSession(sessionHandle);
-            }
-        } finally {
-            super.finalize();
-        }
-    }</pre>
-                <div class="problem"><strong>Issue:</strong> HmacSM3 uses finalize() for session cleanup.</div>
-                <div class="fix-label">Fix:</div><pre>public void close() {
-        cleanupKey();
-        if (sessionHandle != 0) {
-            SDFJceNative.closeSession(sessionHandle);
-            sessionHandle = 0;
-        }
-    }
-
-    @Override
-    protected void finalize() throws Throwable {
-        try {
-            close();
-        } finally {
-            super.finalize();
-        }
-    }</pre>
-                <div class="issue-source">Reviewer: claude</div>
-            </div>
-<div class="issue">
-                <div class="issue-title">Resource cleanup relies on finalize()</div>
-                <div class="issue-location">sdf4j-jce/src/main/java/org/openhitls/sdf4j/jce/mac/SM4Mac.java:119-128</div>
-                <pre>@Override
-    protected void finalize() throws Throwable {
-        try {
-            cleanupKey();
-            if (sessionHandle != 0) {
-                SDFJceNative.closeSession(sessionHandle);
-            }
-        } finally {
-            super.finalize();
-        }
-    }</pre>
-                <div class="problem"><strong>Issue:</strong> SM4Mac uses finalize() for session cleanup.</div>
-                <div class="fix-label">Fix:</div><pre>public void close() {
-        cleanupKey();
-        if (sessionHandle != 0) {
-            SDFJceNative.closeSession(sessionHandle);
-            sessionHandle = 0;
-        }
-    }
-
-    @Override
-    protected void finalize() throws Throwable {
-        try {
-            close();
-        } finally {
-            super.finalize();
-        }
-    }</pre>
+}</pre>
                 <div class="issue-source">Reviewer: claude</div>
             </div>
 </div>
 <div class="section"><div class="section-title low">Low</div>
 <div class="issue">
-                <div class="issue-title">Potential race condition in initialization check</div>
-                <div class="issue-location">sdf4j-jce/src/main/native/src/sdf_jce_init.c:28-36</div>
-                <pre>int sdf_jce_initialize(const char *library_path) {
-    if (g_sdf_initialized) {
-        /* 检查句柄是否有效（简单检查：不为NULL）*/
-        if (g_device_handle != NULL) {
-            return SDR_OK;  // 已初始化且句柄有效
-        }
-        /* 句柄无效，先清理 */
-        sdf_jce_cleanup();
-    }</pre>
-                <div class="problem"><strong>Issue:</strong> The g_sdf_initialized flag is checked before checking g_device_handle validity, but the flag is set after successful initialization. Between the check and the set, another thread could see an inconsistent state.</div>
-                <div class="fix-label">Fix:</div><pre>int sdf_jce_initialize(const char *library_path) {
-    /* Use mutex to protect initialization */
-    static pthread_mutex_t init_mutex = PTHREAD_MUTEX_INITIALIZER;
-    pthread_mutex_lock(&amp;init_mutex);
-
-    if (g_sdf_initialized) {
-        /* 检查句柄是否有效（简单检查：不为NULL）*/
-        if (g_device_handle != NULL) {
-            pthread_mutex_unlock(&amp;init_mutex);
-            return SDR_OK;  // 已初始化且句柄有效
-        }
-        /* 句柄无效，先清理 */
-        sdf_jce_cleanup();
+                <div class="issue-title">hexToBytes doesn't validate input length</div>
+                <div class="issue-location">sdf4j-jce/src/main/java/org/openhitls/sdf4j/jce/util/SM2Util.java:151-157</div>
+                <pre>private static byte[] hexToBytes(String hex) {
+    int len = hex.length();
+    byte[] data = new byte[len / 2];
+    for (int i = 0; i &lt; len; i += 2) {
+        data[i / 2] = (byte) ((Character.digit(hex.charAt(i), 16) &lt;&lt; 4)
+                             + Character.digit(hex.charAt(i + 1), 16));
     }
-    /* ... rest of function ... */
-    pthread_mutex_unlock(&amp;init_mutex);</pre>
-                <div class="issue-source">Reviewer: claude</div>
-            </div>
-<div class="issue">
-                <div class="issue-title">Memory leak when strdup fails in SetLibraryPath</div>
-                <div class="issue-location">sdf4j-jce/src/main/native/src/sdf_jce_register.c:175-187</div>
-                <pre>/* 获取并保存新路径 */
-    const char *path_str = (*env)-&gt;GetStringUTFChars(env, path, NULL);
-    if (path_str != NULL) {
-        g_library_path = strdup(path_str);
-        (*env)-&gt;ReleaseStringUTFChars(env, path, path_str);
-    }</pre>
-                <div class="problem"><strong>Issue:</strong> When GetStringUTFChars succeeds but strdup fails, the code returns without freeing the string from GetStringUTFChars, causing a memory leak.</div>
-                <div class="fix-label">Fix:</div><pre>/* 获取并保存新路径 */
-    const char *path_str = (*env)-&gt;GetStringUTFChars(env, path, NULL);
-    if (path_str != NULL) {
-        g_library_path = strdup(path_str);
-        (*env)-&gt;ReleaseStringUTFChars(env, path, path_str);
-        if (g_library_path == NULL) {
-            throw_exception(env, "java/lang/OutOfMemoryError", "Failed to allocate library path");
+    return data;
+}</pre>
+                <div class="problem"><strong>Issue:</strong> The method assumes the hex string has even length. If an odd-length string is passed, it will throw IndexOutOfBoundsException instead of a more descriptive error.</div>
+                <div class="fix-label">Fix:</div><pre>private static byte[] hexToBytes(String hex) {
+    if (hex == null) {
+        throw new IllegalArgumentException("Hex string cannot be null");
+    }
+    if (hex.length() % 2 != 0) {
+        throw new IllegalArgumentException("Hex string must have even length");
+    }
+    int len = hex.length();
+    byte[] data = new byte[len / 2];
+    for (int i = 0; i &lt; len; i += 2) {
+        int high = Character.digit(hex.charAt(i), 16);
+        int low = Character.digit(hex.charAt(i + 1), 16);
+        if (high == -1 || low == -1) {
+            throw new IllegalArgumentException("Invalid hex string: " + hex);
         }
-    }</pre>
+        data[i / 2] = (byte) ((high &lt;&lt; 4) + low);
+    }
+    return data;
+}</pre>
                 <div class="issue-source">Reviewer: claude</div>
             </div>
 <div class="issue">
-                <div class="issue-title">forkCount changed from 0 to 1 may affect test behavior</div>
+                <div class="issue-title">Maven forkCount changed from 0 to 1</div>
                 <div class="issue-location">pom.xml:65</div>
-                <pre>-                        &lt;!-- 禁用fork，在Maven主进程中运行测试，避免surefire临时文件 --&gt;
--                        &lt;forkCount&gt;0&lt;/forkCount&gt;
-+                        &lt;forkCount&gt;1&lt;/forkCount&gt;</pre>
-                <div class="problem"><strong>Issue:</strong> The forkCount is changed from 0 (no fork, run in Maven process) to 1 (fork new process). The original comment stated this was to "avoid surefire temporary files" and use "system class loader". This change may break tests that relied on the previous behavior.</div>
-                <div class="fix-label">Fix:</div><pre>Keep the original forkCount=0 behavior if tests depend on running in the Maven process with system class loader. If the change is intentional, add a comment explaining why the change was made and what the implications are.</pre>
+                <pre>&lt;forkCount&gt;1&lt;/forkCount&gt;</pre>
+                <div class="problem"><strong>Issue:</strong> Changing forkCount from 0 (no fork) to 1 (forked process) may cause issues with stateful providers like JCE providers where provider registration needs to be shared.</div>
+                <div class="fix-label">Fix:</div><pre>&lt;forkCount&gt;0&lt;/forkCount&gt;</pre>
+                <div class="issue-source">Reviewer: claude</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">Loaded flag visibility issue in double-checked locking</div>
+                <div class="issue-location">sdf4j-jce/src/main/java/org/openhitls/sdf4j/jce/NativeLoader.java:59</div>
+                <pre>public static synchronized void load() {
+    if (loaded) {
+        return;
+    }</pre>
+                <div class="problem"><strong>Issue:</strong> The `loaded` flag is checked outside the synchronized block without proper volatile semantics. While volatile is declared, the double-check pattern could still have visibility issues on some JVMs.</div>
+                <div class="fix-label">Fix:</div><pre>private static volatile boolean loaded = false;
+
+public static void load() {
+    if (loaded) {
+        return;
+    }
+    synchronized (NativeLoader.class) {
+        if (loaded) {
+            return;
+        }
+        // ... loading logic
+    }
+}</pre>
                 <div class="issue-source">Reviewer: claude</div>
             </div>
 </div>
