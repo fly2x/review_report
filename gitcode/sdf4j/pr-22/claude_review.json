@@ -1,112 +1,162 @@
 [
   {
     "source": "claude",
-    "file": "sdf4j-jce/src/main/native/src/sdf_jce_sm4.c",
-    "line": "365-371",
-    "severity": "high",
-    "title": "Context freed before error check in sm4EncryptFinal",
-    "problem": "The context is freed (free(ctx)) before checking the return value of SDF_EncryptFinal. If the operation fails, the context is freed and then an exception is thrown. The Java side still has a reference to the freed context handle, and if cleanup code (like finalize() or explicit cleanup) calls sm4Free again, it will cause a double-free vulnerability.",
-    "code": "LONG ret = g_sdf_functions.SDF_EncryptFinal(ctx->session_handle, output, &outputLen);\n\n    ctx->initialized = 0;\n    free(ctx);\n\n    if (ret != SDR_OK) {\n        throw_jce_exception(env, (int)ret, \"SM4 encrypt final failed\");\n        return NULL;\n    }",
-    "fix": "LONG ret = g_sdf_functions.SDF_EncryptFinal(ctx->session_handle, output, &outputLen);\n\n    if (ret != SDR_OK) {\n        throw_jce_exception(env, (int)ret, \"SM4 encrypt final failed\");\n        free(ctx);\n        return NULL;\n    }\n\n    ctx->initialized = 0;\n    free(ctx);\n\n    jbyteArray result = (*env)->NewByteArray(env, (jsize)outputLen);\n    if (result != NULL && outputLen > 0) {\n        (*env)->SetByteArrayRegion(env, result, 0, (jsize)outputLen, (jbyte *)output);\n    }\n    return result;"
-  },
-  {
-    "source": "claude",
-    "file": "sdf4j-jce/src/main/native/src/sdf_jce_sm4.c",
-    "line": "522-528",
-    "severity": "high",
-    "title": "Context freed before error check in sm4DecryptFinal",
-    "problem": "Same issue as sm4EncryptFinal. The context is freed before checking the return value, leading to potential double-free if error handling code attempts to clean up.",
-    "code": "LONG ret = g_sdf_functions.SDF_DecryptFinal(ctx->session_handle, output, &outputLen);\n\n    ctx->initialized = 0;\n    free(ctx);\n\n    if (ret != SDR_OK) {\n        throw_jce_exception(env, (int)ret, \"SM4 decrypt final failed\");\n        return NULL;\n    }",
-    "fix": "LONG ret = g_sdf_functions.SDF_DecryptFinal(ctx->session_handle, output, &outputLen);\n\n    if (ret != SDR_OK) {\n        throw_jce_exception(env, (int)ret, \"SM4 decrypt final failed\");\n        free(ctx);\n        return NULL;\n    }\n\n    ctx->initialized = 0;\n    free(ctx);\n\n    jbyteArray result = (*env)->NewByteArray(env, (jsize)outputLen);\n    if (result != NULL && outputLen > 0) {\n        (*env)->SetByteArrayRegion(env, result, 0, (jsize)outputLen, (jbyte *)output);\n    }\n    return result;"
-  },
-  {
-    "source": "claude",
-    "file": "sdf4j-jce/src/main/native/src/sdf_jce_sm2.c",
-    "line": "117-122",
-    "severity": "high",
-    "title": "sm2Sign modifies caller's private key array",
-    "problem": "After memset(privKeyBytes, 0, ...) to clear sensitive data, ReleaseByteArrayElements is called with mode 0 which copies back to the original array. This writes zeros to the caller's original private key array, causing unexpected data corruption.",
-    "code": "ERR:\n    /* Clear sensitive data in JNI buffer before releasing */\n    memset(privKeyBytes, 0, (size_t)privKeyLen);\n    (*env)->ReleaseByteArrayElements(env, privateKey, privKeyBytes, 0);",
-    "fix": "ERR:\n    /* Clear sensitive data in JNI buffer before releasing */\n    memset(privKeyBytes, 0, (size_t)privKeyLen);\n    (*env)->ReleaseByteArrayElements(env, privateKey, privKeyBytes, JNI_ABORT);"
-  },
-  {
-    "source": "claude",
-    "file": "sdf4j-jce/src/main/native/src/sdf_jce_sm2.c",
-    "line": "264-269",
-    "severity": "high",
-    "title": "sm2Decrypt modifies caller's private key array",
-    "problem": "Same issue as sm2Sign - zeros are written to the caller's original array due to using ReleaseByteArrayElements with mode 0 after memset.",
-    "code": "ERR:\n    /* 清除敏感数据 */\n    memset(privKeyBytes, 0, (size_t)privKeyLen);\n    (*env)->ReleaseByteArrayElements(env, privateKey, privKeyBytes, 0);",
-    "fix": "ERR:\n    /* 清除敏感数据 */\n    memset(privKeyBytes, 0, (size_t)privKeyLen);\n    (*env)->ReleaseByteArrayElements(env, privateKey, privKeyBytes, JNI_ABORT);"
-  },
-  {
-    "source": "claude",
-    "file": "sdf4j-jce/src/main/java/org/openhitls/sdf4j/jce/digest/SM3MessageDigest.java",
-    "line": "69-71",
-    "severity": "medium",
-    "title": "Memory leak in SM3MessageDigest.engineDigest",
-    "problem": "After calling sm3Final, the native context (allocated by sm3Init with malloc) is never freed. The ctx is set to 0 but sm3Free is never called, causing a memory leak for each digest operation.",
-    "code": "byte[] result = SDFJceNative.sm3Final(ctx);\n        ctx = 0;\n        initialized = false;",
-    "fix": "byte[] result = SDFJceNative.sm3Final(ctx);\n        SDFJceNative.sm3Free(ctx);\n        ctx = 0;\n        initialized = false;"
-  },
-  {
-    "source": "claude",
     "file": "sdf4j-jce/src/main/java/org/openhitls/sdf4j/jce/key/SM2PrivateKey.java",
-    "line": "33",
-    "severity": "medium",
-    "title": "SM2PrivateKey doesn't clone key bytes, allowing external modification",
-    "problem": "The constructor assigns the keyBytes reference directly without cloning. This allows external code to modify the internal key state. Additionally, getEncoded() returns the internal array directly, and destroy() zeros the array which affects the caller's original array if they passed it directly to the constructor.",
-    "code": "public SM2PrivateKey(byte[] keyBytes) {\n        if (keyBytes == null || keyBytes.length != 32) {\n            throw new IllegalArgumentException(\"Key must be 32 bytes\");\n        }\n        this.keyBytes = keyBytes;\n    }\n\n    @Override\n    public byte[] getEncoded() {\n        return keyBytes;\n    }",
-    "fix": "public SM2PrivateKey(byte[] keyBytes) {\n        if (keyBytes == null || keyBytes.length != 32) {\n            throw new IllegalArgumentException(\"Key must be 32 bytes\");\n        }\n        this.keyBytes = keyBytes.clone();\n    }\n\n    @Override\n    public byte[] getEncoded() {\n        return keyBytes.clone();\n    }"
-  },
-  {
-    "source": "claude",
-    "file": "sdf4j-jce/src/main/native/src/sdf_jce_sm3.c",
-    "line": "192-193",
-    "severity": "low",
-    "title": "sm3Free doesn't clear sensitive data before freeing",
-    "problem": "The sm3Free function frees the context without clearing potentially sensitive data. For consistency with sm4Free which does memset before free, sm3Free should also clear the context.",
-    "code": "SM3Context *ctx = (SM3Context *)(uintptr_t)ctxHandle;\n    if (ctx == NULL) {\n        return;\n    }\n\n    free(ctx);",
-    "fix": "SM3Context *ctx = (SM3Context *)(uintptr_t)ctxHandle;\n    if (ctx == NULL) {\n        return;\n    }\n\n    memset(ctx, 0, sizeof(SM3Context));\n    free(ctx);"
+    "line": "45",
+    "severity": "high",
+    "title": "Private key material exposure through getEncoded()",
+    "problem": "The getEncoded() method returns the internal keyBytes array directly instead of a clone. This allows external code to modify the private key material, which is a security vulnerability.",
+    "code": "@Override\n    public byte[] getEncoded() {\n        return keyBytes;\n    }",
+    "fix": "@Override\n    public byte[] getEncoded() {\n        return keyBytes.clone();\n    }"
   },
   {
     "source": "claude",
     "file": "sdf4j-jce/src/main/java/org/openhitls/sdf4j/jce/key/SM2PublicKey.java",
-    "line": "36-37",
-    "severity": "low",
-    "title": "SM2PublicKey getX/getY return internal arrays without cloning",
-    "problem": "The getX() and getY() methods return the internal byte arrays directly without cloning, allowing external modification of the key's internal state.",
+    "line": "64-68",
+    "severity": "medium",
+    "title": "Public key coordinates exposed without cloning",
+    "problem": "The getX() and getY() methods return the internal x and y arrays directly without cloning. This allows external code to modify the public key coordinates.",
     "code": "public byte[] getX() {\n        return x;\n    }\n\n    public byte[] getY() {\n        return y;\n    }",
     "fix": "public byte[] getX() {\n        return x.clone();\n    }\n\n    public byte[] getY() {\n        return y.clone();\n    }"
   },
   {
     "source": "claude",
-    "file": "sdf4j-jce/src/main/java/org/openhitls/sdf4j/jce/spec/SM2ParameterSpec.java",
-    "line": "81",
-    "severity": "low",
-    "title": "SM2ParameterSpec.getUserId returns internal array without cloning",
-    "problem": "The getUserId() method returns the internal userId array directly without cloning, allowing external modification.",
-    "code": "public byte[] getUserId() {\n        return userId;\n    }",
-    "fix": "public byte[] getUserId() {\n        return userId.clone();\n    }"
+    "file": "sdf4j-jce/src/main/java/org/openhitls/sdf4j/jce/NativeLoader.java",
+    "line": "94-98",
+    "severity": "medium",
+    "title": "Native library extracted to temp directory without restrictive permissions",
+    "problem": "The loadLibraryFromResources() method extracts the native library to /tmp/sdf4j-jce-native without setting restrictive file permissions. On multi-user systems, another user could potentially replace the library before it's loaded.",
+    "code": "// Extract the library (always re-extract to ensure using latest version)\n            Files.copy(is, tempLib, StandardCopyOption.REPLACE_EXISTING);\n\n            // Load the extracted library\n            System.load(tempLib.toAbsolutePath().toString());",
+    "fix": "// Extract the library (always re-extract to ensure using latest version)\n            Files.copy(is, tempLib, StandardCopyOption.REPLACE_EXISTING);\n\n            // Set restrictive permissions (owner read-only)\n            try {\n                Files.setPosixFilePermissions(tempLib, PosixFilePermissions.fromString(\"r--------\"));\n            } catch (UnsupportedOperationException e) {\n                // Not a POSIX system, skip\n            }\n\n            // Load the extracted library\n            System.load(tempLib.toAbsolutePath().toString());"
   },
   {
     "source": "claude",
     "file": "sdf4j-jce/src/main/java/org/openhitls/sdf4j/jce/cipher/SM4Cipher.java",
-    "line": "237",
-    "severity": "low",
-    "title": "SM2Cipher.engineSetPadding accepts unsupported padding mode",
-    "problem": "The engineSetPadding method accepts \"PKCS1Padding\" but the comment says SM2 only supports NoPadding. This is misleading and the method should throw an exception for unsupported padding.",
-    "code": "@Override\n    protected void engineSetPadding(String padding) throws NoSuchPaddingException {\n        if (!\"NoPadding\".equalsIgnoreCase(padding) && !\"PKCS1Padding\".equalsIgnoreCase(padding)) {\n            throw new NoSuchPaddingException(\"SM2 only supports NoPadding\");\n        }\n    }",
-    "fix": "@Override\n    protected void engineSetPadding(String padding) throws NoSuchPaddingException {\n        if (!\"NoPadding\".equalsIgnoreCase(padding)) {\n            throw new NoSuchPaddingException(\"SM2 only supports NoPadding\");\n        }\n    }"
+    "line": "531-543",
+    "severity": "medium",
+    "title": "Resource cleanup relies on finalize() which is unreliable",
+    "problem": "The sessionHandle is only cleaned up in finalize(), which is not guaranteed to run and may run arbitrarily late. This can lead to resource leaks. There should be an explicit close() method or implement AutoCloseable.",
+    "code": "@Override\n    protected void finalize() throws Throwable {\n        try {\n            cleanup();\n            if (sessionHandle != 0) {\n                SDFJceNative.closeSession(sessionHandle);\n            }\n        } finally {\n            super.finalize();\n        }\n    }",
+    "fix": "// Implement AutoCloseable for explicit resource management\n    public void close() {\n        cleanup();\n        if (sessionHandle != 0) {\n            SDFJceNative.closeSession(sessionHandle);\n            sessionHandle = 0;\n        }\n    }\n\n    @Override\n    protected void finalize() throws Throwable {\n        try {\n            close();\n        } finally {\n            super.finalize();\n        }\n    }"
   },
   {
     "source": "claude",
-    "file": "sdf4j-jce/src/main/native/src/sdf_jce_sm2.c",
-    "line": "195-201",
+    "file": "sdf4j-jce/src/main/java/org/openhitls/sdf4j/jce/signature/SM2Signature.java",
+    "line": "178-186",
+    "severity": "medium",
+    "title": "Resource cleanup relies on finalize() which is unreliable",
+    "problem": "The sessionHandle is only cleaned up in finalize(). This class should implement AutoCloseable to provide explicit resource cleanup.",
+    "code": "@Override\n    protected void finalize() throws Throwable {\n        try {\n            if (sessionHandle != 0) {\n                SDFJceNative.closeSession(sessionHandle);\n            }\n        } finally {\n            super.finalize();\n        }\n    }",
+    "fix": "public void close() {\n        if (sessionHandle != 0) {\n            SDFJceNative.closeSession(sessionHandle);\n            sessionHandle = 0;\n        }\n    }\n\n    @Override\n    protected void finalize() throws Throwable {\n        try {\n            close();\n        } finally {\n            super.finalize();\n        }\n    }"
+  },
+  {
+    "source": "claude",
+    "file": "sdf4j-jce/src/main/java/org/openhitls/sdf4j/jce/util/DERCodec.java",
+    "line": "196-209",
+    "severity": "medium",
+    "title": "Silent truncation of signature values in copyToFixedBuffer",
+    "problem": "The copyToFixedBuffer function silently truncates data if srcLen > 32 bytes. This could lead to incorrect signature verification or encoding issues without any error indication.",
+    "code": "private static void copyToFixedBuffer(byte[] src, byte[] dest, int offset) {\n        int srcLen = src.length;\n        int fixedLen = 32;\n\n        if (srcLen > fixedLen) {\n            // 截断高位\n            System.arraycopy(src, srcLen - fixedLen, dest, offset, fixedLen);\n        } else {\n            // 前导零填充\n            int padLen = fixedLen - srcLen;\n            for (int i = 0; i < padLen; i++) {\n                dest[offset + i] = 0;\n            }\n            System.arraycopy(src, 0, dest, offset + padLen, srcLen);\n        }\n    }",
+    "fix": "private static void copyToFixedBuffer(byte[] src, byte[] dest, int offset) {\n        int srcLen = src.length;\n        int fixedLen = 32;\n\n        if (srcLen > fixedLen) {\n            // Truncation indicates invalid signature - throw exception\n            throw new IllegalArgumentException(\"Signature component too large: \" + srcLen + \" bytes\");\n        } else {\n            // 前导零填充\n            int padLen = fixedLen - srcLen;\n            for (int i = 0; i < padLen; i++) {\n                dest[offset + i] = 0;\n            }\n            System.arraycopy(src, 0, dest, offset + padLen, srcLen);\n        }\n    }"
+  },
+  {
+    "source": "claude",
+    "file": "sdf4j-jce/src/main/java/org/openhitls/sdf4j/jce/digest/SM3MessageDigest.java",
+    "line": "104-115",
+    "severity": "medium",
+    "title": "Resource cleanup relies on finalize()",
+    "problem": "Like other JCE classes, this class uses finalize() for cleanup. Implementing AutoCloseable would provide better resource management.",
+    "code": "@Override\n    protected void finalize() throws Throwable {\n        try {\n            cleanupContext();\n            if (sessionHandle != 0) {\n                SDFJceNative.closeSession(sessionHandle);\n            }\n        } finally {\n            super.finalize();\n        }\n    }",
+    "fix": "public void close() {\n        cleanupContext();\n        if (sessionHandle != 0) {\n            SDFJceNative.closeSession(sessionHandle);\n            sessionHandle = 0;\n        }\n    }\n\n    @Override\n    protected void finalize() throws Throwable {\n        try {\n            close();\n        } finally {\n            super.finalize();\n        }\n    }"
+  },
+  {
+    "source": "claude",
+    "file": "sdf4j-jce/src/main/java/org/openhitls/sdf4j/jce/keygen/SM2KeyPairGenerator.java",
+    "line": "73-80",
+    "severity": "medium",
+    "title": "Resource cleanup relies on finalize()",
+    "problem": "This class uses finalize() for session cleanup. The sessionHandle should be explicitly closable.",
+    "code": "@Override\n    protected void finalize() throws Throwable {\n        try {\n            if (sessionHandle != 0) {\n                SDFJceNative.closeSession(sessionHandle);\n            }\n        } finally {\n            super.finalize();\n        }\n    }",
+    "fix": "public void close() {\n        if (sessionHandle != 0) {\n            SDFJceNative.closeSession(sessionHandle);\n            sessionHandle = 0;\n        }\n    }\n\n    @Override\n    protected void finalize() throws Throwable {\n        try {\n            close();\n        } finally {\n            super.finalize();\n        }\n    }"
+  },
+  {
+    "source": "claude",
+    "file": "sdf4j-jce/src/main/java/org/openhitls/sdf4j/jce/cipher/SM2Cipher.java",
+    "line": "206-213",
+    "severity": "medium",
+    "title": "Resource cleanup relies on finalize()",
+    "problem": "SM2Cipher also uses finalize() for session cleanup.",
+    "code": "@Override\n    protected void finalize() throws Throwable {\n        try {\n            if (sessionHandle != 0) {\n                SDFJceNative.closeSession(sessionHandle);\n            }\n        } finally {\n            super.finalize();\n        }\n    }",
+    "fix": "public void close() {\n        if (sessionHandle != 0) {\n            SDFJceNative.closeSession(sessionHandle);\n            sessionHandle = 0;\n        }\n    }\n\n    @Override\n    protected void finalize() throws Throwable {\n        try {\n            close();\n        } finally {\n            super.finalize();\n        }\n    }"
+  },
+  {
+    "source": "claude",
+    "file": "sdf4j-jce/src/main/java/org/openhitls/sdf4j/jce/random/SDFSecureRandom.java",
+    "line": "57-64",
+    "severity": "medium",
+    "title": "Resource cleanup relies on finalize()",
+    "problem": "SDFSecureRandom uses finalize() for session cleanup. This is particularly problematic since SecureRandom instances are often long-lived.",
+    "code": "@Override\n    protected void finalize() throws Throwable {\n        try {\n            if (sessionHandle != 0) {\n                SDFJceNative.closeSession(sessionHandle);\n            }\n        } finally {\n            super.finalize();\n        }\n    }",
+    "fix": "public void close() {\n        if (sessionHandle != 0) {\n            SDFJceNative.closeSession(sessionHandle);\n            sessionHandle = 0;\n        }\n    }\n\n    @Override\n    protected void finalize() throws Throwable {\n        try {\n            close();\n        } finally {\n            super.finalize();\n        }\n    }"
+  },
+  {
+    "source": "claude",
+    "file": "sdf4j-jce/src/main/java/org/openhitls/sdf4j/jce/keygen/SM4KeyGenerator.java",
+    "line": "65-72",
+    "severity": "medium",
+    "title": "Resource cleanup relies on finalize()",
+    "problem": "SM4KeyGenerator uses finalize() for session cleanup.",
+    "code": "@Override\n    protected void finalize() throws Throwable {\n        try {\n            if (sessionHandle != 0) {\n                SDFJceNative.closeSession(sessionHandle);\n            }\n        } finally {\n            super.finalize();\n        }\n    }",
+    "fix": "public void close() {\n        if (sessionHandle != 0) {\n            SDFJceNative.closeSession(sessionHandle);\n            sessionHandle = 0;\n        }\n    }\n\n    @Override\n    protected void finalize() throws Throwable {\n        try {\n            close();\n        } finally {\n            super.finalize();\n        }\n    }"
+  },
+  {
+    "source": "claude",
+    "file": "sdf4j-jce/src/main/java/org/openhitls/sdf4j/jce/mac/HmacSM3.java",
+    "line": "94-102",
+    "severity": "medium",
+    "title": "Resource cleanup relies on finalize()",
+    "problem": "HmacSM3 uses finalize() for session cleanup.",
+    "code": "@Override\n    protected void finalize() throws Throwable {\n        try {\n            cleanupKey();\n            if (sessionHandle != 0) {\n                SDFJceNative.closeSession(sessionHandle);\n            }\n        } finally {\n            super.finalize();\n        }\n    }",
+    "fix": "public void close() {\n        cleanupKey();\n        if (sessionHandle != 0) {\n            SDFJceNative.closeSession(sessionHandle);\n            sessionHandle = 0;\n        }\n    }\n\n    @Override\n    protected void finalize() throws Throwable {\n        try {\n            close();\n        } finally {\n            super.finalize();\n        }\n    }"
+  },
+  {
+    "source": "claude",
+    "file": "sdf4j-jce/src/main/java/org/openhitls/sdf4j/jce/mac/SM4Mac.java",
+    "line": "119-128",
+    "severity": "medium",
+    "title": "Resource cleanup relies on finalize()",
+    "problem": "SM4Mac uses finalize() for session cleanup.",
+    "code": "@Override\n    protected void finalize() throws Throwable {\n        try {\n            cleanupKey();\n            if (sessionHandle != 0) {\n                SDFJceNative.closeSession(sessionHandle);\n            }\n        } finally {\n            super.finalize();\n        }\n    }",
+    "fix": "public void close() {\n        cleanupKey();\n        if (sessionHandle != 0) {\n            SDFJceNative.closeSession(sessionHandle);\n            sessionHandle = 0;\n        }\n    }\n\n    @Override\n    protected void finalize() throws Throwable {\n        try {\n            close();\n        } finally {\n            super.finalize();\n        }\n    }"
+  },
+  {
+    "source": "claude",
+    "file": "sdf4j-jce/src/main/native/src/sdf_jce_init.c",
+    "line": "28-36",
     "severity": "low",
-    "title": "sm2Verify doesn't check signature length",
-    "problem": "The sm2Verify function checks publicKeyX and publicKeyY lengths but doesn't validate the signature array length. A malformed signature could cause out-of-bounds read when accessing sigBytes.",
-    "code": "jsize xLen = (*env)->GetArrayLength(env, publicKeyX);\n    jsize yLen = (*env)->GetArrayLength(env, publicKeyY);\n    if (xLen != SM2_KEY_BYTES || yLen != SM2_KEY_BYTES) {\n        throw_exception(env, \"java/lang/IllegalArgumentException\",\n                        \"SM2 public key/signature length is invalid\");\n        return JNI_FALSE;\n    }",
-    "fix": "jsize xLen = (*env)->GetArrayLength(env, publicKeyX);\n    jsize yLen = (*env)->GetArrayLength(env, publicKeyY);\n    jsize sigLen = (*env)->GetArrayLength(env, signature);\n    if (xLen != SM2_KEY_BYTES || yLen != SM2_KEY_BYTES || sigLen != SM2_SIGNATURE_BYTES) {\n        throw_exception(env, \"java/lang/IllegalArgumentException\",\n                        \"SM2 public key/signature length is invalid\");\n        return JNI_FALSE;\n    }"
+    "title": "Potential race condition in initialization check",
+    "problem": "The g_sdf_initialized flag is checked before checking g_device_handle validity, but the flag is set after successful initialization. Between the check and the set, another thread could see an inconsistent state.",
+    "code": "int sdf_jce_initialize(const char *library_path) {\n    if (g_sdf_initialized) {\n        /* 检查句柄是否有效（简单检查：不为NULL）*/\n        if (g_device_handle != NULL) {\n            return SDR_OK;  // 已初始化且句柄有效\n        }\n        /* 句柄无效，先清理 */\n        sdf_jce_cleanup();\n    }",
+    "fix": "int sdf_jce_initialize(const char *library_path) {\n    /* Use mutex to protect initialization */\n    static pthread_mutex_t init_mutex = PTHREAD_MUTEX_INITIALIZER;\n    pthread_mutex_lock(&init_mutex);\n\n    if (g_sdf_initialized) {\n        /* 检查句柄是否有效（简单检查：不为NULL）*/\n        if (g_device_handle != NULL) {\n            pthread_mutex_unlock(&init_mutex);\n            return SDR_OK;  // 已初始化且句柄有效\n        }\n        /* 句柄无效，先清理 */\n        sdf_jce_cleanup();\n    }\n    /* ... rest of function ... */\n    pthread_mutex_unlock(&init_mutex);"
+  },
+  {
+    "source": "claude",
+    "file": "sdf4j-jce/src/main/native/src/sdf_jce_register.c",
+    "line": "175-187",
+    "severity": "low",
+    "title": "Memory leak when strdup fails in SetLibraryPath",
+    "problem": "When GetStringUTFChars succeeds but strdup fails, the code returns without freeing the string from GetStringUTFChars, causing a memory leak.",
+    "code": "/* 获取并保存新路径 */\n    const char *path_str = (*env)->GetStringUTFChars(env, path, NULL);\n    if (path_str != NULL) {\n        g_library_path = strdup(path_str);\n        (*env)->ReleaseStringUTFChars(env, path, path_str);\n    }",
+    "fix": "/* 获取并保存新路径 */\n    const char *path_str = (*env)->GetStringUTFChars(env, path, NULL);\n    if (path_str != NULL) {\n        g_library_path = strdup(path_str);\n        (*env)->ReleaseStringUTFChars(env, path, path_str);\n        if (g_library_path == NULL) {\n            throw_exception(env, \"java/lang/OutOfMemoryError\", \"Failed to allocate library path\");\n        }\n    }"
+  },
+  {
+    "source": "claude",
+    "file": "pom.xml",
+    "line": "65",
+    "severity": "low",
+    "title": "forkCount changed from 0 to 1 may affect test behavior",
+    "problem": "The forkCount is changed from 0 (no fork, run in Maven process) to 1 (fork new process). The original comment stated this was to \"avoid surefire temporary files\" and use \"system class loader\". This change may break tests that relied on the previous behavior.",
+    "code": "-                        <!-- 禁用fork，在Maven主进程中运行测试，避免surefire临时文件 -->\n-                        <forkCount>0</forkCount>\n+                        <forkCount>1</forkCount>",
+    "fix": "Keep the original forkCount=0 behavior if tests depend on running in the Maven process with system class loader. If the change is intentional, add a comment explaining why the change was made and what the implications are."
   }
 ]
