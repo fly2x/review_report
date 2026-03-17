@@ -1,0 +1,110 @@
+[
+  {
+    "source": "claude",
+    "file": "openhitls/src/aes.rs",
+    "line": "202",
+    "severity": "critical",
+    "title": "AEAD tag comparison vulnerable to timing attacks",
+    "problem": "The tag comparison uses `!=` operator which is not constant-time. This allows an attacker to potentially forge valid tags through timing side-channel attacks.",
+    "code": "if calculated_tag != tag {\n    return Err(format!(\"AEAD Tag mismatch! Expected {:?}, Got {:?}\", tag, calculated_tag));\n}",
+    "fix": "use subtle::ConstantTimeEq;\n\nif calculated_tag.ct_eq(&tag).into() == false {\n    return Err(\"AEAD Tag mismatch\".to_string());\n}"
+  },
+  {
+    "source": "claude",
+    "file": "openhitls/src/ecc_pkey_gen.rs",
+    "line": "19",
+    "severity": "critical",
+    "title": "Indistinguishable error return from successful empty key generation",
+    "problem": "The function returns (Vec::new(), Vec::new()) on error, which is indistinguishable from a successful (but impossible) generation of empty keys. Callers cannot detect failures and may use uninitialized/invalid cryptographic keys.",
+    "code": "if ctx.is_null() {\n    println!(\"Failed to create ECC context\");\n    return (Vec::new(), Vec::new());\n}",
+    "fix": "pub fn ecc_genpkey(curve_id: u32) -> Result<(Vec<u8>, Vec<u8>), String> {\n    // ...\n    if ctx.is_null() {\n        return Err(\"Failed to create ECC context\".to_string());\n    }\n    // ...\n    Ok((actual_pub, actual_prv))\n}"
+  },
+  {
+    "source": "claude",
+    "file": "openhitls/src/sha2_256.rs",
+    "line": "12",
+    "severity": "high",
+    "title": "Ignored return value from sha2_256_init",
+    "problem": "The sha2_256_init function returns an i32 status code (0 = success), but the return value is ignored. If initialization fails, the context will be in an invalid state but the new() function still succeeds, leading to undefined behavior when the context is used.",
+    "code": "pub fn new() -> Self {\n    let ctx = sha2_256_newctx();\n    sha2_256_init(ctx);\n    Self { ctx }\n}",
+    "fix": "pub fn new() -> Result<Self, String> {\n    let ctx = sha2_256_newctx();\n    if ctx.is_null() {\n        return Err(\"Failed to allocate SHA256 context\".to_string());\n    }\n    let ret = sha2_256_init(ctx);\n    if ret != 0 {\n        sha2_256_freectx(ctx);\n        return Err(format!(\"Failed to initialize SHA256 context: {}\", ret));\n    }\n    Ok(Self { ctx })\n}"
+  },
+  {
+    "source": "claude",
+    "file": "openhitls/src/sha2_256.rs",
+    "line": "16-18",
+    "severity": "high",
+    "title": "Ignored return value from sha2_256_update",
+    "problem": "The sha2_256_update function returns an i32 status code, but the return value is ignored. If update fails, the hash state is corrupted and the final result will be invalid.",
+    "code": "pub fn update(&mut self, data: &[u8]) {\n    sha2_256_update(self.ctx, data);\n}",
+    "fix": "pub fn update(&mut self, data: &[u8]) -> Result<(), String> {\n    let ret = sha2_256_update(self.ctx, data);\n    if ret != 0 {\n        Err(format!(\"Failed to update SHA256: {}\", ret))\n    } else {\n        Ok(())\n    }\n}"
+  },
+  {
+    "source": "claude",
+    "file": "openhitls/src/aes.rs",
+    "line": "33-37",
+    "severity": "high",
+    "title": "Silent IV truncation for CCM mode without length validation",
+    "problem": "For CCM mode, the IV is truncated to 12 bytes if longer, but no error is raised if the IV is shorter than 12 bytes. CCM requires a 12-byte nonce (7-13 bytes allowed by spec, but 12 is standard). Using a shorter IV may lead to weak cryptography.",
+    "code": "let actual_iv = if is_ccm(algid) && iv.len() > 12 {\n    &iv[..12]\n} else {\n    iv\n};",
+    "fix": "let actual_iv = if is_ccm(algid) {\n    if iv.len() < 12 {\n        return Err(\"CCM mode requires IV of at least 12 bytes\".to_string());\n    }\n    &iv[..12]\n} else {\n    iv\n};"
+  },
+  {
+    "source": "claude",
+    "file": "openhitls/src/aes.rs",
+    "line": "127-131",
+    "severity": "high",
+    "title": "Silent IV truncation for CCM mode in decrypt without length validation",
+    "problem": "Same issue as in encrypt - CCM IV is truncated to 12 bytes if longer, but no error if shorter than 12 bytes.",
+    "code": "let actual_iv = if is_ccm(algid) && iv.len() > 12 {\n    &iv[..12]\n} else {\n    iv\n};",
+    "fix": "let actual_iv = if is_ccm(algid) {\n    if iv.len() < 12 {\n        return Err(\"CCM mode requires IV of at least 12 bytes\".to_string());\n    }\n    &iv[..12]\n} else {\n    iv\n};"
+  },
+  {
+    "source": "claude",
+    "file": "openhitls/src/ecc_pkey_gen.rs",
+    "line": "49-84",
+    "severity": "high",
+    "title": "ctx_to_key returns empty vectors on error without indication",
+    "problem": "When ecc_get_pub or ecc_get_prv fails, the function returns partially filled or empty vectors without any error indication. The caller cannot detect that key extraction failed.",
+    "code": "let ret_pub = ecc_get_pub(ctx, &mut pub_key_wrapper);\nif ret_pub == 0 {\n    let len = pub_key_wrapper.get_pub_len() as usize;\n    actual_pub = pub_buf[..len].to_vec();\n} else {\n    println!(\"Failed to get ECC public key: {}\", ret_pub);\n}",
+    "fix": "pub fn ctx_to_key(ctx: *mut std::ffi::c_void, curve_id: u32) -> Result<(Vec<u8>, Vec<u8>), String> {\n    // ...\n    let ret_pub = ecc_get_pub(ctx, &mut pub_key_wrapper);\n    if ret_pub != 0 {\n        return Err(format!(\"Failed to get ECC public key: {}\", ret_pub));\n    }\n    let ret_prv = ecc_get_prv(ctx, &mut prv_key_wrapper);\n    if ret_prv != 0 {\n        return Err(format!(\"Failed to get ECC private key: {}\", ret_prv));\n    }\n    // ...\n    Ok((actual_pub, actual_prv))\n}"
+  },
+  {
+    "source": "claude",
+    "file": "openhitls/src/ecc_pkey_gen.rs",
+    "line": "110-121",
+    "severity": "high",
+    "title": "pub_buf dropped before use in key_to_ctx",
+    "problem": "The `pub_buf` vector is allocated and its pointer is passed to `ecc_set_pub`, but the vector goes out of scope immediately after. If the C library stores the pointer and uses it later, this will cause use-after-free. The vector needs to live as long as the context.",
+    "code": "if !pub_key.is_empty() {\n    let mut pub_buf = pub_key.to_vec();\n    let mut pub_key_wrapper = CRYPT_EAL_PkeyPub::new(ctx_id);\n    pub_key_wrapper.setter(pub_buf.as_mut_ptr(), pub_buf.len() as u32);\n\n    let ret = ecc_set_pub(ctx, &mut pub_key_wrapper);\n    // pub_buf is dropped here!\n}"
+  },
+  {
+    "source": "claude",
+    "file": "openhitls/src/ecc_pkey_crypt.rs",
+    "line": "37",
+    "severity": "medium",
+    "title": "Output buffer size based on encrypted data length may be insufficient",
+    "problem": "The output buffer is sized to `enc_data.len()`, but decrypted data can be larger than encrypted data for some encryption schemes (though SM2 typically produces ciphertext larger than plaintext). This could cause a buffer overflow or truncation.",
+    "code": "let mut out_len: u32 = enc_data.len() as u32;\nlet mut out_buf = vec![0u8; out_len as usize];",
+    "fix": "let mut out_len: u32 = (enc_data.len() + 256) as u32;\nlet mut out_buf = vec![0u8; out_len as usize];"
+  },
+  {
+    "source": "claude",
+    "file": "configure.py",
+    "line": "9-15",
+    "severity": "medium",
+    "title": "Working directory not restored on subprocess failure",
+    "problem": "If subprocess.run() with check=True fails, an exception is raised but the working directory has already been changed. This leaves the process in an inconsistent state and makes debugging harder.",
+    "code": "os.chdir(deps_dir)\nsubprocess.run(['python3', 'configure.py'], check=True)\nbuild_dir = os.path.join(deps_dir, 'build')\nos.makedirs(build_dir, exist_ok=True)\nos.chdir(build_dir)",
+    "fix": "original_dir = os.getcwd()\ntry:\n    os.chdir(deps_dir)\n    subprocess.run(['python3', 'configure.py'], check=True)\n    build_dir = os.path.join(deps_dir, 'build')\n    os.makedirs(build_dir, exist_ok=True)\n    os.chdir(build_dir)\n    subprocess.run(['cmake', '..'], check=True)\n    subprocess.run(['make', '-j'], check=True)\n    os.chdir(script_dir)\nexcept Exception:\n    os.chdir(original_dir)\n    raise"
+  },
+  {
+    "source": "claude",
+    "file": "crypto/src/sha2_256.rs",
+    "line": "18-20",
+    "severity": "medium",
+    "title": "sha2_256_init wrapper discards return value",
+    "problem": "The safe wrapper function sha2_256_init does not return the status code from the underlying C function, making it impossible for callers to detect initialization failures.",
+    "code": "pub fn sha2_256_init(ctx: *mut c_void) -> i32 {\n    unsafe { CRYPT_SHA2_256_Init(ctx, std::ptr::null_mut()) }\n}"
+  }
+]

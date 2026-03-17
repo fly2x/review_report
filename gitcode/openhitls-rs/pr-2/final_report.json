@@ -1,0 +1,187 @@
+{
+  "context": {
+    "owner": "openHiTLS",
+    "repo": "openhitls-rs",
+    "pr_id": "2",
+    "title": "",
+    "reviewers": [
+      "claude",
+      "gemini",
+      "codex"
+    ]
+  },
+  "statistics": {
+    "total": 15,
+    "critical": 2,
+    "high": 8,
+    "medium": 4,
+    "low": 1
+  },
+  "issues": [
+    {
+      "file": "openhitls/src/aes.rs",
+      "line": "202-204",
+      "severity": "critical",
+      "title": "AEAD tag comparison vulnerable to timing attacks",
+      "reviewers": "CLAUDE, GEMINI",
+      "confidence": "trusted",
+      "problem": "The AEAD tag comparison uses the non-constant-time `!=` operator, enabling timing side-channel attacks (CWE-208). Additionally, the error message leaks both the expected and calculated tags, allowing attackers to forge valid MACs by reading the error message (CWE-209).",
+      "code": "if calculated_tag != tag {\n    return Err(format!(\"AEAD Tag mismatch! Expected {:?}, Got {:?}\", tag, calculated_tag));\n}",
+      "fix": "// Constant-time comparison without leaking tags in error messages\nif calculated_tag.len() != tag.len() {\n    return Err(\"AEAD Tag mismatch\".to_string());\n}\nlet mut diff = 0u8;\nfor (a, b) in calculated_tag.iter().zip(tag.iter()) {\n    diff |= a ^ b;\n}\nif diff != 0 {\n    return Err(\"AEAD Tag mismatch\".to_string());\n}"
+    },
+    {
+      "file": "openhitls/src/ecc_pkey_gen.rs",
+      "line": "17-19",
+      "severity": "critical",
+      "title": "Key generation returns empty vectors on error without indication",
+      "reviewers": "CLAUDE",
+      "confidence": "trusted",
+      "problem": "When ECC context allocation fails, `ecc_genpkey` returns `(Vec::new(), Vec::new())`, which is indistinguishable from a successful generation of empty keys. Callers cannot detect failures and may use uninitialized/invalid cryptographic keys.",
+      "code": "if ctx.is_null() {\n    println!(\"Failed to create ECC context\");\n    return (Vec::new(), Vec::new());\n}",
+      "fix": "pub fn ecc_genpkey(curve_id: u32) -> Result<(Vec<u8>, Vec<u8>), String> {\n    rand_regist_default();\n    // ... existing setup code ...\n    let ctx = ecc_new_ctx(ctx_id);\n    if ctx.is_null() {\n        return Err(\"Failed to create ECC context\".to_string());\n    }\n    // ... rest of implementation ...\n    Ok((actual_pub, actual_prv))\n}"
+    },
+    {
+      "file": "openhitls/src/ecdsa.rs",
+      "line": "22-26",
+      "severity": "high",
+      "title": "Memory leak of ECC context on sign failure",
+      "reviewers": "GEMINI, CODEX",
+      "confidence": "trusted",
+      "problem": "When `pkey_sign` fails, the function returns immediately without freeing `key_ctx`. This causes a memory leak of the unmanaged C ECC context.",
+      "code": "let ret = pkey_sign(key_ctx, digest, data, &mut sig_buf, &mut sig_len);\n\nif ret != 0 {\n    return Err(format!(\"Sign failed: 0x{:x}\", ret));\n}",
+      "fix": "let ret = pkey_sign(key_ctx, digest, data, &mut sig_buf, &mut sig_len);\nif ret != 0 {\n    free_ecc_pkey(key_ctx);\n    return Err(format!(\"Sign failed: 0x{:x}\", ret));\n}"
+    },
+    {
+      "file": "openhitls/src/sha2_256.rs",
+      "line": "10-14",
+      "severity": "high",
+      "title": "SHA256 initialization ignores error returns and null pointer",
+      "reviewers": "CLAUDE, CODEX, GEMINI",
+      "confidence": "trusted",
+      "problem": "`Sha256::new()` ignores the return value from `sha2_256_init` and doesn't check if `sha2_256_newctx()` returned null. Allocation/init failures can lead to null-pointer calls or silently produce invalid digests while presenting a safe Rust API.",
+      "code": "pub fn new() -> Self {\n    let ctx = sha2_256_newctx();\n    sha2_256_init(ctx);\n    Self { ctx }\n}",
+      "fix": "pub fn new() -> Result<Self, String> {\n    let ctx = sha2_256_newctx();\n    if ctx.is_null() {\n        return Err(\"Failed to allocate SHA256 context\".to_string());\n    }\n    let ret = sha2_256_init(ctx);\n    if ret != 0 {\n        sha2_256_freectx(ctx);\n        return Err(format!(\"Failed to initialize SHA256 context: 0x{:x}\", ret));\n    }\n    Ok(Self { ctx })\n}"
+    },
+    {
+      "file": "openhitls/src/sha2_256.rs",
+      "line": "16-18",
+      "severity": "high",
+      "title": "SHA256 update ignores error return",
+      "reviewers": "CLAUDE, CODEX",
+      "confidence": "trusted",
+      "problem": "`update()` discards the status code from `sha2_256_update`. If update fails, the hash state is corrupted and the final result will be invalid.",
+      "code": "pub fn update(&mut self, data: &[u8]) {\n    sha2_256_update(self.ctx, data);\n}",
+      "fix": "pub fn update(&mut self, data: &[u8]) -> Result<(), String> {\n    let ret = sha2_256_update(self.ctx, data);\n    if ret != 0 {\n        Err(format!(\"Failed to update SHA256: 0x{:x}\", ret))\n    } else {\n        Ok(())\n    }\n}"
+    },
+    {
+      "file": "openhitls/src/aes.rs",
+      "line": "33-37",
+      "severity": "high",
+      "title": "CCM mode IV truncation without proper validation",
+      "reviewers": "CLAUDE, CODEX",
+      "confidence": "trusted",
+      "problem": "For CCM mode, IVs longer than 12 bytes are silently truncated, and IVs shorter than 12 bytes are accepted without error. CCM requires a 12-byte nonce (7-13 bytes allowed by spec). Using incorrect IV lengths can lead to weak cryptography or nonce reuse.",
+      "code": "let actual_iv = if is_ccm(algid) && iv.len() > 12 {\n    &iv[..12]\n} else {\n    iv\n};",
+      "fix": "let actual_iv = if is_ccm(algid) {\n    if iv.len() < 12 {\n        return Err(\"CCM mode requires IV of at least 12 bytes\".to_string());\n    }\n    if iv.len() > 12 {\n        return Err(\"CCM mode IVs longer than 12 bytes are not supported\".to_string());\n    }\n    iv\n} else {\n    iv\n};"
+    },
+    {
+      "file": "openhitls/src/ecdsa.rs",
+      "line": "48-54",
+      "severity": "high",
+      "title": "ECDSA verification masks operational failures as Ok(false)",
+      "reviewers": "CODEX",
+      "confidence": "likely",
+      "problem": "Every nonzero return code from `pkey_verify` is reported as `Ok(false)`, hiding real library failures such as bad parameters, unsupported digests, or internal errors.",
+      "code": "let ret = pkey_verify(key_ctx, digest, data, signature);\nfree_ecc_pkey(key_ctx);\nif ret == 0 {\n    Ok(true)\n} else {\n    Ok(false)\n}",
+      "fix": "let ret = pkey_verify(key_ctx, digest, data, signature);\nfree_ecc_pkey(key_ctx);\n// Distinguish between signature mismatch (specific error code) and other failures\nif ret == 0 {\n    Ok(true)\n} else if ret == CRYPT_ECDSA_VERIFY_FAIL {\n    Ok(false)\n} else {\n    Err(format!(\"Verify failed: 0x{:x}\", ret))\n}"
+    },
+    {
+      "file": "openhitls/src/ecc_pkey_gen.rs",
+      "line": "110-121",
+      "severity": "high",
+      "title": "Potential use-after-free due to dropped local vectors",
+      "reviewers": "CLAUDE, GEMINI",
+      "confidence": "evaluate",
+      "problem": "In `key_to_ctx`, `pub_buf` and `prv_buf` are local vectors whose pointers are passed to `ecc_set_pub`/`ecc_set_prv`. If the C library stores these pointers (rather than copying the data), the vectors will be dropped at scope end, leaving dangling pointers in the context.",
+      "code": "if !pub_key.is_empty() {\n    let mut pub_buf = pub_key.to_vec();\n    let mut pub_key_wrapper = CRYPT_EAL_PkeyPub::new(ctx_id);\n    pub_key_wrapper.setter(pub_buf.as_mut_ptr(), pub_buf.len() as u32);\n    \n    let ret = ecc_set_pub(ctx, &mut pub_key_wrapper);\n    // pub_buf dropped here\n}",
+      "fix": "if !pub_key.is_empty() {\n    let mut pub_key_wrapper = CRYPT_EAL_PkeyPub::new(ctx_id);\n    // Use caller's slice directly instead of copying\n    pub_key_wrapper.setter(pub_key.as_ptr() as *mut u8, pub_key.len() as u32);\n    \n    let ret = ecc_set_pub(ctx, &mut pub_key_wrapper);\n    if ret != 0 {\n        println!(\"Failed to set ECC public key: {}\", ret);\n        ecc_free_ctx(ctx);\n        return std::ptr::null_mut();\n    }\n}"
+    },
+    {
+      "file": "openhitls/src/ecc_pkey_gen.rs",
+      "line": "49-84",
+      "severity": "high",
+      "title": "ctx_to_key returns partial/empty keys on extraction failure",
+      "reviewers": "CLAUDE",
+      "confidence": "likely",
+      "problem": "When `ecc_get_pub` or `ecc_get_prv` fails, `ctx_to_key` returns partially filled or empty vectors without error indication. Callers cannot detect that key extraction failed.",
+      "code": "let ret_pub = ecc_get_pub(ctx, &mut pub_key_wrapper);\nif ret_pub == 0 {\n    let len = pub_key_wrapper.get_pub_len() as usize;\n    actual_pub = pub_buf[..len].to_vec();\n} else {\n    println!(\"Failed to get ECC public key: {}\", ret_pub);\n}",
+      "fix": "pub fn ctx_to_key(ctx: *mut std::ffi::c_void, curve_id: u32) -> Result<(Vec<u8>, Vec<u8>), String> {\n    // ... existing setup code ...\n    let ret_pub = ecc_get_pub(ctx, &mut pub_key_wrapper);\n    if ret_pub != 0 {\n        return Err(format!(\"Failed to get ECC public key: 0x{:x}\", ret_pub));\n    }\n    let ret_prv = ecc_get_prv(ctx, &mut prv_key_wrapper);\n    if ret_prv != 0 {\n        return Err(format!(\"Failed to get ECC private key: 0x{:x}\", ret_prv));\n    }\n    Ok((actual_pub, actual_prv))\n}"
+    },
+    {
+      "file": "configure.py",
+      "line": "42-48",
+      "severity": "high",
+      "title": "Incorrect Cargo link directives break downstream consumers",
+      "reviewers": "CODEX",
+      "confidence": "likely",
+      "problem": "The generated `crypto/build.rs` uses `rustc-link-arg` for `-L` and `-l` flags. Cargo only applies `rustc-link-arg` to final binaries, not library compilation, causing downstream crates to fail linking `hitls_bsl` and `hitls_crypto`.",
+      "code": "content = f\"\"\"fn main() {{\n    let lib_dir = \"{abs_location}\";\n    println!(\"cargo:rustc-link-search=native={{}}\", lib_dir);\n    println!(\"cargo:rustc-link-arg=-Wl,-rpath,{{}}\", lib_dir);\n    println!(\"cargo:rustc-link-arg=-L{{}}\", lib_dir);\n    println!(\"cargo:rustc-link-arg=-lhitls_bsl\");\n    println!(\"cargo:rustc-link-arg=-lhitls_crypto\");",
+      "fix": "content = f\"\"\"fn main() {{\n    let lib_dir = \"{abs_location}\";\n    println!(\"cargo:rustc-link-search=native={{}}\", lib_dir);\n    println!(\"cargo:rustc-link-lib=dylib=hitls_bsl\");\n    println!(\"cargo:rustc-link-lib=dylib=hitls_crypto\");\n    println!(\"cargo:rustc-link-arg=-Wl,-rpath,{{}}\", lib_dir);\n    println!(\"cargo:rerun-if-changed=build.rs\");\n}}\n\"\"\""
+    },
+    {
+      "file": "openhitls/src/ecc_pkey_crypt.rs",
+      "line": "47-48",
+      "severity": "medium",
+      "title": "Decrypt output buffer may be undersized",
+      "reviewers": "CLAUDE",
+      "confidence": "evaluate",
+      "problem": "The output buffer is sized to `enc_data.len()`, but for some encryption schemes decrypted data could be larger than encrypted data (though SM2 typically produces larger ciphertext than plaintext). This could cause buffer overflow or truncation.",
+      "code": "let mut out_len: u32 = enc_data.len() as u32;\nlet mut out_buf = vec![0u8; out_len as usize];",
+      "fix": "let mut out_len: u32 = (enc_data.len() + 256) as u32;\nlet mut out_buf = vec![0u8; out_len as usize];"
+    },
+    {
+      "file": "configure.py",
+      "line": "9-15",
+      "severity": "medium",
+      "title": "Working directory not restored on subprocess failure",
+      "reviewers": "CLAUDE",
+      "confidence": "likely",
+      "problem": "If `subprocess.run()` with `check=True` fails, the working directory has already been changed, leaving the process in an inconsistent state and making debugging harder.",
+      "code": "os.chdir(deps_dir)\nsubprocess.run(['python3', 'configure.py'], check=True)\nbuild_dir = os.path.join(deps_dir, 'build')\nos.makedirs(build_dir, exist_ok=True)\nos.chdir(build_dir)",
+      "fix": "original_dir = os.getcwd()\ntry:\n    os.chdir(deps_dir)\n    subprocess.run(['python3', 'configure.py'], check=True)\n    build_dir = os.path.join(deps_dir, 'build')\n    os.makedirs(build_dir, exist_ok=True)\n    os.chdir(build_dir)\n    subprocess.run(['cmake', '..'], check=True)\n    subprocess.run(['make', '-j'], check=True)\n    os.chdir(script_dir)\nexcept Exception:\n    os.chdir(original_dir)\n    raise"
+    },
+    {
+      "file": "crypto/src/ecc_pkey_gen.rs",
+      "line": "57-60",
+      "severity": "medium",
+      "title": "Union field access may require unsafe block",
+      "reviewers": "GEMINI",
+      "confidence": "evaluate",
+      "problem": "In Rust, reading or modifying sub-fields of a union field directly (`self.key.ecc_pub.data = ...`) may require an `unsafe` block depending on Rust version and compiler strictness.",
+      "code": "pub fn setter(&mut self, data_ptr: *mut u8, data_len: u32) {\n    self.key.ecc_pub.data = data_ptr;\n    self.key.ecc_pub.len = data_len;\n}",
+      "fix": "pub fn setter(&mut self, data_ptr: *mut u8, data_len: u32) {\n    self.key = CRYPT_EAL_PkeyPubUnion {\n        ecc_pub: CRYPT_Data {\n            data: data_ptr,\n            len: data_len,\n        },\n    };\n}"
+    },
+    {
+      "file": "README.md",
+      "line": "192-197",
+      "severity": "medium",
+      "title": "AES example documents fixed IV reuse",
+      "reviewers": "CODEX",
+      "confidence": "likely",
+      "problem": "The README shows AES encryption with a hard-coded IV. Reusing a fixed IV is unsafe for CBC and catastrophic for GCM/CCM under the same key, teaching an insecure pattern in the main user-facing documentation.",
+      "code": "let plaintext = \"Hello OpenHiTLS!\";\nlet key = b\"0123456789abcdef\";\nlet iv = b\"0123456789abcdef\";\n\nlet encrypted = aes_encrypt(AES128_CBC, plaintext.as_bytes(), key, iv).unwrap();",
+      "fix": "let plaintext = \"Hello OpenHiTLS!\";\nlet key = b\"0123456789abcdef\";\nlet mut iv = [0u8; 16];\ngetrandom::fill(&mut iv).unwrap(); // Generate a new random IV for each encryption\n\nlet encrypted = aes_encrypt(AES128_CBC, plaintext.as_bytes(), key, &iv).unwrap();\nlet decrypted = aes_decrypt(AES128_CBC, &encrypted, key, &iv).unwrap();"
+    },
+    {
+      "file": "openhitls/src/ecdsa.rs",
+      "line": "4-13",
+      "severity": "low",
+      "title": "Unnecessary consumption of key parameters",
+      "reviewers": "GEMINI",
+      "confidence": "likely",
+      "problem": "`ecdsa_sign` and `ecdsa_verify` take `prv_key` and `pub_key` as `Vec<u8>` instead of `&[u8]`, forcing callers to clone keys for reuse and resulting in suboptimal performance and ergonomics.",
+      "code": "pub fn ecdsa_sign(\n    prv_key: Vec<u8>,\n    curve_id: u32,\n    digest: i32,\n    data: &[u8]\n) -> Result<Vec<u8>, String> {",
+      "fix": "pub fn ecdsa_sign(\n    prv_key: &[u8],\n    curve_id: u32,\n    digest: i32,\n    data: &[u8]\n) -> Result<Vec<u8>, String> {"
+    }
+  ]
+}

@@ -1,0 +1,62 @@
+[
+  {
+    "source": "codex",
+    "file": "configure.py",
+    "line": "44-48",
+    "severity": "high",
+    "title": "Generated build script uses `rustc-link-arg` instead of Cargo link directives",
+    "problem": "The generated `crypto/build.rs` passes `-L` and `-l` through `cargo:rustc-link-arg`. Cargo only applies `rustc-link-arg` to final binaries/examples/tests, not to normal library compilation, so downstream crates depending on `openhitls` can still fail to link `hitls_bsl` and `hitls_crypto`. This makes the documented consumption path unreliable.",
+    "code": "println!(\"cargo:rustc-link-search=native={{}}\", lib_dir);\n    println!(\"cargo:rustc-link-arg=-Wl,-rpath,{{}}\", lib_dir);\n    println!(\"cargo:rustc-link-arg=-L{{}}\", lib_dir);\n    println!(\"cargo:rustc-link-arg=-lhitls_bsl\");\n    println!(\"cargo:rustc-link-arg=-lhitls_crypto\");",
+    "fix": "content = f\"\"\"fn main() {{\n    let lib_dir = \"{abs_location}\";\n    println!(\"cargo:rustc-link-search=native={{}}\", lib_dir);\n    println!(\"cargo:rustc-link-lib=dylib=hitls_bsl\");\n    println!(\"cargo:rustc-link-lib=dylib=hitls_crypto\");\n    println!(\"cargo:rustc-link-arg=-Wl,-rpath,{{}}\", lib_dir);\n    println!(\"cargo:rerun-if-changed=build.rs\");\n}}\n\"\"\""
+  },
+  {
+    "source": "codex",
+    "file": "openhitls/src/aes.rs",
+    "line": "33-37",
+    "severity": "high",
+    "title": "CCM mode silently truncates caller-supplied IVs",
+    "problem": "For CCM, any IV longer than 12 bytes is silently shortened to its first 12 bytes before encryption and decryption. That collapses distinct nonces onto the same effective IV, which is a cryptographic misuse and can cause nonce reuse under the same key. If longer IVs are unsupported, the wrapper must reject them instead of mutating them.",
+    "code": "let actual_iv = if is_ccm(algid) && iv.len() > 12 {\n            &iv[..12]\n        } else {\n            iv\n        };",
+    "fix": "let actual_iv = if is_ccm(algid) {\n            if iv.len() > 12 {\n                return Err(\"CCM IVs longer than 12 bytes are not supported\".to_string());\n            }\n            iv\n        } else {\n            iv\n        };"
+  },
+  {
+    "source": "codex",
+    "file": "openhitls/src/ecdsa.rs",
+    "line": "22-29",
+    "severity": "medium",
+    "title": "Signing error path leaks the allocated key context",
+    "problem": "When `pkey_sign` fails, the function returns immediately without freeing `key_ctx`. Repeated signing failures will leak native contexts in a public API that is otherwise expected to manage resources safely.",
+    "code": "let ret = pkey_sign(key_ctx, digest, data, &mut sig_buf, &mut sig_len);\n\n    if ret != 0 {\n        return Err(format!(\"Sign failed: 0x{:x}\", ret));\n    }\n\n    sig_buf.truncate(sig_len as usize);\n    free_ecc_pkey(key_ctx);\n    Ok(sig_buf)",
+    "fix": "let ret = pkey_sign(key_ctx, digest, data, &mut sig_buf, &mut sig_len);\n    if ret != 0 {\n        free_ecc_pkey(key_ctx);\n        return Err(format!(\"Sign failed: 0x{:x}\", ret));\n    }\n\n    sig_buf.truncate(sig_len as usize);\n    free_ecc_pkey(key_ctx);\n    Ok(sig_buf)"
+  },
+  {
+    "source": "codex",
+    "file": "openhitls/src/ecdsa.rs",
+    "line": "48-53",
+    "severity": "medium",
+    "title": "Verification API turns operational failures into `Ok(false)`",
+    "problem": "Every nonzero return code from `pkey_verify` is reported as `Ok(false)`. That hides real library failures such as bad parameters, unsupported digests, or internal verification errors, and makes callers treat infrastructure errors as ordinary signature mismatches.",
+    "code": "let ret = pkey_verify(key_ctx, digest, data, signature);\n    free_ecc_pkey(key_ctx);\n    if ret == 0 {\n        Ok(true)\n    } else {\n        Ok(false)\n    }",
+    "fix": "let ret = pkey_verify(key_ctx, digest, data, signature);\n    free_ecc_pkey(key_ctx);\n\n    if ret == 0 {\n        Ok(true)\n    } else {\n        Err(format!(\"Verify failed: 0x{:x}\", ret))\n    }"
+  },
+  {
+    "source": "codex",
+    "file": "openhitls/src/sha2_256.rs",
+    "line": "10-25",
+    "severity": "medium",
+    "title": "Safe SHA-256 wrapper ignores allocation and FFI error returns",
+    "problem": "`Sha256::new`, `update`, and `finalize` discard the native return codes and never check whether `sha2_256_newctx()` returned null. That means allocation/init failures can turn into null-pointer calls or silently produce an all-zero/partial digest while still presenting a safe Rust API.",
+    "code": "pub fn new() -> Self {\n        let ctx = sha2_256_newctx();\n        sha2_256_init(ctx);\n        Self { ctx }\n    }\n\n    pub fn update(&mut self, data: &[u8]) {\n        sha2_256_update(self.ctx, data);\n    }\n\n    pub fn finalize(self) -> [u8; 32] {\n        let this = ManuallyDrop::new(self);\n        let mut out = [0u8; 32];\n        let mut out_len = 32u32;\n        sha2_256_final(this.ctx, &mut out, &mut out_len);\n        sha2_256_freectx(this.ctx);\n        out\n    }",
+    "fix": "pub fn new() -> Result<Self, String> {\n        let ctx = sha2_256_newctx();\n        if ctx.is_null() {\n            return Err(\"CRYPT_SHA2_256_NewCtx failed\".to_string());\n        }\n\n        let ret = sha2_256_init(ctx);\n        if ret != 0 {\n            sha2_256_freectx(ctx);\n            return Err(format!(\"CRYPT_SHA2_256_Init failed: 0x{:x}\", ret));\n        }\n\n        Ok(Self { ctx })\n    }\n\n    pub fn update(&mut self, data: &[u8]) -> Result<(), String> {\n        let ret = sha2_256_update(self.ctx, data);\n        if ret != 0 {\n            return Err(format!(\"CRYPT_SHA2_256_Update failed: 0x{:x}\", ret));\n        }\n        Ok(())\n    }\n\n    pub fn finalize(self) -> Result<[u8; 32], String> {\n        let this = ManuallyDrop::new(self);\n        let mut out = [0u8; 32];\n        let mut out_len = 32u32;\n        let ret = sha2_256_final(this.ctx, &mut out, &mut out_len);\n        sha2_256_freectx(this.ctx);\n\n        if ret != 0 || out_len != 32 {\n            return Err(format!(\"CRYPT_SHA2_256_Final failed: 0x{:x}\", ret));\n        }\n\n        Ok(out)\n    }"
+  },
+  {
+    "source": "codex",
+    "file": "README.md",
+    "line": "192-197",
+    "severity": "medium",
+    "title": "AES example documents a fixed IV",
+    "problem": "The README shows AES encryption with a hard-coded IV. Reusing a fixed IV is unsafe for CBC and catastrophic for GCM/CCM under the same key, so this example teaches an insecure pattern in the main user-facing documentation.",
+    "code": "let plaintext = \"Hello OpenHiTLS!\";\nlet key = b\"0123456789abcdef\";\nlet iv = b\"0123456789abcdef\";\n\nlet encrypted = aes_encrypt(AES128_CBC, plaintext.as_bytes(), key, iv).unwrap();\nlet decrypted = aes_decrypt(AES128_CBC, &encrypted, key, iv).unwrap();",
+    "fix": "let plaintext = \"Hello OpenHiTLS!\";\nlet key = b\"0123456789abcdef\";\nlet mut iv = [0u8; 16];\ngetrandom::fill(&mut iv).unwrap(); // 每次加密都要生成新的 IV\n\nlet encrypted = aes_encrypt(AES128_CBC, plaintext.as_bytes(), key, &iv).unwrap();\nlet decrypted = aes_decrypt(AES128_CBC, &encrypted, key, &iv).unwrap();"
+  }
+]

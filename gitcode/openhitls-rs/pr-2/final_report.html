@@ -1,0 +1,415 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Final Report: openHiTLS/openhitls-rs#2</title>
+    <style>
+        :root { --critical: #dc2626; --high: #ea580c; --medium: #ca8a04; --low: #65a30d;
+                 --trusted: #059669; --likely: #0284c7; --evaluate: #7c3aed; }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: system-ui, sans-serif; background: #f8fafc; color: #1e293b; padding: 2rem; line-height: 1.6; }
+        .container { max-width: 900px; margin: 0 auto; }
+        h1 { font-size: 1.75rem; margin-bottom: 0.5rem; }
+        .subtitle { color: #64748b; margin-bottom: 1rem; }
+        .stats { display: flex; gap: 1rem; margin-bottom: 2rem; flex-wrap: wrap; }
+        .stat { background: white; border: 1px solid #e2e8f0; border-radius: 0.5rem; padding: 1rem; min-width: 100px; text-align: center; }
+        .stat-value { font-size: 1.5rem; font-weight: 700; }
+        .stat-label { font-size: 0.875rem; color: #64748b; }
+        .stat.critical .stat-value { color: var(--critical); }
+        .stat.high .stat-value { color: var(--high); }
+        .stat.medium .stat-value { color: var(--medium); }
+        .stat.low .stat-value { color: var(--low); }
+        .reviewers { background: #e0e7ff; color: #3730a3; padding: 0.5rem 1rem; border-radius: 0.5rem; margin-bottom: 2rem; }
+        .section { margin-bottom: 2rem; }
+        .section-title { font-size: 1.1rem; font-weight: 600; padding: 0.5rem 1rem; border-radius: 0.5rem 0.5rem 0 0; color: white; }
+        .section-title.critical { background: var(--critical); }
+        .section-title.high { background: var(--high); }
+        .section-title.medium { background: var(--medium); }
+        .section-title.low { background: var(--low); }
+        .issue { background: white; border: 1px solid #e2e8f0; border-top: none; padding: 1rem; }
+        .issue:last-child { border-radius: 0 0 0.5rem 0.5rem; }
+        .issue-title { font-weight: 600; margin-bottom: 0.25rem; }
+        .issue-location { font-family: monospace; font-size: 0.875rem; color: #64748b; margin-bottom: 0.5rem; }
+        .issue-meta { font-size: 0.75rem; margin-bottom: 0.75rem; display: flex; gap: 0.75rem; align-items: center; }
+        .issue-meta .reviewers { background: #f1f5f9; color: #475569; padding: 0.25rem 0.5rem; border-radius: 0.25rem; margin: 0; }
+        .confidence-badge { padding: 0.25rem 0.5rem; border-radius: 0.25rem; font-weight: 500; }
+        .confidence-badge.trusted { background: #d1fae5; color: #065f46; }
+        .confidence-badge.likely { background: #dbeafe; color: #1e40af; }
+        .confidence-badge.evaluate { background: #ede9fe; color: #5b21b6; }
+        pre { background: #1e293b; color: #e2e8f0; padding: 0.75rem; border-radius: 0.375rem; overflow-x: auto; font-size: 0.875rem; margin: 0.5rem 0; }
+        .problem { margin: 0.75rem 0; }
+        .fix-label { font-weight: 600; margin-top: 0.75rem; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Final Code Review Report</h1>
+        <div class="subtitle">openHiTLS/openhitls-rs - PR #2</div>
+        <p style="margin-bottom: 1rem;"></p>
+
+        <div class="stats">
+            <div class="stat"><div class="stat-value">15</div><div class="stat-label">Total</div></div>
+            <div class="stat critical"><div class="stat-value">2</div><div class="stat-label">Critical</div></div>
+            <div class="stat high"><div class="stat-value">8</div><div class="stat-label">High</div></div>
+            <div class="stat medium"><div class="stat-value">4</div><div class="stat-label">Medium</div></div>
+            <div class="stat low"><div class="stat-value">1</div><div class="stat-label">Low</div></div>
+        </div>
+
+        <div class="reviewers">Reviewers: claude, gemini, codex</div>
+<div class="section"><div class="section-title critical">Critical</div>
+<div class="issue">
+                <div class="issue-title">AEAD tag comparison vulnerable to timing attacks</div>
+                <div class="issue-location">openhitls/src/aes.rs:202-204</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CLAUDE, GEMINI</span>
+                    <span class="confidence-badge trusted">置信度: 可信</span>
+                </div>
+                <pre>if calculated_tag != tag {
+    return Err(format!("AEAD Tag mismatch! Expected {:?}, Got {:?}", tag, calculated_tag));
+}</pre>
+                <div class="problem"><strong>Issue:</strong> The AEAD tag comparison uses the non-constant-time `!=` operator, enabling timing side-channel attacks (CWE-208). Additionally, the error message leaks both the expected and calculated tags, allowing attackers to forge valid MACs by reading the error message (CWE-209).</div>
+                <div class="fix-label">Fix:</div><pre>// Constant-time comparison without leaking tags in error messages
+if calculated_tag.len() != tag.len() {
+    return Err("AEAD Tag mismatch".to_string());
+}
+let mut diff = 0u8;
+for (a, b) in calculated_tag.iter().zip(tag.iter()) {
+    diff |= a ^ b;
+}
+if diff != 0 {
+    return Err("AEAD Tag mismatch".to_string());
+}</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">Key generation returns empty vectors on error without indication</div>
+                <div class="issue-location">openhitls/src/ecc_pkey_gen.rs:17-19</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CLAUDE</span>
+                    <span class="confidence-badge trusted">置信度: 可信</span>
+                </div>
+                <pre>if ctx.is_null() {
+    println!("Failed to create ECC context");
+    return (Vec::new(), Vec::new());
+}</pre>
+                <div class="problem"><strong>Issue:</strong> When ECC context allocation fails, `ecc_genpkey` returns `(Vec::new(), Vec::new())`, which is indistinguishable from a successful generation of empty keys. Callers cannot detect failures and may use uninitialized/invalid cryptographic keys.</div>
+                <div class="fix-label">Fix:</div><pre>pub fn ecc_genpkey(curve_id: u32) -&gt; Result&lt;(Vec&lt;u8&gt;, Vec&lt;u8&gt;), String&gt; {
+    rand_regist_default();
+    // ... existing setup code ...
+    let ctx = ecc_new_ctx(ctx_id);
+    if ctx.is_null() {
+        return Err("Failed to create ECC context".to_string());
+    }
+    // ... rest of implementation ...
+    Ok((actual_pub, actual_prv))
+}</pre>
+            </div>
+</div>
+<div class="section"><div class="section-title high">High</div>
+<div class="issue">
+                <div class="issue-title">Memory leak of ECC context on sign failure</div>
+                <div class="issue-location">openhitls/src/ecdsa.rs:22-26</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: GEMINI, CODEX</span>
+                    <span class="confidence-badge trusted">置信度: 可信</span>
+                </div>
+                <pre>let ret = pkey_sign(key_ctx, digest, data, &amp;mut sig_buf, &amp;mut sig_len);
+
+if ret != 0 {
+    return Err(format!("Sign failed: 0x{:x}", ret));
+}</pre>
+                <div class="problem"><strong>Issue:</strong> When `pkey_sign` fails, the function returns immediately without freeing `key_ctx`. This causes a memory leak of the unmanaged C ECC context.</div>
+                <div class="fix-label">Fix:</div><pre>let ret = pkey_sign(key_ctx, digest, data, &amp;mut sig_buf, &amp;mut sig_len);
+if ret != 0 {
+    free_ecc_pkey(key_ctx);
+    return Err(format!("Sign failed: 0x{:x}", ret));
+}</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">SHA256 initialization ignores error returns and null pointer</div>
+                <div class="issue-location">openhitls/src/sha2_256.rs:10-14</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CLAUDE, CODEX, GEMINI</span>
+                    <span class="confidence-badge trusted">置信度: 可信</span>
+                </div>
+                <pre>pub fn new() -&gt; Self {
+    let ctx = sha2_256_newctx();
+    sha2_256_init(ctx);
+    Self { ctx }
+}</pre>
+                <div class="problem"><strong>Issue:</strong> `Sha256::new()` ignores the return value from `sha2_256_init` and doesn't check if `sha2_256_newctx()` returned null. Allocation/init failures can lead to null-pointer calls or silently produce invalid digests while presenting a safe Rust API.</div>
+                <div class="fix-label">Fix:</div><pre>pub fn new() -&gt; Result&lt;Self, String&gt; {
+    let ctx = sha2_256_newctx();
+    if ctx.is_null() {
+        return Err("Failed to allocate SHA256 context".to_string());
+    }
+    let ret = sha2_256_init(ctx);
+    if ret != 0 {
+        sha2_256_freectx(ctx);
+        return Err(format!("Failed to initialize SHA256 context: 0x{:x}", ret));
+    }
+    Ok(Self { ctx })
+}</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">SHA256 update ignores error return</div>
+                <div class="issue-location">openhitls/src/sha2_256.rs:16-18</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CLAUDE, CODEX</span>
+                    <span class="confidence-badge trusted">置信度: 可信</span>
+                </div>
+                <pre>pub fn update(&amp;mut self, data: &amp;[u8]) {
+    sha2_256_update(self.ctx, data);
+}</pre>
+                <div class="problem"><strong>Issue:</strong> `update()` discards the status code from `sha2_256_update`. If update fails, the hash state is corrupted and the final result will be invalid.</div>
+                <div class="fix-label">Fix:</div><pre>pub fn update(&amp;mut self, data: &amp;[u8]) -&gt; Result&lt;(), String&gt; {
+    let ret = sha2_256_update(self.ctx, data);
+    if ret != 0 {
+        Err(format!("Failed to update SHA256: 0x{:x}", ret))
+    } else {
+        Ok(())
+    }
+}</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">CCM mode IV truncation without proper validation</div>
+                <div class="issue-location">openhitls/src/aes.rs:33-37</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CLAUDE, CODEX</span>
+                    <span class="confidence-badge trusted">置信度: 可信</span>
+                </div>
+                <pre>let actual_iv = if is_ccm(algid) &amp;&amp; iv.len() &gt; 12 {
+    &amp;iv[..12]
+} else {
+    iv
+};</pre>
+                <div class="problem"><strong>Issue:</strong> For CCM mode, IVs longer than 12 bytes are silently truncated, and IVs shorter than 12 bytes are accepted without error. CCM requires a 12-byte nonce (7-13 bytes allowed by spec). Using incorrect IV lengths can lead to weak cryptography or nonce reuse.</div>
+                <div class="fix-label">Fix:</div><pre>let actual_iv = if is_ccm(algid) {
+    if iv.len() &lt; 12 {
+        return Err("CCM mode requires IV of at least 12 bytes".to_string());
+    }
+    if iv.len() &gt; 12 {
+        return Err("CCM mode IVs longer than 12 bytes are not supported".to_string());
+    }
+    iv
+} else {
+    iv
+};</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">ECDSA verification masks operational failures as Ok(false)</div>
+                <div class="issue-location">openhitls/src/ecdsa.rs:48-54</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CODEX</span>
+                    <span class="confidence-badge likely">置信度: 较可信</span>
+                </div>
+                <pre>let ret = pkey_verify(key_ctx, digest, data, signature);
+free_ecc_pkey(key_ctx);
+if ret == 0 {
+    Ok(true)
+} else {
+    Ok(false)
+}</pre>
+                <div class="problem"><strong>Issue:</strong> Every nonzero return code from `pkey_verify` is reported as `Ok(false)`, hiding real library failures such as bad parameters, unsupported digests, or internal errors.</div>
+                <div class="fix-label">Fix:</div><pre>let ret = pkey_verify(key_ctx, digest, data, signature);
+free_ecc_pkey(key_ctx);
+// Distinguish between signature mismatch (specific error code) and other failures
+if ret == 0 {
+    Ok(true)
+} else if ret == CRYPT_ECDSA_VERIFY_FAIL {
+    Ok(false)
+} else {
+    Err(format!("Verify failed: 0x{:x}", ret))
+}</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">Potential use-after-free due to dropped local vectors</div>
+                <div class="issue-location">openhitls/src/ecc_pkey_gen.rs:110-121</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CLAUDE, GEMINI</span>
+                    <span class="confidence-badge evaluate">置信度: 需评估</span>
+                </div>
+                <pre>if !pub_key.is_empty() {
+    let mut pub_buf = pub_key.to_vec();
+    let mut pub_key_wrapper = CRYPT_EAL_PkeyPub::new(ctx_id);
+    pub_key_wrapper.setter(pub_buf.as_mut_ptr(), pub_buf.len() as u32);
+    
+    let ret = ecc_set_pub(ctx, &amp;mut pub_key_wrapper);
+    // pub_buf dropped here
+}</pre>
+                <div class="problem"><strong>Issue:</strong> In `key_to_ctx`, `pub_buf` and `prv_buf` are local vectors whose pointers are passed to `ecc_set_pub`/`ecc_set_prv`. If the C library stores these pointers (rather than copying the data), the vectors will be dropped at scope end, leaving dangling pointers in the context.</div>
+                <div class="fix-label">Fix:</div><pre>if !pub_key.is_empty() {
+    let mut pub_key_wrapper = CRYPT_EAL_PkeyPub::new(ctx_id);
+    // Use caller's slice directly instead of copying
+    pub_key_wrapper.setter(pub_key.as_ptr() as *mut u8, pub_key.len() as u32);
+    
+    let ret = ecc_set_pub(ctx, &amp;mut pub_key_wrapper);
+    if ret != 0 {
+        println!("Failed to set ECC public key: {}", ret);
+        ecc_free_ctx(ctx);
+        return std::ptr::null_mut();
+    }
+}</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">ctx_to_key returns partial/empty keys on extraction failure</div>
+                <div class="issue-location">openhitls/src/ecc_pkey_gen.rs:49-84</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CLAUDE</span>
+                    <span class="confidence-badge likely">置信度: 较可信</span>
+                </div>
+                <pre>let ret_pub = ecc_get_pub(ctx, &amp;mut pub_key_wrapper);
+if ret_pub == 0 {
+    let len = pub_key_wrapper.get_pub_len() as usize;
+    actual_pub = pub_buf[..len].to_vec();
+} else {
+    println!("Failed to get ECC public key: {}", ret_pub);
+}</pre>
+                <div class="problem"><strong>Issue:</strong> When `ecc_get_pub` or `ecc_get_prv` fails, `ctx_to_key` returns partially filled or empty vectors without error indication. Callers cannot detect that key extraction failed.</div>
+                <div class="fix-label">Fix:</div><pre>pub fn ctx_to_key(ctx: *mut std::ffi::c_void, curve_id: u32) -&gt; Result&lt;(Vec&lt;u8&gt;, Vec&lt;u8&gt;), String&gt; {
+    // ... existing setup code ...
+    let ret_pub = ecc_get_pub(ctx, &amp;mut pub_key_wrapper);
+    if ret_pub != 0 {
+        return Err(format!("Failed to get ECC public key: 0x{:x}", ret_pub));
+    }
+    let ret_prv = ecc_get_prv(ctx, &amp;mut prv_key_wrapper);
+    if ret_prv != 0 {
+        return Err(format!("Failed to get ECC private key: 0x{:x}", ret_prv));
+    }
+    Ok((actual_pub, actual_prv))
+}</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">Incorrect Cargo link directives break downstream consumers</div>
+                <div class="issue-location">configure.py:42-48</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CODEX</span>
+                    <span class="confidence-badge likely">置信度: 较可信</span>
+                </div>
+                <pre>content = f"""fn main() {{
+    let lib_dir = "{abs_location}";
+    println!("cargo:rustc-link-search=native={{}}", lib_dir);
+    println!("cargo:rustc-link-arg=-Wl,-rpath,{{}}", lib_dir);
+    println!("cargo:rustc-link-arg=-L{{}}", lib_dir);
+    println!("cargo:rustc-link-arg=-lhitls_bsl");
+    println!("cargo:rustc-link-arg=-lhitls_crypto");</pre>
+                <div class="problem"><strong>Issue:</strong> The generated `crypto/build.rs` uses `rustc-link-arg` for `-L` and `-l` flags. Cargo only applies `rustc-link-arg` to final binaries, not library compilation, causing downstream crates to fail linking `hitls_bsl` and `hitls_crypto`.</div>
+                <div class="fix-label">Fix:</div><pre>content = f"""fn main() {{
+    let lib_dir = "{abs_location}";
+    println!("cargo:rustc-link-search=native={{}}", lib_dir);
+    println!("cargo:rustc-link-lib=dylib=hitls_bsl");
+    println!("cargo:rustc-link-lib=dylib=hitls_crypto");
+    println!("cargo:rustc-link-arg=-Wl,-rpath,{{}}", lib_dir);
+    println!("cargo:rerun-if-changed=build.rs");
+}}
+"""</pre>
+            </div>
+</div>
+<div class="section"><div class="section-title medium">Medium</div>
+<div class="issue">
+                <div class="issue-title">Decrypt output buffer may be undersized</div>
+                <div class="issue-location">openhitls/src/ecc_pkey_crypt.rs:47-48</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CLAUDE</span>
+                    <span class="confidence-badge evaluate">置信度: 需评估</span>
+                </div>
+                <pre>let mut out_len: u32 = enc_data.len() as u32;
+let mut out_buf = vec![0u8; out_len as usize];</pre>
+                <div class="problem"><strong>Issue:</strong> The output buffer is sized to `enc_data.len()`, but for some encryption schemes decrypted data could be larger than encrypted data (though SM2 typically produces larger ciphertext than plaintext). This could cause buffer overflow or truncation.</div>
+                <div class="fix-label">Fix:</div><pre>let mut out_len: u32 = (enc_data.len() + 256) as u32;
+let mut out_buf = vec![0u8; out_len as usize];</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">Working directory not restored on subprocess failure</div>
+                <div class="issue-location">configure.py:9-15</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CLAUDE</span>
+                    <span class="confidence-badge likely">置信度: 较可信</span>
+                </div>
+                <pre>os.chdir(deps_dir)
+subprocess.run(['python3', 'configure.py'], check=True)
+build_dir = os.path.join(deps_dir, 'build')
+os.makedirs(build_dir, exist_ok=True)
+os.chdir(build_dir)</pre>
+                <div class="problem"><strong>Issue:</strong> If `subprocess.run()` with `check=True` fails, the working directory has already been changed, leaving the process in an inconsistent state and making debugging harder.</div>
+                <div class="fix-label">Fix:</div><pre>original_dir = os.getcwd()
+try:
+    os.chdir(deps_dir)
+    subprocess.run(['python3', 'configure.py'], check=True)
+    build_dir = os.path.join(deps_dir, 'build')
+    os.makedirs(build_dir, exist_ok=True)
+    os.chdir(build_dir)
+    subprocess.run(['cmake', '..'], check=True)
+    subprocess.run(['make', '-j'], check=True)
+    os.chdir(script_dir)
+except Exception:
+    os.chdir(original_dir)
+    raise</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">Union field access may require unsafe block</div>
+                <div class="issue-location">crypto/src/ecc_pkey_gen.rs:57-60</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: GEMINI</span>
+                    <span class="confidence-badge evaluate">置信度: 需评估</span>
+                </div>
+                <pre>pub fn setter(&amp;mut self, data_ptr: *mut u8, data_len: u32) {
+    self.key.ecc_pub.data = data_ptr;
+    self.key.ecc_pub.len = data_len;
+}</pre>
+                <div class="problem"><strong>Issue:</strong> In Rust, reading or modifying sub-fields of a union field directly (`self.key.ecc_pub.data = ...`) may require an `unsafe` block depending on Rust version and compiler strictness.</div>
+                <div class="fix-label">Fix:</div><pre>pub fn setter(&amp;mut self, data_ptr: *mut u8, data_len: u32) {
+    self.key = CRYPT_EAL_PkeyPubUnion {
+        ecc_pub: CRYPT_Data {
+            data: data_ptr,
+            len: data_len,
+        },
+    };
+}</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">AES example documents fixed IV reuse</div>
+                <div class="issue-location">README.md:192-197</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CODEX</span>
+                    <span class="confidence-badge likely">置信度: 较可信</span>
+                </div>
+                <pre>let plaintext = "Hello OpenHiTLS!";
+let key = b"0123456789abcdef";
+let iv = b"0123456789abcdef";
+
+let encrypted = aes_encrypt(AES128_CBC, plaintext.as_bytes(), key, iv).unwrap();</pre>
+                <div class="problem"><strong>Issue:</strong> The README shows AES encryption with a hard-coded IV. Reusing a fixed IV is unsafe for CBC and catastrophic for GCM/CCM under the same key, teaching an insecure pattern in the main user-facing documentation.</div>
+                <div class="fix-label">Fix:</div><pre>let plaintext = "Hello OpenHiTLS!";
+let key = b"0123456789abcdef";
+let mut iv = [0u8; 16];
+getrandom::fill(&amp;mut iv).unwrap(); // Generate a new random IV for each encryption
+
+let encrypted = aes_encrypt(AES128_CBC, plaintext.as_bytes(), key, &amp;iv).unwrap();
+let decrypted = aes_decrypt(AES128_CBC, &amp;encrypted, key, &amp;iv).unwrap();</pre>
+            </div>
+</div>
+<div class="section"><div class="section-title low">Low</div>
+<div class="issue">
+                <div class="issue-title">Unnecessary consumption of key parameters</div>
+                <div class="issue-location">openhitls/src/ecdsa.rs:4-13</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: GEMINI</span>
+                    <span class="confidence-badge likely">置信度: 较可信</span>
+                </div>
+                <pre>pub fn ecdsa_sign(
+    prv_key: Vec&lt;u8&gt;,
+    curve_id: u32,
+    digest: i32,
+    data: &amp;[u8]
+) -&gt; Result&lt;Vec&lt;u8&gt;, String&gt; {</pre>
+                <div class="problem"><strong>Issue:</strong> `ecdsa_sign` and `ecdsa_verify` take `prv_key` and `pub_key` as `Vec<u8>` instead of `&[u8]`, forcing callers to clone keys for reuse and resulting in suboptimal performance and ergonomics.</div>
+                <div class="fix-label">Fix:</div><pre>pub fn ecdsa_sign(
+    prv_key: &amp;[u8],
+    curve_id: u32,
+    digest: i32,
+    data: &amp;[u8]
+) -&gt; Result&lt;Vec&lt;u8&gt;, String&gt; {</pre>
+            </div>
+</div>
+</div></body></html>

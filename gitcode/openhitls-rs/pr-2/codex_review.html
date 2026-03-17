@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Code Review: openHiTLS/openhitls-rs#2 - CODEX</title>
+    <style>
+        :root { --critical: #dc2626; --high: #ea580c; --medium: #ca8a04; --low: #65a30d; }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: system-ui, sans-serif; background: #f8fafc; color: #1e293b; padding: 2rem; line-height: 1.6; }
+        .container { max-width: 900px; margin: 0 auto; }
+        h1 { font-size: 1.5rem; margin-bottom: 0.5rem; }
+        .subtitle { color: #64748b; margin-bottom: 2rem; }
+        .section { margin-bottom: 2rem; }
+        .section-title { font-size: 1.1rem; font-weight: 600; padding: 0.5rem 1rem; border-radius: 0.5rem 0.5rem 0 0; color: white; }
+        .section-title.critical { background: var(--critical); }
+        .section-title.high { background: var(--high); }
+        .section-title.medium { background: var(--medium); }
+        .section-title.low { background: var(--low); }
+        .issue { background: white; border: 1px solid #e2e8f0; border-top: none; padding: 1rem; }
+        .issue:last-child { border-radius: 0 0 0.5rem 0.5rem; }
+        .issue-title { font-weight: 600; margin-bottom: 0.25rem; }
+        .issue-location { font-family: monospace; font-size: 0.875rem; color: #64748b; margin-bottom: 0.75rem; }
+        .issue-source { font-size: 0.75rem; color: #94a3b8; margin-top: 0.5rem; }
+        pre { background: #1e293b; color: #e2e8f0; padding: 0.75rem; border-radius: 0.375rem; overflow-x: auto; font-size: 0.875rem; margin: 0.5rem 0; }
+        .problem { margin: 0.75rem 0; }
+        .fix-label { font-weight: 600; margin-top: 0.75rem; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Code Review: openHiTLS/openhitls-rs#2 - CODEX</h1>
+        <div class="subtitle"></div>
+<div class="section"><div class="section-title high">High</div>
+<div class="issue">
+                <div class="issue-title">Generated build script uses `rustc-link-arg` instead of Cargo link directives</div>
+                <div class="issue-location">configure.py:44-48</div>
+                <pre>println!("cargo:rustc-link-search=native={{}}", lib_dir);
+    println!("cargo:rustc-link-arg=-Wl,-rpath,{{}}", lib_dir);
+    println!("cargo:rustc-link-arg=-L{{}}", lib_dir);
+    println!("cargo:rustc-link-arg=-lhitls_bsl");
+    println!("cargo:rustc-link-arg=-lhitls_crypto");</pre>
+                <div class="problem"><strong>Issue:</strong> The generated `crypto/build.rs` passes `-L` and `-l` through `cargo:rustc-link-arg`. Cargo only applies `rustc-link-arg` to final binaries/examples/tests, not to normal library compilation, so downstream crates depending on `openhitls` can still fail to link `hitls_bsl` and `hitls_crypto`. This makes the documented consumption path unreliable.</div>
+                <div class="fix-label">Fix:</div><pre>content = f"""fn main() {{
+    let lib_dir = "{abs_location}";
+    println!("cargo:rustc-link-search=native={{}}", lib_dir);
+    println!("cargo:rustc-link-lib=dylib=hitls_bsl");
+    println!("cargo:rustc-link-lib=dylib=hitls_crypto");
+    println!("cargo:rustc-link-arg=-Wl,-rpath,{{}}", lib_dir);
+    println!("cargo:rerun-if-changed=build.rs");
+}}
+"""</pre>
+                <div class="issue-source">Reviewer: codex</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">CCM mode silently truncates caller-supplied IVs</div>
+                <div class="issue-location">openhitls/src/aes.rs:33-37</div>
+                <pre>let actual_iv = if is_ccm(algid) &amp;&amp; iv.len() &gt; 12 {
+            &amp;iv[..12]
+        } else {
+            iv
+        };</pre>
+                <div class="problem"><strong>Issue:</strong> For CCM, any IV longer than 12 bytes is silently shortened to its first 12 bytes before encryption and decryption. That collapses distinct nonces onto the same effective IV, which is a cryptographic misuse and can cause nonce reuse under the same key. If longer IVs are unsupported, the wrapper must reject them instead of mutating them.</div>
+                <div class="fix-label">Fix:</div><pre>let actual_iv = if is_ccm(algid) {
+            if iv.len() &gt; 12 {
+                return Err("CCM IVs longer than 12 bytes are not supported".to_string());
+            }
+            iv
+        } else {
+            iv
+        };</pre>
+                <div class="issue-source">Reviewer: codex</div>
+            </div>
+</div>
+<div class="section"><div class="section-title medium">Medium</div>
+<div class="issue">
+                <div class="issue-title">Signing error path leaks the allocated key context</div>
+                <div class="issue-location">openhitls/src/ecdsa.rs:22-29</div>
+                <pre>let ret = pkey_sign(key_ctx, digest, data, &amp;mut sig_buf, &amp;mut sig_len);
+
+    if ret != 0 {
+        return Err(format!("Sign failed: 0x{:x}", ret));
+    }
+
+    sig_buf.truncate(sig_len as usize);
+    free_ecc_pkey(key_ctx);
+    Ok(sig_buf)</pre>
+                <div class="problem"><strong>Issue:</strong> When `pkey_sign` fails, the function returns immediately without freeing `key_ctx`. Repeated signing failures will leak native contexts in a public API that is otherwise expected to manage resources safely.</div>
+                <div class="fix-label">Fix:</div><pre>let ret = pkey_sign(key_ctx, digest, data, &amp;mut sig_buf, &amp;mut sig_len);
+    if ret != 0 {
+        free_ecc_pkey(key_ctx);
+        return Err(format!("Sign failed: 0x{:x}", ret));
+    }
+
+    sig_buf.truncate(sig_len as usize);
+    free_ecc_pkey(key_ctx);
+    Ok(sig_buf)</pre>
+                <div class="issue-source">Reviewer: codex</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">Verification API turns operational failures into `Ok(false)`</div>
+                <div class="issue-location">openhitls/src/ecdsa.rs:48-53</div>
+                <pre>let ret = pkey_verify(key_ctx, digest, data, signature);
+    free_ecc_pkey(key_ctx);
+    if ret == 0 {
+        Ok(true)
+    } else {
+        Ok(false)
+    }</pre>
+                <div class="problem"><strong>Issue:</strong> Every nonzero return code from `pkey_verify` is reported as `Ok(false)`. That hides real library failures such as bad parameters, unsupported digests, or internal verification errors, and makes callers treat infrastructure errors as ordinary signature mismatches.</div>
+                <div class="fix-label">Fix:</div><pre>let ret = pkey_verify(key_ctx, digest, data, signature);
+    free_ecc_pkey(key_ctx);
+
+    if ret == 0 {
+        Ok(true)
+    } else {
+        Err(format!("Verify failed: 0x{:x}", ret))
+    }</pre>
+                <div class="issue-source">Reviewer: codex</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">Safe SHA-256 wrapper ignores allocation and FFI error returns</div>
+                <div class="issue-location">openhitls/src/sha2_256.rs:10-25</div>
+                <pre>pub fn new() -&gt; Self {
+        let ctx = sha2_256_newctx();
+        sha2_256_init(ctx);
+        Self { ctx }
+    }
+
+    pub fn update(&amp;mut self, data: &amp;[u8]) {
+        sha2_256_update(self.ctx, data);
+    }
+
+    pub fn finalize(self) -&gt; [u8; 32] {
+        let this = ManuallyDrop::new(self);
+        let mut out = [0u8; 32];
+        let mut out_len = 32u32;
+        sha2_256_final(this.ctx, &amp;mut out, &amp;mut out_len);
+        sha2_256_freectx(this.ctx);
+        out
+    }</pre>
+                <div class="problem"><strong>Issue:</strong> `Sha256::new`, `update`, and `finalize` discard the native return codes and never check whether `sha2_256_newctx()` returned null. That means allocation/init failures can turn into null-pointer calls or silently produce an all-zero/partial digest while still presenting a safe Rust API.</div>
+                <div class="fix-label">Fix:</div><pre>pub fn new() -&gt; Result&lt;Self, String&gt; {
+        let ctx = sha2_256_newctx();
+        if ctx.is_null() {
+            return Err("CRYPT_SHA2_256_NewCtx failed".to_string());
+        }
+
+        let ret = sha2_256_init(ctx);
+        if ret != 0 {
+            sha2_256_freectx(ctx);
+            return Err(format!("CRYPT_SHA2_256_Init failed: 0x{:x}", ret));
+        }
+
+        Ok(Self { ctx })
+    }
+
+    pub fn update(&amp;mut self, data: &amp;[u8]) -&gt; Result&lt;(), String&gt; {
+        let ret = sha2_256_update(self.ctx, data);
+        if ret != 0 {
+            return Err(format!("CRYPT_SHA2_256_Update failed: 0x{:x}", ret));
+        }
+        Ok(())
+    }
+
+    pub fn finalize(self) -&gt; Result&lt;[u8; 32], String&gt; {
+        let this = ManuallyDrop::new(self);
+        let mut out = [0u8; 32];
+        let mut out_len = 32u32;
+        let ret = sha2_256_final(this.ctx, &amp;mut out, &amp;mut out_len);
+        sha2_256_freectx(this.ctx);
+
+        if ret != 0 || out_len != 32 {
+            return Err(format!("CRYPT_SHA2_256_Final failed: 0x{:x}", ret));
+        }
+
+        Ok(out)
+    }</pre>
+                <div class="issue-source">Reviewer: codex</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">AES example documents a fixed IV</div>
+                <div class="issue-location">README.md:192-197</div>
+                <pre>let plaintext = "Hello OpenHiTLS!";
+let key = b"0123456789abcdef";
+let iv = b"0123456789abcdef";
+
+let encrypted = aes_encrypt(AES128_CBC, plaintext.as_bytes(), key, iv).unwrap();
+let decrypted = aes_decrypt(AES128_CBC, &amp;encrypted, key, iv).unwrap();</pre>
+                <div class="problem"><strong>Issue:</strong> The README shows AES encryption with a hard-coded IV. Reusing a fixed IV is unsafe for CBC and catastrophic for GCM/CCM under the same key, so this example teaches an insecure pattern in the main user-facing documentation.</div>
+                <div class="fix-label">Fix:</div><pre>let plaintext = "Hello OpenHiTLS!";
+let key = b"0123456789abcdef";
+let mut iv = [0u8; 16];
+getrandom::fill(&amp;mut iv).unwrap(); // 每次加密都要生成新的 IV
+
+let encrypted = aes_encrypt(AES128_CBC, plaintext.as_bytes(), key, &amp;iv).unwrap();
+let decrypted = aes_decrypt(AES128_CBC, &amp;encrypted, key, &amp;iv).unwrap();</pre>
+                <div class="issue-source">Reviewer: codex</div>
+            </div>
+</div>
+</div></body></html>
