@@ -1,11 +1,12 @@
-===ISSUE===
-FILE: config/json/feature.json
-LINE: 1417-1427
-SEVERITY: high
-TITLE: ML-DSA source split still leaves the deleted NTT file in the always-built public list
-PROBLEM: The new `no_asm`/`armv8` split moved `ml_dsa_ntt.c` into `crypto/mldsa/src/noasm/`, but the `public` list still points at the old deleted path. The local source resolver always includes `.srcs.public` before the variant-specific list, so any build with `mldsa` enabled expands a missing source file.
-CODE:
-```json
+# Code Review: openHiTLS/openhitls#1153
+**Reviewer**: CODEX
+
+
+## High
+
+### ML-DSA source split still leaves the deleted NTT file in the always-built public list
+`config/json/feature.json:1417-1427`
+```
 ".srcs": {
     "public": [
         "crypto/mldsa/src/ml_dsa_core.c",
@@ -20,8 +21,9 @@ CODE:
     ]
 }
 ```
-FIX:
-```json
+**Issue**: The new `no_asm`/`armv8` split moved `ml_dsa_ntt.c` into `crypto/mldsa/src/noasm/`, but the `public` list still points at the old deleted path. The local source resolver always includes `.srcs.public` before the variant-specific list, so any build with `mldsa` enabled expands a missing source file.
+**Fix**:
+```
 ".srcs": {
     "public": [
         "crypto/mldsa/src/ml_dsa_core.c",
@@ -35,16 +37,15 @@ FIX:
     ]
 }
 ```
-===END===
 
-===ISSUE===
-FILE: crypto/mldsa/src/asm/export_ml_dsa_armv8.c
-LINE: 99-104
-SEVERITY: medium
-TITLE: ARMv8 rejection sampler byte-swaps the raw SHAKE stream before parsing it
-PROBLEM: `MldRejUniformAsm` consumes the SHAKE output as a byte stream, but this wrapper rewrites every `uint32_t` with `CRYPT_HTOLE32` before casting the buffer back to `uint8_t *`. On big-endian AArch64 that permutes the bytes inside each 32-bit word, so the armv8 path expands a different matrix than the scalar implementation.
-CODE:
-```c
+---
+
+
+## Medium
+
+### ARMv8 rejection sampler byte-swaps the raw SHAKE stream before parsing it
+`crypto/mldsa/src/asm/export_ml_dsa_armv8.c:99-104`
+```
 GOTO_ERR_IF(hashMethod->squeeze(mdCtx, (uint8_t *)buf, outlen), ret);
 for (uint32_t i = 0; i < buflen; i++) {
     buf[i] = CRYPT_HTOLE32(buf[i]);
@@ -52,23 +53,23 @@ for (uint32_t i = 0; i < buflen; i++) {
 uint32_t gensize = 0;
 gensize = MldRejUniformAsm(a, (uint8_t *) buf, outlen, MLD_REJ_UNIFORM_TABLE);
 ```
-FIX:
-```c
+**Issue**: `MldRejUniformAsm` consumes the SHAKE output as a byte stream, but this wrapper rewrites every `uint32_t` with `CRYPT_HTOLE32` before casting the buffer back to `uint8_t *`. On big-endian AArch64 that permutes the bytes inside each 32-bit word, so the armv8 path expands a different matrix than the scalar implementation.
+**Fix**:
+```
 GOTO_ERR_IF(hashMethod->squeeze(mdCtx, (uint8_t *)buf, outlen), ret);
 
 uint32_t gensize = 0;
 gensize = MldRejUniformAsm(a, (const uint8_t *)buf, outlen, MLD_REJ_UNIFORM_TABLE);
 ```
-===END===
 
-===ISSUE===
-FILE: crypto/mldsa/src/asm/export_ml_dsa_armv8.c
-LINE: 103-149
-SEVERITY: low
-TITLE: Scalar fallback for `MLDSA_RejNTTPoly` restarts from an already-consumed buffer
-PROBLEM: After `MldRejUniformAsm` processes the initial five SHAKE128 blocks, the scalar tail starts with `j = 0` and reads from `buf[0]` again. If the fast path returns fewer than 256 accepted coefficients, the continuation duplicates bytes from the beginning of the XOF output instead of squeezing the next block, so the ARMv8 result diverges from the reference rejection sampler on that edge path.
-CODE:
-```c
+---
+
+
+## Low
+
+### Scalar fallback for `MLDSA_RejNTTPoly` restarts from an already-consumed buffer
+`crypto/mldsa/src/asm/export_ml_dsa_armv8.c:103-149`
+```
 uint32_t gensize = 0;
 gensize = MldRejUniformAsm(a, (uint8_t *) buf, outlen, MLD_REJ_UNIFORM_TABLE);
 outlen = CRYPT_SHAKE128_BLOCKSIZE;
@@ -87,8 +88,9 @@ for (uint32_t i = gensize; i < MLDSA_N;) {
     }
 }
 ```
-FIX:
-```c
+**Issue**: After `MldRejUniformAsm` processes the initial five SHAKE128 blocks, the scalar tail starts with `j = 0` and reads from `buf[0]` again. If the fast path returns fewer than 256 accepted coefficients, the continuation duplicates bytes from the beginning of the XOF output instead of squeezing the next block, so the ARMv8 result diverges from the reference rejection sampler on that edge path.
+**Fix**:
+```
 uint32_t gensize = MldRejUniformAsm(a, (const uint8_t *)buf, outlen, MLD_REJ_UNIFORM_TABLE);
 outlen = CRYPT_SHAKE128_BLOCKSIZE;
 buflen = CRYPT_SHAKE128_BLOCKSIZE / 4;
@@ -104,4 +106,5 @@ for (uint32_t i = gensize; i < MLDSA_N;) {
     ...
 }
 ```
-===END===
+
+---

@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Code Review: openHiTLS/openhitls#1153 - CODEX</title>
+    <style>
+        :root { --critical: #dc2626; --high: #ea580c; --medium: #ca8a04; --low: #65a30d; }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: system-ui, sans-serif; background: #f8fafc; color: #1e293b; padding: 2rem; line-height: 1.6; }
+        .container { max-width: 900px; margin: 0 auto; }
+        h1 { font-size: 1.5rem; margin-bottom: 0.5rem; }
+        .subtitle { color: #64748b; margin-bottom: 2rem; }
+        .section { margin-bottom: 2rem; }
+        .section-title { font-size: 1.1rem; font-weight: 600; padding: 0.5rem 1rem; border-radius: 0.5rem 0.5rem 0 0; color: white; }
+        .section-title.critical { background: var(--critical); }
+        .section-title.high { background: var(--high); }
+        .section-title.medium { background: var(--medium); }
+        .section-title.low { background: var(--low); }
+        .issue { background: white; border: 1px solid #e2e8f0; border-top: none; padding: 1rem; }
+        .issue:last-child { border-radius: 0 0 0.5rem 0.5rem; }
+        .issue-title { font-weight: 600; margin-bottom: 0.25rem; }
+        .issue-location { font-family: monospace; font-size: 0.875rem; color: #64748b; margin-bottom: 0.75rem; }
+        .issue-source { font-size: 0.75rem; color: #94a3b8; margin-top: 0.5rem; }
+        pre { background: #1e293b; color: #e2e8f0; padding: 0.75rem; border-radius: 0.375rem; overflow-x: auto; font-size: 0.875rem; margin: 0.5rem 0; }
+        .problem { margin: 0.75rem 0; }
+        .fix-label { font-weight: 600; margin-top: 0.75rem; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Code Review: openHiTLS/openhitls#1153 - CODEX</h1>
+        <div class="subtitle"></div>
+<div class="section"><div class="section-title high">High</div>
+<div class="issue">
+                <div class="issue-title">ML-DSA source split still leaves the deleted NTT file in the always-built public list</div>
+                <div class="issue-location">config/json/feature.json:1417-1427</div>
+                <pre>".srcs": {
+    "public": [
+        "crypto/mldsa/src/ml_dsa_core.c",
+        "crypto/mldsa/src/ml_dsa_ntt.c",
+        "crypto/mldsa/src/ml_dsa.c"
+    ],
+    "no_asm": "crypto/mldsa/src/noasm/*.c",
+    "armv8": [
+        "crypto/mldsa/src/asm/*armv8.S",
+        "crypto/mldsa/src/asm/*armv8.c",
+        "crypto/mldsa/src/asm/*table.c"
+    ]
+}</pre>
+                <div class="problem"><strong>Issue:</strong> The new `no_asm`/`armv8` split moved `ml_dsa_ntt.c` into `crypto/mldsa/src/noasm/`, but the `public` list still points at the old deleted path. The local source resolver always includes `.srcs.public` before the variant-specific list, so any build with `mldsa` enabled expands a missing source file.</div>
+                <div class="fix-label">Fix:</div><pre>".srcs": {
+    "public": [
+        "crypto/mldsa/src/ml_dsa_core.c",
+        "crypto/mldsa/src/ml_dsa.c"
+    ],
+    "no_asm": "crypto/mldsa/src/noasm/*.c",
+    "armv8": [
+        "crypto/mldsa/src/asm/*armv8.S",
+        "crypto/mldsa/src/asm/*armv8.c",
+        "crypto/mldsa/src/asm/*table.c"
+    ]
+}</pre>
+                <div class="issue-source">Reviewer: codex</div>
+            </div>
+</div>
+<div class="section"><div class="section-title medium">Medium</div>
+<div class="issue">
+                <div class="issue-title">ARMv8 rejection sampler byte-swaps the raw SHAKE stream before parsing it</div>
+                <div class="issue-location">crypto/mldsa/src/asm/export_ml_dsa_armv8.c:99-104</div>
+                <pre>GOTO_ERR_IF(hashMethod-&gt;squeeze(mdCtx, (uint8_t *)buf, outlen), ret);
+for (uint32_t i = 0; i &lt; buflen; i++) {
+    buf[i] = CRYPT_HTOLE32(buf[i]);
+}
+uint32_t gensize = 0;
+gensize = MldRejUniformAsm(a, (uint8_t *) buf, outlen, MLD_REJ_UNIFORM_TABLE);</pre>
+                <div class="problem"><strong>Issue:</strong> `MldRejUniformAsm` consumes the SHAKE output as a byte stream, but this wrapper rewrites every `uint32_t` with `CRYPT_HTOLE32` before casting the buffer back to `uint8_t *`. On big-endian AArch64 that permutes the bytes inside each 32-bit word, so the armv8 path expands a different matrix than the scalar implementation.</div>
+                <div class="fix-label">Fix:</div><pre>GOTO_ERR_IF(hashMethod-&gt;squeeze(mdCtx, (uint8_t *)buf, outlen), ret);
+
+uint32_t gensize = 0;
+gensize = MldRejUniformAsm(a, (const uint8_t *)buf, outlen, MLD_REJ_UNIFORM_TABLE);</pre>
+                <div class="issue-source">Reviewer: codex</div>
+            </div>
+</div>
+<div class="section"><div class="section-title low">Low</div>
+<div class="issue">
+                <div class="issue-title">Scalar fallback for `MLDSA_RejNTTPoly` restarts from an already-consumed buffer</div>
+                <div class="issue-location">crypto/mldsa/src/asm/export_ml_dsa_armv8.c:103-149</div>
+                <pre>uint32_t gensize = 0;
+gensize = MldRejUniformAsm(a, (uint8_t *) buf, outlen, MLD_REJ_UNIFORM_TABLE);
+outlen = CRYPT_SHAKE128_BLOCKSIZE;
+buflen = CRYPT_SHAKE128_BLOCKSIZE / 4; // buflen in terms of uint32_t
+
+uint32_t j = 0;
+for (uint32_t i = gensize; i &lt; MLDSA_N;) {
+    const uint32_t w0 = CRYPT_HTOLE32(buf[j]);
+    const uint32_t w1 = CRYPT_HTOLE32(buf[j + 1]);
+    const uint32_t w2 = CRYPT_HTOLE32(buf[j + 2]);
+    ...
+    j += 3;
+    if (j &gt;= buflen &amp;&amp; i &lt; MLDSA_N) {
+        GOTO_ERR_IF(hashMethod-&gt;squeeze(mdCtx, (uint8_t *)buf, outlen), ret);
+        j = 0;
+    }
+}</pre>
+                <div class="problem"><strong>Issue:</strong> After `MldRejUniformAsm` processes the initial five SHAKE128 blocks, the scalar tail starts with `j = 0` and reads from `buf[0]` again. If the fast path returns fewer than 256 accepted coefficients, the continuation duplicates bytes from the beginning of the XOF output instead of squeezing the next block, so the ARMv8 result diverges from the reference rejection sampler on that edge path.</div>
+                <div class="fix-label">Fix:</div><pre>uint32_t gensize = MldRejUniformAsm(a, (const uint8_t *)buf, outlen, MLD_REJ_UNIFORM_TABLE);
+outlen = CRYPT_SHAKE128_BLOCKSIZE;
+buflen = CRYPT_SHAKE128_BLOCKSIZE / 4;
+
+if (gensize &lt; MLDSA_N) {
+    GOTO_ERR_IF(hashMethod-&gt;squeeze(mdCtx, (uint8_t *)buf, outlen), ret);
+}
+uint32_t j = 0;
+for (uint32_t i = gensize; i &lt; MLDSA_N;) {
+    const uint32_t w0 = CRYPT_HTOLE32(buf[j]);
+    const uint32_t w1 = CRYPT_HTOLE32(buf[j + 1]);
+    const uint32_t w2 = CRYPT_HTOLE32(buf[j + 2]);
+    ...
+}</pre>
+                <div class="issue-source">Reviewer: codex</div>
+            </div>
+</div>
+</div></body></html>

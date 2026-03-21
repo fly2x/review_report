@@ -3,6 +3,13 @@
 You are reviewing PR #1153 for openHiTLS/openhitls.
 
 
+## Local Repository Context
+
+- Repository root: `openhitls-1153/openhitls`
+- Base ref: `e6f9560091967dbcdddde9c74ce5a8aa771cba08`
+- Head ref: `mr-1153`
+- The change under review is already checked out locally in this repository.
+
 ## Changed Files (23 files)
 
 **Source** (9 files):
@@ -34,6 +41,16 @@ You are reviewing PR #1153 for openHiTLS/openhitls.
   - crypto/mldsa/src/asm/validity_check_armv8.S
   - crypto/mldsa/src/asm/vec_opts_x8_armv8.S
 
+
+## Hard Constraints
+
+- Review ONLY the local repository checkout in the current working directory.
+- Use local git/file inspection only.
+- Do NOT search the web.
+- Do NOT open GitHub, GitLab, Gitee, or GitCode pages for this review.
+- Do NOT rely on remote PR pages or web search results for code analysis.
+- If a git command fails, retry with another local command or inspect the changed files directly.
+- If local tooling is limited, continue from the checked-out files and changed-file list instead of switching to network search.
 
 ## Your Task
 

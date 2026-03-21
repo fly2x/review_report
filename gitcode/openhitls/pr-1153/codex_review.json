@@ -1,0 +1,32 @@
+[
+  {
+    "source": "codex",
+    "file": "config/json/feature.json",
+    "line": "1417-1427",
+    "severity": "high",
+    "title": "ML-DSA source split still leaves the deleted NTT file in the always-built public list",
+    "problem": "The new `no_asm`/`armv8` split moved `ml_dsa_ntt.c` into `crypto/mldsa/src/noasm/`, but the `public` list still points at the old deleted path. The local source resolver always includes `.srcs.public` before the variant-specific list, so any build with `mldsa` enabled expands a missing source file.",
+    "code": "\".srcs\": {\n    \"public\": [\n        \"crypto/mldsa/src/ml_dsa_core.c\",\n        \"crypto/mldsa/src/ml_dsa_ntt.c\",\n        \"crypto/mldsa/src/ml_dsa.c\"\n    ],\n    \"no_asm\": \"crypto/mldsa/src/noasm/*.c\",\n    \"armv8\": [\n        \"crypto/mldsa/src/asm/*armv8.S\",\n        \"crypto/mldsa/src/asm/*armv8.c\",\n        \"crypto/mldsa/src/asm/*table.c\"\n    ]\n}",
+    "fix": "\".srcs\": {\n    \"public\": [\n        \"crypto/mldsa/src/ml_dsa_core.c\",\n        \"crypto/mldsa/src/ml_dsa.c\"\n    ],\n    \"no_asm\": \"crypto/mldsa/src/noasm/*.c\",\n    \"armv8\": [\n        \"crypto/mldsa/src/asm/*armv8.S\",\n        \"crypto/mldsa/src/asm/*armv8.c\",\n        \"crypto/mldsa/src/asm/*table.c\"\n    ]\n}"
+  },
+  {
+    "source": "codex",
+    "file": "crypto/mldsa/src/asm/export_ml_dsa_armv8.c",
+    "line": "99-104",
+    "severity": "medium",
+    "title": "ARMv8 rejection sampler byte-swaps the raw SHAKE stream before parsing it",
+    "problem": "`MldRejUniformAsm` consumes the SHAKE output as a byte stream, but this wrapper rewrites every `uint32_t` with `CRYPT_HTOLE32` before casting the buffer back to `uint8_t *`. On big-endian AArch64 that permutes the bytes inside each 32-bit word, so the armv8 path expands a different matrix than the scalar implementation.",
+    "code": "GOTO_ERR_IF(hashMethod->squeeze(mdCtx, (uint8_t *)buf, outlen), ret);\nfor (uint32_t i = 0; i < buflen; i++) {\n    buf[i] = CRYPT_HTOLE32(buf[i]);\n}\nuint32_t gensize = 0;\ngensize = MldRejUniformAsm(a, (uint8_t *) buf, outlen, MLD_REJ_UNIFORM_TABLE);",
+    "fix": "GOTO_ERR_IF(hashMethod->squeeze(mdCtx, (uint8_t *)buf, outlen), ret);\n\nuint32_t gensize = 0;\ngensize = MldRejUniformAsm(a, (const uint8_t *)buf, outlen, MLD_REJ_UNIFORM_TABLE);"
+  },
+  {
+    "source": "codex",
+    "file": "crypto/mldsa/src/asm/export_ml_dsa_armv8.c",
+    "line": "103-149",
+    "severity": "low",
+    "title": "Scalar fallback for `MLDSA_RejNTTPoly` restarts from an already-consumed buffer",
+    "problem": "After `MldRejUniformAsm` processes the initial five SHAKE128 blocks, the scalar tail starts with `j = 0` and reads from `buf[0]` again. If the fast path returns fewer than 256 accepted coefficients, the continuation duplicates bytes from the beginning of the XOF output instead of squeezing the next block, so the ARMv8 result diverges from the reference rejection sampler on that edge path.",
+    "code": "uint32_t gensize = 0;\ngensize = MldRejUniformAsm(a, (uint8_t *) buf, outlen, MLD_REJ_UNIFORM_TABLE);\noutlen = CRYPT_SHAKE128_BLOCKSIZE;\nbuflen = CRYPT_SHAKE128_BLOCKSIZE / 4; // buflen in terms of uint32_t\n\nuint32_t j = 0;\nfor (uint32_t i = gensize; i < MLDSA_N;) {\n    const uint32_t w0 = CRYPT_HTOLE32(buf[j]);\n    const uint32_t w1 = CRYPT_HTOLE32(buf[j + 1]);\n    const uint32_t w2 = CRYPT_HTOLE32(buf[j + 2]);\n    ...\n    j += 3;\n    if (j >= buflen && i < MLDSA_N) {\n        GOTO_ERR_IF(hashMethod->squeeze(mdCtx, (uint8_t *)buf, outlen), ret);\n        j = 0;\n    }\n}",
+    "fix": "uint32_t gensize = MldRejUniformAsm(a, (const uint8_t *)buf, outlen, MLD_REJ_UNIFORM_TABLE);\noutlen = CRYPT_SHAKE128_BLOCKSIZE;\nbuflen = CRYPT_SHAKE128_BLOCKSIZE / 4;\n\nif (gensize < MLDSA_N) {\n    GOTO_ERR_IF(hashMethod->squeeze(mdCtx, (uint8_t *)buf, outlen), ret);\n}\nuint32_t j = 0;\nfor (uint32_t i = gensize; i < MLDSA_N;) {\n    const uint32_t w0 = CRYPT_HTOLE32(buf[j]);\n    const uint32_t w1 = CRYPT_HTOLE32(buf[j + 1]);\n    const uint32_t w2 = CRYPT_HTOLE32(buf[j + 2]);\n    ...\n}"
+  }
+]

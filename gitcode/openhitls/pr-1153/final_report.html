@@ -49,120 +49,203 @@
         <p style="margin-bottom: 1rem;"></p>
 
         <div class="stats">
-            <div class="stat"><div class="stat-value">4</div><div class="stat-label">Total</div></div>
-            <div class="stat critical"><div class="stat-value">0</div><div class="stat-label">Critical</div></div>
-            <div class="stat high"><div class="stat-value">1</div><div class="stat-label">High</div></div>
-            <div class="stat medium"><div class="stat-value">3</div><div class="stat-label">Medium</div></div>
-            <div class="stat low"><div class="stat-value">0</div><div class="stat-label">Low</div></div>
+            <div class="stat"><div class="stat-value">9</div><div class="stat-label">Total</div></div>
+            <div class="stat critical"><div class="stat-value">6</div><div class="stat-label">Critical</div></div>
+            <div class="stat high"><div class="stat-value">0</div><div class="stat-label">High</div></div>
+            <div class="stat medium"><div class="stat-value">0</div><div class="stat-label">Medium</div></div>
+            <div class="stat low"><div class="stat-value">3</div><div class="stat-label">Low</div></div>
         </div>
 
-        <div class="reviewers">Reviewers: claude</div>
-<div class="section"><div class="section-title high">High</div>
+        <div class="reviewers">Reviewers: claude, gemini, codex</div>
+<div class="section"><div class="section-title critical">Critical</div>
 <div class="issue">
-                <div class="issue-title">Function declaration missing const qualifier for ctx parameter</div>
-                <div class="issue-location">crypto/mldsa/src/ml_dsa_local.h:105</div>
+                <div class="issue-title">Incorrect buffer index initialization in MLDSA_RejBoundedPolyEta2</div>
+                <div class="issue-location">crypto/mldsa/src/asm/export_ml_dsa_armv8.c:182</div>
                 <div class="issue-meta">
-                    <span class="reviewers">Reviewers: claude</span>
-                    <span class="confidence-badge evaluate">置信度: 需评估</span>
+                    <span class="reviewers">Reviewers: CLAUDE</span>
+                    <span class="confidence-badge trusted">置信度: 可信</span>
                 </div>
-                <pre>// Header declaration (ml_dsa_local.h line 105)
-void MLDSA_Batch_Decompose(const CRYPT_ML_DSA_Ctx *ctx, int32_t a[MLDSA_N], int32_t r1[MLDSA_N]);</pre>
-                <div class="problem"><strong>Issue:</strong> The declaration `void MLDSA_Batch_Decompose(const CRYPT_ML_DSA_Ctx *ctx, ...)` adds a const qualifier for ctx, but the implementation in noasm/export_mldsa_c.c shows `void MLDSA_Batch_Decompose(const CRYPT_ML_DSA_Ctx *ctx, ...)` with const. However, looking more closely, the ARMv8 implementation incorrectly passes ctx to an assembly function that expects array pointers.</div>
-                <div class="fix-label">Fix:</div><pre>// Remove unused function declaration, or implement it correctly:
-void MLDSA_Batch_Decompose(const CRYPT_ML_DSA_Ctx *ctx, int32_t a[MLDSA_N], int32_t r1[MLDSA_N])
-{
-    void (*fp)(int32_t *, int32_t *);
-    fp = ctx-&gt;info-&gt;k == K_VALUE_OF_MLDSA_44 ? batch_decompose_88 : batch_decompose_32;
-    fp(a, r1);
-}</pre>
-            </div>
-</div>
-<div class="section"><div class="section-title medium">Medium</div>
-<div class="issue">
-                <div class="issue-title">Incorrect (void) h; cast in MLDSA_UseHint function</div>
-                <div class="issue-location">crypto/mldsa/src/asm/export_ml_dsa_armv8.c:73-80</div>
-                <div class="issue-meta">
-                    <span class="reviewers">Reviewers: claude</span>
-                    <span class="confidence-badge evaluate">置信度: 需评估</span>
-                </div>
-                <pre>void MLDSA_UseHint(const CRYPT_ML_DSA_Ctx *ctx, int32_t *const h[MLDSA_K_MAX], int32_t *w[MLDSA_K_MAX]) {
-    (void) h;  // INCORRECT: h is used below!
-    void (*fp)(int32_t *, int32_t const *);
-    fp = ctx-&gt;info-&gt;k == K_VALUE_OF_MLDSA_44? usehint_88: usehint_32;
+                <pre>gensize = MldRejUniformEta2Asm(a, buf, bufLen, MLD_REJ_UNIFORM_ETA_TABLE);
 
-    for (uint8_t i = 0; i &lt; ctx-&gt;info-&gt;k; i++) {
-        fp(w[i], h[i]);  // h IS used here
+for (uint32_t i = gensize, j = bufLen+1; i &lt; MLDSA_N; j++) {
+    if (j &gt;= CRYPT_SHAKE256_BLOCKSIZE) {</pre>
+                <div class="problem"><strong>Issue:</strong> The fallback loop initializes j = bufLen+1 (137), which immediately triggers j >= CRYPT_SHAKE256_BLOCKSIZE (136), causing an immediate buffer refill. This skips the bytes that were just fetched from SHAKE256. The C reference implementation (export_mldsa_c.c:170) uses j = 0, which is the correct initialization. This bug causes incorrect polynomial generation in the ML-DSA signature algorithm, weakening cryptographic security.</div>
+                <div class="fix-label">Fix:</div><pre>gensize = MldRejUniformEta2Asm(a, buf, bufLen, MLD_REJ_UNIFORM_ETA_TABLE);
+
+for (uint32_t i = gensize, j = 0; i &lt; MLDSA_N; j++) {
+    if (j == CRYPT_SHAKE256_BLOCKSIZE) {</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">Incorrect buffer index initialization in MLDSA_RejBoundedPolyEta4</div>
+                <div class="issue-location">crypto/mldsa/src/asm/export_ml_dsa_armv8.c:235</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CLAUDE</span>
+                    <span class="confidence-badge trusted">置信度: 可信</span>
+                </div>
+                <pre>gensize = MldRejUniformEta4Asm(a, buf, bufLen, MLD_REJ_UNIFORM_ETA_TABLE);
+
+for (uint32_t i = gensize, j = bufLen+1; i &lt; MLDSA_N; j++) {
+    if (j &gt;= CRYPT_SHAKE256_BLOCKSIZE) {</pre>
+                <div class="problem"><strong>Issue:</strong> Similar to the Eta2 function, the loop initializes j = bufLen+1 (273), causing immediate buffer refill and skipping valid SHAKE256 bytes. Additionally, the condition compares j against CRYPT_SHAKE256_BLOCKSIZE (136) instead of bufLen (272), which is inconsistent with the 2-block buffer allocation. The C reference implementation (export_mldsa_c.c:217) uses j = 0. This causes incorrect polynomial generation.</div>
+                <div class="fix-label">Fix:</div><pre>gensize = MldRejUniformEta4Asm(a, buf, bufLen, MLD_REJ_UNIFORM_ETA_TABLE);
+
+for (uint32_t i = gensize, j = 0; i &lt; MLDSA_N; j++) {
+    if (j == CRYPT_SHAKE256_BLOCKSIZE) {</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">MLDSA_RejNTTPoly reuses consumed SHAKE128 buffer bytes</div>
+                <div class="issue-location">crypto/mldsa/src/asm/export_ml_dsa_armv8.c:108-149</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: GEMINI, CODEX</span>
+                    <span class="confidence-badge trusted">置信度: 可信</span>
+                </div>
+                <pre>gensize = MldRejUniformAsm(a, (uint8_t *) buf, outlen, MLD_REJ_UNIFORM_TABLE);
+outlen = CRYPT_SHAKE128_BLOCKSIZE;
+buflen = CRYPT_SHAKE128_BLOCKSIZE / 4;
+
+uint32_t j = 0;
+for (uint32_t i = gensize; i &lt; MLDSA_N;) {
+    const uint32_t w0 = CRYPT_HTOLE32(buf[j]);</pre>
+                <div class="problem"><strong>Issue:</strong> After MldRejUniformAsm processes the initial SHAKE128 data and returns gensize < MLDSA_N coefficients, the scalar fallback loop starts with j = 0. This re-reads from buf[0] instead of squeezing a new SHAKE128 block, causing the ARMv8 implementation to diverge from the reference rejection sampler. The C reference implementation (export_mldsa_c.c:103) starts fresh with j = 0 after a single squeeze, but the ARMv8 version has already consumed 5 blocks via assembly.</div>
+                <div class="fix-label">Fix:</div><pre>gensize = MldRejUniformAsm(a, (uint8_t *) buf, outlen, MLD_REJ_UNIFORM_TABLE);
+outlen = CRYPT_SHAKE128_BLOCKSIZE;
+buflen = CRYPT_SHAKE128_BLOCKSIZE / 4;
+
+if (gensize &lt; MLDSA_N) {
+    GOTO_ERR_IF(hashMethod-&gt;squeeze(mdCtx, (uint8_t *)buf, outlen), ret);
+}
+uint32_t j = 0;
+for (uint32_t i = gensize; i &lt; MLDSA_N;) {</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">MLDSA_VectorsCaddQ ignores s2 parameter in noasm implementation</div>
+                <div class="issue-location">crypto/mldsa/src/noasm/export_mldsa_c.c:269-276</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: GEMINI</span>
+                    <span class="confidence-badge trusted">置信度: 可信</span>
+                </div>
+                <pre>void MLDSA_VectorsCaddQ(int32_t w[MLDSA_N], int32_t s2[MLDSA_N])
+{
+    (void) s2;
+    for (uint32_t i = 0; i &lt; MLDSA_N; i++) {
+        w[i] += (MLDSA_Q &amp; (((MLDSA_Q + 1) / 2 - w[i] - 1) &gt;&gt; 31));
+        MLDSA_MOD_Q(w[i]);
     }
 }</pre>
-                <div class="problem"><strong>Issue:</strong> The line `(void) h;` suppresses the unused parameter warning, but `h` is actually used later in the function (`fp(w[i], h[i])`). This cast should be removed as it misleads readers about the parameter usage.</div>
-                <div class="fix-label">Fix:</div><pre>void MLDSA_UseHint(const CRYPT_ML_DSA_Ctx *ctx, int32_t *const h[MLDSA_K_MAX], int32_t *w[MLDSA_K_MAX]) {
+                <div class="problem"><strong>Issue:</strong> The noasm implementation completely ignores the s2 parameter ((void) s2;) and only applies conditional modular reduction to w. However, the ARMv8 assembly version calls VecCaddq(w, w, s2) which adds s2 to w before modular reduction. This is a fundamental semantic difference - the two implementations do completely different operations, causing signature verification failures depending on which implementation is used.</div>
+                <div class="fix-label">Fix:</div><pre>void MLDSA_VectorsCaddQ(int32_t w[MLDSA_N], int32_t s2[MLDSA_N])
+{
+    for (uint32_t i = 0; i &lt; MLDSA_N; i++) {
+        w[i] += s2[i];
+        w[i] += (MLDSA_Q &amp; (w[i] &gt;&gt; 31));
+    }
+}</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">MLDSA_Batch_Decompose fails to store r0 values in array a</div>
+                <div class="issue-location">crypto/mldsa/src/noasm/export_mldsa_c.c:75-81</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: GEMINI</span>
+                    <span class="confidence-badge trusted">置信度: 可信</span>
+                </div>
+                <pre>void MLDSA_Batch_Decompose(const CRYPT_ML_DSA_Ctx *ctx, int32_t a[MLDSA_N], int32_t r1[MLDSA_N])
+{
+    for (uint32_t i = 0; i &lt; MLDSA_N; i++) {
+        int32_t r0;
+        MLDSA_Decompose(ctx, a[i], &amp;r1[i], &amp;r0);
+    }
+}</pre>
+                <div class="problem"><strong>Issue:</strong> The noasm implementation writes r0 to a local variable and discards it. It fails to update a[i] with the r0 value. The ARMv8 assembly implementation (BatchDecompose88/BatchDecompose32) modifies the input array a in-place to store the r0 values while storing r1 in the output array. This divergence causes incorrect cryptographic computations.</div>
+                <div class="fix-label">Fix:</div><pre>void MLDSA_Batch_Decompose(const CRYPT_ML_DSA_Ctx *ctx, int32_t a[MLDSA_N], int32_t r1[MLDSA_N])
+{
+    for (uint32_t i = 0; i &lt; MLDSA_N; i++) {
+        int32_t r0;
+        MLDSA_Decompose(ctx, a[i], &amp;r1[i], &amp;r0);
+        a[i] = r0;
+    }
+}</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">Build configuration references deleted ml_dsa_ntt.c path</div>
+                <div class="issue-location">config/json/feature.json:1417-1427</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CODEX</span>
+                    <span class="confidence-badge trusted">置信度: 可信</span>
+                </div>
+                <pre>".srcs": {
+    "public": [
+        "crypto/mldsa/src/ml_dsa_core.c",
+        "crypto/mldsa/src/ml_dsa_ntt.c",
+        "crypto/mldsa/src/ml_dsa.c"
+    ],
+    "no_asm": "crypto/mldsa/src/noasm/*.c",</pre>
+                <div class="problem"><strong>Issue:</strong> The ML-DSA source reorganization moved ml_dsa_ntt.c from crypto/mldsa/src/ to crypto/mldsa/src/noasm/, but the .srcs.public list still points to the old deleted path "crypto/mldsa/src/ml_dsa_ntt.c". The local source resolver always includes .srcs.public before variant-specific lists, so any build with mldsa enabled attempts to compile a non-existent source file, causing build failures.</div>
+                <div class="fix-label">Fix:</div><pre>".srcs": {
+    "public": [
+        "crypto/mldsa/src/ml_dsa_core.c",
+        "crypto/mldsa/src/ml_dsa.c"
+    ],
+    "no_asm": "crypto/mldsa/src/noasm/*.c",</pre>
+            </div>
+</div>
+<div class="section"><div class="section-title low">Low</div>
+<div class="issue">
+                <div class="issue-title">Unnecessary (void) cast for used parameter h</div>
+                <div class="issue-location">crypto/mldsa/src/asm/export_ml_dsa_armv8.c:46</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: GEMINI</span>
+                    <span class="confidence-badge likely">置信度: 较可信</span>
+                </div>
+                <pre>void MLDSA_UseHint(const CRYPT_ML_DSA_Ctx *ctx, int32_t *const h[MLDSA_K_MAX], int32_t *w[MLDSA_K_MAX])
+{
+    (void) h;
     void (*fp)(int32_t *, int32_t const *);
-    fp = ctx-&gt;info-&gt;k == K_VALUE_OF_MLDSA_44? usehint_88: usehint_32;
+    fp = ctx-&gt;info-&gt;k == K_VALUE_OF_MLDSA_44? Usehint88: Usehint32;
 
     for (uint8_t i = 0; i &lt; ctx-&gt;info-&gt;k; i++) {
         fp(w[i], h[i]);
     }
 }</pre>
+                <div class="problem"><strong>Issue:</strong> Parameter h is cast to void to suppress unused warning, but it is actually used at line 51 (fp(w[i], h[i]);). The (void) h; cast at line 46 is unnecessary and should be removed.</div>
+                <div class="fix-label">Fix:</div><pre>void MLDSA_UseHint(const CRYPT_ML_DSA_Ctx *ctx, int32_t *const h[MLDSA_K_MAX], int32_t *w[MLDSA_K_MAX])
+{
+    void (*fp)(int32_t *, int32_t const *);</pre>
             </div>
 <div class="issue">
-                <div class="issue-title">Confusing loop initialization in MLDSA_RejBoundedPolyEta2</div>
-                <div class="issue-location">crypto/mldsa/src/asm/export_ml_dsa_armv8.c:254</div>
+                <div class="issue-title">Unnecessary (void) cast for used parameter s</div>
+                <div class="issue-location">crypto/mldsa/src/asm/export_ml_dsa_armv8.c:160</div>
                 <div class="issue-meta">
-                    <span class="reviewers">Reviewers: claude</span>
-                    <span class="confidence-badge evaluate">置信度: 需评估</span>
+                    <span class="reviewers">Reviewers: GEMINI</span>
+                    <span class="confidence-badge likely">置信度: 较可信</span>
                 </div>
-                <pre>gensize = mld_rej_uniform_eta2_asm(a, buf, bufLen, mld_rej_uniform_eta_table);
-
-for (uint32_t i = gensize, j = bufLen+1; i &lt; MLDSA_N; j++) {
-    if (j &gt;= CRYPT_SHAKE256_BLOCKSIZE) {
-        GOTO_ERR_IF(hashMethod-&gt;squeeze(mdCtx, buf, CRYPT_SHAKE256_BLOCKSIZE), ret);
-        j = 0;
-    }
-    int32_t z0 = (int32_t)(buf[j] &amp; 0x0F);
+                <pre>int32_t MLDSA_RejBoundedPolyEta2(int32_t *a, const uint8_t *s)
+{
+    (void) s;
+    uint8_t buf[CRYPT_SHAKE256_BLOCKSIZE] = {0};
     ...
-}</pre>
-                <div class="problem"><strong>Issue:</strong> The loop starts with `j = bufLen+1` which causes an immediate buffer refill on first iteration. This skips one byte (the second byte) of each buffer after the first. While this may be intentional optimization, it's non-obvious and differs from the reference C implementation.</div>
-                <div class="fix-label">Fix:</div><pre>gensize = mld_rej_uniform_eta2_asm(a, buf, bufLen, mld_rej_uniform_eta_table);
-
-// The asm function processes bufLen bytes, leaving buf[bufLen] unprocessed.
-// Start loop at bufLen to process this byte before refilling buffer.
-for (uint32_t i = gensize, j = bufLen; i &lt; MLDSA_N; j++) {
-    if (j &gt;= CRYPT_SHAKE256_BLOCKSIZE) {
-        GOTO_ERR_IF(hashMethod-&gt;squeeze(mdCtx, buf, CRYPT_SHAKE256_BLOCKSIZE), ret);
-        j = 0;
-    }
-    int32_t z0 = (int32_t)(buf[j] &amp; 0x0F);
-    ...
-}</pre>
+    GOTO_ERR_IF(hashMethod-&gt;update(mdCtx, s, MLDSA_PRIVATE_SEED_LEN + 2), ret);</pre>
+                <div class="problem"><strong>Issue:</strong> Parameter s is cast to void at line 160, but it is used at line 177 (hashMethod->update(mdCtx, s, MLDSA_PRIVATE_SEED_LEN + 2)). The (void) s; cast is unnecessary.</div>
+                <div class="fix-label">Fix:</div><pre>int32_t MLDSA_RejBoundedPolyEta2(int32_t *a, const uint8_t *s)
+{
+    uint8_t buf[CRYPT_SHAKE256_BLOCKSIZE] = {0};</pre>
             </div>
 <div class="issue">
-                <div class="issue-title">Same confusing loop initialization in MLDSA_RejBoundedPolyEta4</div>
-                <div class="issue-location">crypto/mldsa/src/asm/export_ml_dsa_armv8.c:282</div>
+                <div class="issue-title">Unnecessary (void) cast for used parameter s</div>
+                <div class="issue-location">crypto/mldsa/src/asm/export_ml_dsa_armv8.c:213</div>
                 <div class="issue-meta">
-                    <span class="reviewers">Reviewers: claude</span>
-                    <span class="confidence-badge evaluate">置信度: 需评估</span>
+                    <span class="reviewers">Reviewers: GEMINI</span>
+                    <span class="confidence-badge likely">置信度: 较可信</span>
                 </div>
-                <pre>gensize = mld_rej_uniform_eta4_asm(a, buf, bufLen, mld_rej_uniform_eta_table);
-
-for (uint32_t i = gensize, j = bufLen+1; i &lt; MLDSA_N; j++) {
-    if (j &gt;= CRYPT_SHAKE256_BLOCKSIZE) {
-        GOTO_ERR_IF(hashMethod-&gt;squeeze(mdCtx, buf, CRYPT_SHAKE256_BLOCKSIZE), ret);
-        j = 0;
-    }
+                <pre>int32_t MLDSA_RejBoundedPolyEta4(int32_t *a, const uint8_t *s)
+{
+    (void) s;
+    uint8_t buf[2*CRYPT_SHAKE256_BLOCKSIZE] = {0};
     ...
-}</pre>
-                <div class="problem"><strong>Issue:</strong> Same issue as MLDSA_RejBoundedPolyEta2 - loop starts with `j = bufLen+1` causing immediate buffer refill.</div>
-                <div class="fix-label">Fix:</div><pre>gensize = mld_rej_uniform_eta4_asm(a, buf, bufLen, mld_rej_uniform_eta_table);
-
-// The asm function processes bufLen bytes, leaving buf[bufLen] unprocessed.
-// Start loop at bufLen to process this byte before refilling buffer.
-for (uint32_t i = gensize, j = bufLen; i &lt; MLDSA_N; j++) {
-    if (j &gt;= CRYPT_SHAKE256_BLOCKSIZE) {
-        GOTO_ERR_IF(hashMethod-&gt;squeeze(mdCtx, buf, CRYPT_SHAKE256_BLOCKSIZE), ret);
-        j = 0;
-    }
-    ...
-}</pre>
+    GOTO_ERR_IF(hashMethod-&gt;update(mdCtx, s, MLDSA_PRIVATE_SEED_LEN + 2), ret);</pre>
+                <div class="problem"><strong>Issue:</strong> Parameter s is cast to void at line 213, but it is used at line 230 (hashMethod->update(mdCtx, s, MLDSA_PRIVATE_SEED_LEN + 2)). The (void) s; cast is unnecessary.</div>
+                <div class="fix-label">Fix:</div><pre>int32_t MLDSA_RejBoundedPolyEta4(int32_t *a, const uint8_t *s)
+{
+    uint8_t buf[2*CRYPT_SHAKE256_BLOCKSIZE] = {0};</pre>
             </div>
 </div>
 </div></body></html>
