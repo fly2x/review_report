@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Code Review: openHiTLS/sdf4j#25 - GEMINI</title>
+    <style>
+        :root { --critical: #dc2626; --high: #ea580c; --medium: #ca8a04; --low: #65a30d; }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: system-ui, sans-serif; background: #f8fafc; color: #1e293b; padding: 2rem; line-height: 1.6; }
+        .container { max-width: 900px; margin: 0 auto; }
+        h1 { font-size: 1.5rem; margin-bottom: 0.5rem; }
+        .subtitle { color: #64748b; margin-bottom: 2rem; }
+        .section { margin-bottom: 2rem; }
+        .section-title { font-size: 1.1rem; font-weight: 600; padding: 0.5rem 1rem; border-radius: 0.5rem 0.5rem 0 0; color: white; }
+        .section-title.critical { background: var(--critical); }
+        .section-title.high { background: var(--high); }
+        .section-title.medium { background: var(--medium); }
+        .section-title.low { background: var(--low); }
+        .issue { background: white; border: 1px solid #e2e8f0; border-top: none; padding: 1rem; }
+        .issue:last-child { border-radius: 0 0 0.5rem 0.5rem; }
+        .issue-title { font-weight: 600; margin-bottom: 0.25rem; }
+        .issue-location { font-family: monospace; font-size: 0.875rem; color: #64748b; margin-bottom: 0.75rem; }
+        .issue-source { font-size: 0.75rem; color: #94a3b8; margin-top: 0.5rem; }
+        pre { background: #1e293b; color: #e2e8f0; padding: 0.75rem; border-radius: 0.375rem; overflow-x: auto; font-size: 0.875rem; margin: 0.5rem 0; }
+        .problem { margin: 0.75rem 0; }
+        .fix-label { font-weight: 600; margin-top: 0.75rem; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Code Review: openHiTLS/sdf4j#25 - GEMINI</h1>
+        <div class="subtitle"></div>
+<div class="section"><div class="section-title high">High</div>
+<div class="issue">
+                <div class="issue-title">JCE contract violation: session closed in doFinal prevents cipher reuse</div>
+                <div class="issue-location">sdf4j-jce/src/main/java/org/openhitls/sdf4j/jce/cipher/SM2Cipher.java:165-184</div>
+                <pre>try {
+            if (opmode == Cipher.ENCRYPT_MODE || opmode == Cipher.WRAP_MODE) {
+                if (publicKey == null) {
+                    throw new IllegalStateException("Public key not set");
+                }
+                // Native layer outputs GM/T format: 0x04 || C1 || C3 || C2
+                return SDFJceNative.sm2Encrypt(sessionHandle, publicKey.getX(), publicKey.getY(), data);
+            } else {
+                if (privateKey == null) {
+                    throw new IllegalStateException("Private key not set");
+                }
+                // Native layer expects GM/T format: 0x04 || C1 || C3 || C2
+                return SDFJceNative.sm2Decrypt(sessionHandle, privateKey.getKeyBytes(), data);
+            }
+        } finally {
+            releaseSession();
+        }</pre>
+                <div class="problem"><strong>Issue:</strong> `releaseSession()` is called in the `finally` block of `engineDoFinal()`. Because `acquireSession()` is only called in `engineInit()`, subsequent `update()` or `doFinal()` operations on the same cipher instance will use `sessionHandle = 0`, leading to exceptions. The JCE `CipherSpi` contract requires instances to be reusable for multiple operations after a single `engineInit()`.</div>
+                <div class="fix-label">Fix:</div><pre>acquireSession();
+        try {
+            if (opmode == Cipher.ENCRYPT_MODE || opmode == Cipher.WRAP_MODE) {
+                if (publicKey == null) {
+                    throw new IllegalStateException("Public key not set");
+                }
+                // Native layer outputs GM/T format: 0x04 || C1 || C3 || C2
+                return SDFJceNative.sm2Encrypt(sessionHandle, publicKey.getX(), publicKey.getY(), data);
+            } else {
+                if (privateKey == null) {
+                    throw new IllegalStateException("Private key not set");
+                }
+                // Native layer expects GM/T format: 0x04 || C1 || C3 || C2
+                return SDFJceNative.sm2Decrypt(sessionHandle, privateKey.getKeyBytes(), data);
+            }
+        } finally {
+            releaseSession();
+        }</pre>
+                <div class="issue-source">Reviewer: gemini</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">JCE contract violation: session closed in AEAD doFinal prevents cipher reuse</div>
+                <div class="issue-location">sdf4j-jce/src/main/java/org/openhitls/sdf4j/jce/cipher/SM4Cipher.java:377-407</div>
+                <pre>try {
+            if (opmode == Cipher.ENCRYPT_MODE || opmode == Cipher.WRAP_MODE) {
+                if (data.length == 0) {
+                    throw new IllegalBlockSizeException("SM4 GCM/CCM does not support empty plaintext");
+                }
+                // sm4AuthEnc returns ciphertext || tag directly
+                byte[] result = SDFJceNative.sm4AuthEnc(sessionHandle, cipherMode, key, iv,
+                        aad.length &gt; 0 ? aad : null, data);
+                if (result == null) {
+                    throw new IllegalBlockSizeException("AuthEnc returned null");
+                }
+                return result;
+            } else {
+                // Decrypt: input is ciphertext || tag
+                if (data.length &lt; tagBytes) {
+                    throw new BadPaddingException("Input too short for GCM tag");
+                }
+                byte[] ciphertext = new byte[data.length - tagBytes];
+                byte[] tag = new byte[tagBytes];
+                System.arraycopy(data, 0, ciphertext, 0, ciphertext.length);
+                System.arraycopy(data, ciphertext.length, tag, 0, tagBytes);
+
+                byte[] plaintext = SDFJceNative.sm4AuthDec(sessionHandle, cipherMode, key, iv,
+                        aad.length &gt; 0 ? aad : null, tag, ciphertext);
+                if (plaintext == null) {
+                    throw new AEADBadTagException("GCM authentication failed");
+                }
+                return plaintext;
+            }
+        } finally {
+            releaseSession();
+        }</pre>
+                <div class="problem"><strong>Issue:</strong> `releaseSession()` is called in `doFinalAead()`, but `acquireSession()` is not called upon reentry, causing subsequent AEAD encryption/decryption operations on the reused cipher instance to fail with `sessionHandle = 0`.</div>
+                <div class="fix-label">Fix:</div><pre>acquireSession();
+        try {
+            if (opmode == Cipher.ENCRYPT_MODE || opmode == Cipher.WRAP_MODE) {
+                if (data.length == 0) {
+                    throw new IllegalBlockSizeException("SM4 GCM/CCM does not support empty plaintext");
+                }
+                // sm4AuthEnc returns ciphertext || tag directly
+                byte[] result = SDFJceNative.sm4AuthEnc(sessionHandle, cipherMode, key, iv,
+                        aad.length &gt; 0 ? aad : null, data);
+                if (result == null) {
+                    throw new IllegalBlockSizeException("AuthEnc returned null");
+                }
+                return result;
+            } else {
+                // Decrypt: input is ciphertext || tag
+                if (data.length &lt; tagBytes) {
+                    throw new BadPaddingException("Input too short for GCM tag");
+                }
+                byte[] ciphertext = new byte[data.length - tagBytes];
+                byte[] tag = new byte[tagBytes];
+                System.arraycopy(data, 0, ciphertext, 0, ciphertext.length);
+                System.arraycopy(data, ciphertext.length, tag, 0, tagBytes);
+
+                byte[] plaintext = SDFJceNative.sm4AuthDec(sessionHandle, cipherMode, key, iv,
+                        aad.length &gt; 0 ? aad : null, tag, ciphertext);
+                if (plaintext == null) {
+                    throw new AEADBadTagException("GCM authentication failed");
+                }
+                return plaintext;
+            }
+        } finally {
+            releaseSession();
+        }</pre>
+                <div class="issue-source">Reviewer: gemini</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">JCE contract violation: session closed in doFinal prevents MAC reuse</div>
+                <div class="issue-location">sdf4j-jce/src/main/java/org/openhitls/sdf4j/jce/mac/HmacSM3.java:95-101</div>
+                <pre>try {
+            return SDFJceNative.hmacSm3(sessionHandle, key, data);
+        } finally {
+            releaseSession();
+        }</pre>
+                <div class="problem"><strong>Issue:</strong> `engineDoFinal()` unconditionally releases the session handle. The standard Mac contract allows reuse of a Mac instance without reinitialization. The next time `engineDoFinal()` is invoked, `sessionHandle` will be `0`, causing the native invocation to fail.</div>
+                <div class="fix-label">Fix:</div><pre>acquireSession();
+        try {
+            return SDFJceNative.hmacSm3(sessionHandle, key, data);
+        } finally {
+            releaseSession();
+        }</pre>
+                <div class="issue-source">Reviewer: gemini</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">JCE contract violation: session closed in doFinal prevents MAC reuse</div>
+                <div class="issue-location">sdf4j-jce/src/main/java/org/openhitls/sdf4j/jce/mac/SM4Mac.java:117-123</div>
+                <pre>try {
+            return SDFJceNative.sm4Mac(sessionHandle, key, iv, data);
+        } finally {
+            releaseSession();
+        }</pre>
+                <div class="problem"><strong>Issue:</strong> The Mac session is released in `engineDoFinal()`, invalidating the instance for subsequent operations that do not call `engineInit()`. Missing `acquireSession()` before doing native MAC operations.</div>
+                <div class="fix-label">Fix:</div><pre>acquireSession();
+        try {
+            return SDFJceNative.sm4Mac(sessionHandle, key, iv, data);
+        } finally {
+            releaseSession();
+        }</pre>
+                <div class="issue-source">Reviewer: gemini</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">Null sessionHandle crash during SM2Signature sign reuse</div>
+                <div class="issue-location">sdf4j-jce/src/main/java/org/openhitls/sdf4j/jce/signature/SM2Signature.java:134-143</div>
+                <pre>byte[] e = SM2Util.calculateE(sessionHandle, z, dataBytes);
+
+        // Sign the hash e (returns r||s format, 64 bytes)
+        try {
+            byte[] rawSignature = SDFJceNative.sm2Sign(sessionHandle, privateKey.getKeyBytes(), e);
+            // Convert to DER format for compatibility with Bouncy Castle and other providers
+            return DERCodec.rawToDer(rawSignature);
+        } finally {
+            releaseSession();
+        }</pre>
+                <div class="problem"><strong>Issue:</strong> `engineSign()` unconditionally calls `releaseSession()`. On a subsequent signing operation (reuse), `SM2Util.calculateE(sessionHandle, ...)` will be called with `sessionHandle = 0`, causing an exception before it even attempts native signing.</div>
+                <div class="fix-label">Fix:</div><pre>acquireSession();
+        byte[] e = SM2Util.calculateE(sessionHandle, z, dataBytes);
+
+        // Sign the hash e (returns r||s format, 64 bytes)
+        try {
+            byte[] rawSignature = SDFJceNative.sm2Sign(sessionHandle, privateKey.getKeyBytes(), e);
+            // Convert to DER format for compatibility with Bouncy Castle and other providers
+            return DERCodec.rawToDer(rawSignature);
+        } finally {
+            releaseSession();
+        }</pre>
+                <div class="issue-source">Reviewer: gemini</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">Null sessionHandle crash during SM2Signature verify reuse</div>
+                <div class="issue-location">sdf4j-jce/src/main/java/org/openhitls/sdf4j/jce/signature/SM2Signature.java:159-170</div>
+                <pre>// SM2 requires hashing the data with user ID (Z)
+        byte[] e = SM2Util.calculateE(sessionHandle, z, dataBytes);
+
+        // Convert DER signature to raw r||s format
+        byte[] rawSignature = DERCodec.derToRaw(sigBytes);
+
+        // Verify the signature (expects r||s format, 64 bytes)
+        try {
+            return SDFJceNative.sm2Verify(sessionHandle, publicKey.getX(), publicKey.getY(), e, rawSignature);
+        } finally {
+            releaseSession();
+        }</pre>
+                <div class="problem"><strong>Issue:</strong> Similar to `engineSign()`, `engineVerify()` releases the session handle. If the signature instance is reused without reinitialization, `SM2Util.calculateE()` will be executed with `sessionHandle = 0`.</div>
+                <div class="fix-label">Fix:</div><pre>acquireSession();
+        // SM2 requires hashing the data with user ID (Z)
+        byte[] e = SM2Util.calculateE(sessionHandle, z, dataBytes);
+
+        // Convert DER signature to raw r||s format
+        byte[] rawSignature = DERCodec.derToRaw(sigBytes);
+
+        // Verify the signature (expects r||s format, 64 bytes)
+        try {
+            return SDFJceNative.sm2Verify(sessionHandle, publicKey.getX(), publicKey.getY(), e, rawSignature);
+        } finally {
+            releaseSession();
+        }</pre>
+                <div class="issue-source">Reviewer: gemini</div>
+            </div>
+</div>
+</div></body></html>

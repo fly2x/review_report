@@ -1,0 +1,276 @@
+# Code Review: openHiTLS/sdf4j#25
+**Reviewer**: CODEX
+
+
+## Medium
+
+### HMAC instance becomes unusable after the first `doFinal()`
+`sdf4j-jce/src/main/java/org/openhitls/sdf4j/jce/mac/HmacSM3.java:92-99`
+```
+@Override
+protected byte[] engineDoFinal() {
+    byte[] data = buffer.toByteArray();
+    buffer.reset();
+    try {
+        return SDFJceNative.hmacSm3(sessionHandle, key, data);
+    } finally {
+        releaseSession();
+    }
+}
+```
+**Issue**: `engineInit()` is the only place that reopens the SDF session, but `engineDoFinal()` now always closes it. The same `Mac` instance can still accept more `update()` calls after `doFinal()`, yet the next `engineDoFinal()` will invoke `hmacSm3()` with `sessionHandle == 0` and fail.
+**Fix**:
+```
+@Override
+protected byte[] engineDoFinal() {
+    acquireSession();
+    byte[] data = buffer.toByteArray();
+    buffer.reset();
+    try {
+        return SDFJceNative.hmacSm3(sessionHandle, key, data);
+    } finally {
+        releaseSession();
+    }
+}
+```
+
+---
+
+### SM4 MAC state is broken after one `doFinal()`
+`sdf4j-jce/src/main/java/org/openhitls/sdf4j/jce/mac/SM4Mac.java:114-121`
+```
+@Override
+protected byte[] engineDoFinal() {
+    byte[] data = buffer.toByteArray();
+    buffer.reset();
+    try {
+        return SDFJceNative.sm4Mac(sessionHandle, key, iv, data);
+    } finally {
+        releaseSession();
+    }
+}
+```
+**Issue**: `engineDoFinal()` closes the session, but no later path reopens it unless the caller performs another `init()`. Reusing the same `Mac` object with the same key after one successful `doFinal()` will call `sm4Mac()` with a zero session handle.
+**Fix**:
+```
+@Override
+protected byte[] engineDoFinal() {
+    acquireSession();
+    byte[] data = buffer.toByteArray();
+    buffer.reset();
+    try {
+        return SDFJceNative.sm4Mac(sessionHandle, key, iv, data);
+    } finally {
+        releaseSession();
+    }
+}
+```
+
+---
+
+### `sign()` and `verify()` close the session without reopening it
+`sdf4j-jce/src/main/java/org/openhitls/sdf4j/jce/signature/SM2Signature.java:130-168`
+```
+// Calculate Z value according to GM/T 0009-2012
+byte[] z = SM2Util.calculateZ(sessionHandle, userId, publicKey.getX(), publicKey.getY());
+
+// Calculate e = SM3(Z || M)
+byte[] e = SM2Util.calculateE(sessionHandle, z, dataBytes);
+
+// Sign the hash e (returns r||s format, 64 bytes)
+try {
+    byte[] rawSignature = SDFJceNative.sm2Sign(sessionHandle, privateKey.getKeyBytes(), e);
+    // Convert to DER format for compatibility with Bouncy Castle and other providers
+    return DERCodec.rawToDer(rawSignature);
+} finally {
+    releaseSession();
+}
+...
+// Calculate Z value according to GM/T 0009-2012
+byte[] z = SM2Util.calculateZ(sessionHandle, userId, publicKey.getX(), publicKey.getY());
+
+// Calculate e = SM3(Z || M)
+byte[] e = SM2Util.calculateE(sessionHandle, z, dataBytes);
+
+try {
+    return SDFJceNative.sm2Verify(sessionHandle, publicKey.getX(), publicKey.getY(), e, rawSignature);
+} finally {
+    releaseSession();
+}
+```
+**Issue**: After the first successful `sign()` or `verify()`, `releaseSession()` sets `sessionHandle` to `0`. A later call on the same initialized `Signature` object uses that dead handle in `SM2Util.calculateZ()`, `SM2Util.calculateE()`, and `sm2Sign()/sm2Verify()`, so repeat operations fail even though the object still holds the key material and buffered state.
+**Fix**:
+```
+@Override
+protected byte[] engineSign() throws SignatureException {
+    if (!forSigning || privateKey == null) {
+        throw new SignatureException("Not initialized for signing");
+    }
+    if (publicKey == null) {
+        throw new SignatureException(
+            "Public key required for SM2 signature. " +
+            "Use setParameter(SM2ParameterSpec) to provide the public key before signing.");
+    }
+
+    byte[] dataBytes = data.toByteArray();
+    data.reset();
+
+    acquireSession();
+    try {
+        byte[] z = SM2Util.calculateZ(sessionHandle, userId, publicKey.getX(), publicKey.getY());
+        byte[] e = SM2Util.calculateE(sessionHandle, z, dataBytes);
+        byte[] rawSignature = SDFJceNative.sm2Sign(sessionHandle, privateKey.getKeyBytes(), e);
+        return DERCodec.rawToDer(rawSignature);
+    } finally {
+        releaseSession();
+    }
+}
+
+@Override
+protected boolean engineVerify(byte[] sigBytes) throws SignatureException {
+    if (forSigning || publicKey == null) {
+        throw new SignatureException("Not initialized for verification");
+    }
+
+    byte[] dataBytes = data.toByteArray();
+    data.reset();
+    byte[] rawSignature = DERCodec.derToRaw(sigBytes);
+
+    acquireSession();
+    try {
+        byte[] z = SM2Util.calculateZ(sessionHandle, userId, publicKey.getX(), publicKey.getY());
+        byte[] e = SM2Util.calculateE(sessionHandle, z, dataBytes);
+        return SDFJceNative.sm2Verify(sessionHandle, publicKey.getX(), publicKey.getY(), e, rawSignature);
+    } finally {
+        releaseSession();
+    }
+}
+```
+
+---
+
+### SM2 cipher cannot be used again after one `doFinal()`
+`sdf4j-jce/src/main/java/org/openhitls/sdf4j/jce/cipher/SM2Cipher.java:174-189`
+```
+try {
+    if (opmode == Cipher.ENCRYPT_MODE || opmode == Cipher.WRAP_MODE) {
+        if (publicKey == null) {
+            throw new IllegalStateException("Public key not set");
+        }
+        // Native layer outputs GM/T format: 0x04 || C1 || C3 || C2
+        return SDFJceNative.sm2Encrypt(sessionHandle, publicKey.getX(), publicKey.getY(), data);
+    } else {
+        if (privateKey == null) {
+            throw new IllegalStateException("Private key not set");
+        }
+        // Native layer expects GM/T format: 0x04 || C1 || C3 || C2
+        return SDFJceNative.sm2Decrypt(sessionHandle, privateKey.getKeyBytes(), data);
+    }
+} finally {
+    releaseSession();
+}
+```
+**Issue**: `engineDoFinal()` now closes the session in a `finally` block, but nothing reopens it before the next encryption/decryption attempt. A caller that reuses the same initialized `Cipher` instance will buffer input normally and then pass `sessionHandle == 0` to `sm2Encrypt()` or `sm2Decrypt()`.
+**Fix**:
+```
+acquireSession();
+try {
+    if (opmode == Cipher.ENCRYPT_MODE || opmode == Cipher.WRAP_MODE) {
+        if (publicKey == null) {
+            throw new IllegalStateException("Public key not set");
+        }
+        return SDFJceNative.sm2Encrypt(sessionHandle, publicKey.getX(), publicKey.getY(), data);
+    } else {
+        if (privateKey == null) {
+            throw new IllegalStateException("Private key not set");
+        }
+        return SDFJceNative.sm2Decrypt(sessionHandle, privateKey.getKeyBytes(), data);
+    }
+} finally {
+    releaseSession();
+}
+```
+
+---
+
+### GCM/CCM mode loses its session after the first `doFinal()`
+`sdf4j-jce/src/main/java/org/openhitls/sdf4j/jce/cipher/SM4Cipher.java:377-407`
+```
+try {
+    if (opmode == Cipher.ENCRYPT_MODE || opmode == Cipher.WRAP_MODE) {
+        if (data.length == 0) {
+            throw new IllegalBlockSizeException("SM4 GCM/CCM does not support empty plaintext");
+        }
+        // sm4AuthEnc returns ciphertext || tag directly
+        byte[] result = SDFJceNative.sm4AuthEnc(sessionHandle, cipherMode, key, iv,
+                aad.length > 0 ? aad : null, data);
+        if (result == null) {
+            throw new IllegalBlockSizeException("AuthEnc returned null");
+        }
+        return result;
+    } else {
+        // Decrypt: input is ciphertext || tag
+        if (data.length < tagBytes) {
+            throw new BadPaddingException("Input too short for GCM tag");
+        }
+        byte[] ciphertext = new byte[data.length - tagBytes];
+        byte[] tag = new byte[tagBytes];
+        System.arraycopy(data, 0, ciphertext, 0, ciphertext.length);
+        System.arraycopy(data, ciphertext.length, tag, 0, tagBytes);
+
+        byte[] plaintext = SDFJceNative.sm4AuthDec(sessionHandle, cipherMode, key, iv,
+                aad.length > 0 ? aad : null, tag, ciphertext);
+        if (plaintext == null) {
+            throw new AEADBadTagException("GCM authentication failed");
+        }
+        return plaintext;
+    }
+} finally {
+    releaseSession();
+}
+```
+**Issue**: `doFinalAead()` closes the session every time, but AEAD mode does not recreate it anywhere except `engineInit()`. After one GCM/CCM operation, later `updateAAD()`/`update()` calls still succeed because they only buffer bytes, but the next `doFinalAead()` reaches `sm4AuthEnc()`/`sm4AuthDec()` with `sessionHandle == 0`.
+**Fix**:
+```
+private byte[] doFinalAead() throws IllegalBlockSizeException, BadPaddingException {
+    byte[] data = buffer.toByteArray();
+    byte[] aad = aadBuffer.toByteArray();
+    buffer.reset();
+    aadBuffer.reset();
+
+    int tagBytes = gcmTagLenBits / 8;
+    acquireSession();
+    try {
+        if (opmode == Cipher.ENCRYPT_MODE || opmode == Cipher.WRAP_MODE) {
+            if (data.length == 0) {
+                throw new IllegalBlockSizeException("SM4 GCM/CCM does not support empty plaintext");
+            }
+            byte[] result = SDFJceNative.sm4AuthEnc(sessionHandle, cipherMode, key, iv,
+                    aad.length > 0 ? aad : null, data);
+            if (result == null) {
+                throw new IllegalBlockSizeException("AuthEnc returned null");
+            }
+            return result;
+        } else {
+            if (data.length < tagBytes) {
+                throw new BadPaddingException("Input too short for GCM tag");
+            }
+            byte[] ciphertext = new byte[data.length - tagBytes];
+            byte[] tag = new byte[tagBytes];
+            System.arraycopy(data, 0, ciphertext, 0, ciphertext.length);
+            System.arraycopy(data, ciphertext.length, tag, 0, tagBytes);
+
+            byte[] plaintext = SDFJceNative.sm4AuthDec(sessionHandle, cipherMode, key, iv,
+                    aad.length > 0 ? aad : null, tag, ciphertext);
+            if (plaintext == null) {
+                throw new AEADBadTagException("GCM authentication failed");
+            }
+            return plaintext;
+        }
+    } finally {
+        releaseSession();
+    }
+}
+```
+
+---

@@ -1,0 +1,446 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Final Report: openHiTLS/sdf4j#25</title>
+    <style>
+        :root { --critical: #dc2626; --high: #ea580c; --medium: #ca8a04; --low: #65a30d;
+                 --trusted: #059669; --likely: #0284c7; --evaluate: #7c3aed; }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: system-ui, sans-serif; background: #f8fafc; color: #1e293b; padding: 2rem; line-height: 1.6; }
+        .container { max-width: 900px; margin: 0 auto; }
+        h1 { font-size: 1.75rem; margin-bottom: 0.5rem; }
+        .subtitle { color: #64748b; margin-bottom: 1rem; }
+        .stats { display: flex; gap: 1rem; margin-bottom: 2rem; flex-wrap: wrap; }
+        .stat { background: white; border: 1px solid #e2e8f0; border-radius: 0.5rem; padding: 1rem; min-width: 100px; text-align: center; }
+        .stat-value { font-size: 1.5rem; font-weight: 700; }
+        .stat-label { font-size: 0.875rem; color: #64748b; }
+        .stat.critical .stat-value { color: var(--critical); }
+        .stat.high .stat-value { color: var(--high); }
+        .stat.medium .stat-value { color: var(--medium); }
+        .stat.low .stat-value { color: var(--low); }
+        .reviewers { background: #e0e7ff; color: #3730a3; padding: 0.5rem 1rem; border-radius: 0.5rem; margin-bottom: 2rem; }
+        .section { margin-bottom: 2rem; }
+        .section-title { font-size: 1.1rem; font-weight: 600; padding: 0.5rem 1rem; border-radius: 0.5rem 0.5rem 0 0; color: white; }
+        .section-title.critical { background: var(--critical); }
+        .section-title.high { background: var(--high); }
+        .section-title.medium { background: var(--medium); }
+        .section-title.low { background: var(--low); }
+        .issue { background: white; border: 1px solid #e2e8f0; border-top: none; padding: 1rem; }
+        .issue:last-child { border-radius: 0 0 0.5rem 0.5rem; }
+        .issue-title { font-weight: 600; margin-bottom: 0.25rem; }
+        .issue-location { font-family: monospace; font-size: 0.875rem; color: #64748b; margin-bottom: 0.5rem; }
+        .issue-meta { font-size: 0.75rem; margin-bottom: 0.75rem; display: flex; gap: 0.75rem; align-items: center; }
+        .issue-meta .reviewers { background: #f1f5f9; color: #475569; padding: 0.25rem 0.5rem; border-radius: 0.25rem; margin: 0; }
+        .confidence-badge { padding: 0.25rem 0.5rem; border-radius: 0.25rem; font-weight: 500; }
+        .confidence-badge.trusted { background: #d1fae5; color: #065f46; }
+        .confidence-badge.likely { background: #dbeafe; color: #1e40af; }
+        .confidence-badge.evaluate { background: #ede9fe; color: #5b21b6; }
+        pre { background: #1e293b; color: #e2e8f0; padding: 0.75rem; border-radius: 0.375rem; overflow-x: auto; font-size: 0.875rem; margin: 0.5rem 0; }
+        .problem { margin: 0.75rem 0; }
+        .fix-label { font-weight: 600; margin-top: 0.75rem; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Final Code Review Report</h1>
+        <div class="subtitle">openHiTLS/sdf4j - PR #25</div>
+        <p style="margin-bottom: 1rem;"></p>
+
+        <div class="stats">
+            <div class="stat"><div class="stat-value">15</div><div class="stat-label">Total</div></div>
+            <div class="stat critical"><div class="stat-value">0</div><div class="stat-label">Critical</div></div>
+            <div class="stat high"><div class="stat-value">7</div><div class="stat-label">High</div></div>
+            <div class="stat medium"><div class="stat-value">6</div><div class="stat-label">Medium</div></div>
+            <div class="stat low"><div class="stat-value">2</div><div class="stat-label">Low</div></div>
+        </div>
+
+        <div class="reviewers">Reviewers: claude, gemini, codex</div>
+<div class="section"><div class="section-title high">High</div>
+<div class="issue">
+                <div class="issue-title">Resource leak and JCE contract violation in engineSign()</div>
+                <div class="issue-location">sdf4j-jce/src/main/java/org/openhitls/sdf4j/jce/signature/SM2Signature.java:130-143</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CLAUDE, GEMINI, CODEX</span>
+                    <span class="confidence-badge trusted">置信度: 可信</span>
+                </div>
+                <pre>// Calculate Z value according to GM/T 0009-2012
+byte[] z = SM2Util.calculateZ(sessionHandle, userId, publicKey.getX(), publicKey.getY());
+
+// Calculate e = SM3(Z || M)
+byte[] e = SM2Util.calculateE(sessionHandle, z, dataBytes);
+
+// Sign the hash e (returns r||s format, 64 bytes)
+try {
+    byte[] rawSignature = SDFJceNative.sm2Sign(sessionHandle, privateKey.getKeyBytes(), e);
+    return DERCodec.rawToDer(rawSignature);
+} finally {
+    releaseSession();
+}</pre>
+                <div class="problem"><strong>Issue:</strong> Two issues: (1) The try-finally block only wraps sm2Sign(), not calculateZ() or calculateE(). If those methods throw exceptions, releaseSession() won't be called, leaking the SDF session handle. (2) After successful signing, releaseSession() sets sessionHandle to 0. The JCE Signature contract allows reuse without re-initialization, but subsequent engineSign() calls will use sessionHandle=0, causing SM2Util.calculateZ() and calculateE() to fail.</div>
+                <div class="fix-label">Fix:</div><pre>try {
+    // Calculate Z value according to GM/T 0009-2012
+    byte[] z = SM2Util.calculateZ(sessionHandle, userId, publicKey.getX(), publicKey.getY());
+    // Calculate e = SM3(Z || M)
+    byte[] e = SM2Util.calculateE(sessionHandle, z, dataBytes);
+    // Sign the hash e (returns r||s format, 64 bytes)
+    byte[] rawSignature = SDFJceNative.sm2Sign(sessionHandle, privateKey.getKeyBytes(), e);
+    return DERCodec.rawToDer(rawSignature);
+} finally {
+    releaseSession();
+}</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">Resource leak and JCE contract violation in engineVerify()</div>
+                <div class="issue-location">sdf4j-jce/src/main/java/org/openhitls/sdf4j/jce/signature/SM2Signature.java:155-169</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CLAUDE, GEMINI, CODEX</span>
+                    <span class="confidence-badge trusted">置信度: 可信</span>
+                </div>
+                <pre>// Calculate Z value according to GM/T 0009-2012
+byte[] z = SM2Util.calculateZ(sessionHandle, userId, publicKey.getX(), publicKey.getY());
+
+// Calculate e = SM3(Z || M)
+byte[] e = SM2Util.calculateE(sessionHandle, z, dataBytes);
+
+// Convert signature to raw format (r||s, 64 bytes) from DER format
+byte[] rawSignature = DERCodec.derToRaw(sigBytes);
+
+// Verify the signature (expects r||s format, 64 bytes)
+try {
+    return SDFJceNative.sm2Verify(sessionHandle, publicKey.getX(), publicKey.getY(), e, rawSignature);
+} finally {
+    releaseSession();
+}</pre>
+                <div class="problem"><strong>Issue:</strong> Two issues: (1) The try-finally block only wraps sm2Verify(). If calculateZ(), calculateE(), or derToRaw() throw exceptions, releaseSession() won't be called, leaking the SDF session handle. (2) After successful verification, sessionHandle is set to 0. Subsequent engineVerify() calls on the same Signature instance will fail with sessionHandle=0.</div>
+                <div class="fix-label">Fix:</div><pre>try {
+    // Calculate Z value according to GM/T 0009-2012
+    byte[] z = SM2Util.calculateZ(sessionHandle, userId, publicKey.getX(), publicKey.getY());
+    // Calculate e = SM3(Z || M)
+    byte[] e = SM2Util.calculateE(sessionHandle, z, dataBytes);
+    // Convert signature to raw format (r||s, 64 bytes) from DER format
+    byte[] rawSignature = DERCodec.derToRaw(sigBytes);
+    // Verify the signature (expects r||s format, 64 bytes)
+    return SDFJceNative.sm2Verify(sessionHandle, publicKey.getX(), publicKey.getY(), e, rawSignature);
+} finally {
+    releaseSession();
+}</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">JCE contract violation: Mac instance unusable after doFinal()</div>
+                <div class="issue-location">sdf4j-jce/src/main/java/org/openhitls/sdf4j/jce/mac/HmacSM3.java:92-99</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: GEMINI, CODEX</span>
+                    <span class="confidence-badge trusted">置信度: 可信</span>
+                </div>
+                <pre>@Override
+protected byte[] engineDoFinal() {
+    byte[] data = buffer.toByteArray();
+    buffer.reset();
+    try {
+        return SDFJceNative.hmacSm3(sessionHandle, key, data);
+    } finally {
+        releaseSession();
+    }
+}</pre>
+                <div class="problem"><strong>Issue:</strong> engineDoFinal() unconditionally calls releaseSession(), setting sessionHandle to 0. The JCE Mac contract allows reuse of a Mac instance after doFinal() without re-initialization (buffer is reset). Subsequent engineDoFinal() calls will invoke hmacSm3() with sessionHandle=0, causing failure.</div>
+                <div class="fix-label">Fix:</div><pre>@Override
+protected byte[] engineDoFinal() {
+    acquireSession();
+    byte[] data = buffer.toByteArray();
+    buffer.reset();
+    try {
+        return SDFJceNative.hmacSm3(sessionHandle, key, data);
+    } finally {
+        releaseSession();
+    }
+}</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">JCE contract violation: Mac instance unusable after doFinal()</div>
+                <div class="issue-location">sdf4j-jce/src/main/java/org/openhitls/sdf4j/jce/mac/SM4Mac.java:114-121</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: GEMINI, CODEX</span>
+                    <span class="confidence-badge trusted">置信度: 可信</span>
+                </div>
+                <pre>@Override
+protected byte[] engineDoFinal() {
+    byte[] data = buffer.toByteArray();
+    buffer.reset();
+    try {
+        return SDFJceNative.sm4Mac(sessionHandle, key, iv, data);
+    } finally {
+        releaseSession();
+    }
+}</pre>
+                <div class="problem"><strong>Issue:</strong> engineDoFinal() unconditionally calls releaseSession(), setting sessionHandle to 0. The JCE Mac contract allows reuse after doFinal() without re-initialization. Subsequent engineDoFinal() calls will invoke sm4Mac() with sessionHandle=0, causing failure.</div>
+                <div class="fix-label">Fix:</div><pre>@Override
+protected byte[] engineDoFinal() {
+    acquireSession();
+    byte[] data = buffer.toByteArray();
+    buffer.reset();
+    try {
+        return SDFJceNative.sm4Mac(sessionHandle, key, iv, data);
+    } finally {
+        releaseSession();
+    }
+}</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">JCE contract violation: Cipher instance unusable after doFinal()</div>
+                <div class="issue-location">sdf4j-jce/src/main/java/org/openhitls/sdf4j/jce/cipher/SM2Cipher.java:174-189</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: GEMINI, CODEX</span>
+                    <span class="confidence-badge trusted">置信度: 可信</span>
+                </div>
+                <pre>try {
+    if (opmode == Cipher.ENCRYPT_MODE || opmode == Cipher.WRAP_MODE) {
+        if (publicKey == null) {
+            throw new IllegalStateException("Public key not set");
+        }
+        // Native layer outputs GM/T format: 0x04 || C1 || C3 || C2
+        return SDFJceNative.sm2Encrypt(sessionHandle, publicKey.getX(), publicKey.getY(), data);
+    } else {
+        if (privateKey == null) {
+            throw new IllegalStateException("Private key not set");
+        }
+        // Native layer expects GM/T format: 0x04 || C1 || C3 || C2
+        return SDFJceNative.sm2Decrypt(sessionHandle, privateKey.getKeyBytes(), data);
+    }
+} finally {
+    releaseSession();
+}</pre>
+                <div class="problem"><strong>Issue:</strong> engineDoFinal() calls releaseSession() in the finally block, setting sessionHandle to 0. The JCE Cipher contract allows reusing an initialized cipher instance for multiple operations. Subsequent doFinal() calls will invoke sm2Encrypt() or sm2Decrypt() with sessionHandle=0, causing failure.</div>
+                <div class="fix-label">Fix:</div><pre>acquireSession();
+try {
+    if (opmode == Cipher.ENCRYPT_MODE || opmode == Cipher.WRAP_MODE) {
+        if (publicKey == null) {
+            throw new IllegalStateException("Public key not set");
+        }
+        return SDFJceNative.sm2Encrypt(sessionHandle, publicKey.getX(), publicKey.getY(), data);
+    } else {
+        if (privateKey == null) {
+            throw new IllegalStateException("Private key not set");
+        }
+        return SDFJceNative.sm2Decrypt(sessionHandle, privateKey.getKeyBytes(), data);
+    }
+} finally {
+    releaseSession();
+}</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">JCE contract violation: AEAD cipher unusable after doFinal()</div>
+                <div class="issue-location">sdf4j-jce/src/main/java/org/openhitls/sdf4j/jce/cipher/SM4Cipher.java:377-407</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: GEMINI, CODEX</span>
+                    <span class="confidence-badge trusted">置信度: 可信</span>
+                </div>
+                <pre>try {
+    if (opmode == Cipher.ENCRYPT_MODE || opmode == Cipher.WRAP_MODE) {
+        if (data.length == 0) {
+            throw new IllegalBlockSizeException("SM4 GCM/CCM does not support empty plaintext");
+        }
+        // sm4AuthEnc returns ciphertext || tag directly
+        byte[] result = SDFJceNative.sm4AuthEnc(sessionHandle, cipherMode, key, iv,
+                aad.length &gt; 0 ? aad : null, data);
+        if (result == null) {
+            throw new IllegalBlockSizeException("AuthEnc returned null");
+        }
+        return result;
+    } else {
+        // Decrypt: input is ciphertext || tag
+        if (data.length &lt; tagBytes) {
+            throw new BadPaddingException("Input too short for GCM tag");
+        }
+        byte[] ciphertext = new byte[data.length - tagBytes];
+        byte[] tag = new byte[tagBytes];
+        System.arraycopy(data, 0, ciphertext, 0, ciphertext.length);
+        System.arraycopy(data, ciphertext.length, tag, 0, tagBytes);
+
+        byte[] plaintext = SDFJceNative.sm4AuthDec(sessionHandle, cipherMode, key, iv,
+                aad.length &gt; 0 ? aad : null, tag, ciphertext);
+        if (plaintext == null) {
+            throw new AEADBadTagException("GCM authentication failed");
+        }
+        return plaintext;
+    }
+} finally {
+    releaseSession();
+}</pre>
+                <div class="problem"><strong>Issue:</strong> doFinalAead() calls releaseSession() in the finally block. For GCM/CCM modes, acquireSession() is only called in engineInit(). After the first doFinal(), subsequent operations will use sessionHandle=0, causing sm4AuthEnc() or sm4AuthDec() to fail.</div>
+                <div class="fix-label">Fix:</div><pre>acquireSession();
+try {
+    if (opmode == Cipher.ENCRYPT_MODE || opmode == Cipher.WRAP_MODE) {
+        if (data.length == 0) {
+            throw new IllegalBlockSizeException("SM4 GCM/CCM does not support empty plaintext");
+        }
+        byte[] result = SDFJceNative.sm4AuthEnc(sessionHandle, cipherMode, key, iv,
+                aad.length &gt; 0 ? aad : null, data);
+        if (result == null) {
+            throw new IllegalBlockSizeException("AuthEnc returned null");
+        }
+        return result;
+    } else {
+        if (data.length &lt; tagBytes) {
+            throw new BadPaddingException("Input too short for GCM tag");
+        }
+        byte[] ciphertext = new byte[data.length - tagBytes];
+        byte[] tag = new byte[tagBytes];
+        System.arraycopy(data, 0, ciphertext, 0, ciphertext.length);
+        System.arraycopy(data, ciphertext.length, tag, 0, tagBytes);
+
+        byte[] plaintext = SDFJceNative.sm4AuthDec(sessionHandle, cipherMode, key, iv,
+                aad.length &gt; 0 ? aad : null, tag, ciphertext);
+        if (plaintext == null) {
+            throw new AEADBadTagException("GCM authentication failed");
+        }
+        return plaintext;
+    }
+} finally {
+    releaseSession();
+}</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">JCE contract violation: MessageDigest unusable after digest()</div>
+                <div class="issue-location">sdf4j-jce/src/main/java/org/openhitls/sdf4j/jce/digest/SM3MessageDigest.java:88-103</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: GEMINI, CODEX</span>
+                    <span class="confidence-badge likely">置信度: 较可信</span>
+                </div>
+                <pre>@Override
+protected byte[] engineDigest() {
+    try {
+        if (!initialized) {
+            // Empty input: need a session for the one-shot call
+            acquireSession();
+            return SDFJceNative.sm3Digest(sessionHandle, new byte[0]);
+        }
+        byte[] result = SDFJceNative.sm3Final(ctx);
+        SDFJceNative.sm3Free(ctx);
+        ctx = 0;
+        initialized = false;
+        return result;
+    } finally {
+        releaseSession();
+    }
+}</pre>
+                <div class="problem"><strong>Issue:</strong> engineDigest() calls releaseSession() in the finally block. After the first digest() call, the sessionHandle is set to 0. Subsequent digest() calls will fail when trying to use the session. The MessageDigest SPI allows reuse after digest().</div>
+                <div class="fix-label">Fix:</div><pre>@Override
+protected byte[] engineDigest() {
+    acquireSession();
+    try {
+        if (!initialized) {
+            return SDFJceNative.sm3Digest(sessionHandle, new byte[0]);
+        }
+        byte[] result = SDFJceNative.sm3Final(ctx);
+        SDFJceNative.sm3Free(ctx);
+        ctx = 0;
+        initialized = false;
+        return result;
+    } finally {
+        releaseSession();
+    }
+}</pre>
+            </div>
+</div>
+<div class="section"><div class="section-title medium">Medium</div>
+<div class="issue">
+                <div class="issue-title">Missing volatile on sessionHandle for thread safety</div>
+                <div class="issue-location">sdf4j-jce/src/main/java/org/openhitls/sdf4j/jce/cipher/SM4Cipher.java:49</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CLAUDE</span>
+                    <span class="confidence-badge evaluate">置信度: 需评估</span>
+                </div>
+                <pre>protected long sessionHandle;</pre>
+                <div class="problem"><strong>Issue:</strong> sessionHandle is accessed from multiple methods (acquireSession, releaseSession, doFinal) without proper synchronization. While JCE Cipher objects are not required to be thread-safe, the lack of volatile can cause memory visibility issues between constructor and other methods, especially in concurrent scenarios where the object might be shared improperly.</div>
+                <div class="fix-label">Fix:</div><pre>protected volatile long sessionHandle;</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">Missing volatile on sessionHandle for thread safety</div>
+                <div class="issue-location">sdf4j-jce/src/main/java/org/openhitls/sdf4j/jce/signature/SM2Signature.java:43</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CLAUDE</span>
+                    <span class="confidence-badge evaluate">置信度: 需评估</span>
+                </div>
+                <pre>private long sessionHandle;</pre>
+                <div class="problem"><strong>Issue:</strong> sessionHandle should be volatile for proper memory visibility between constructor, acquireSession(), and releaseSession().</div>
+                <div class="fix-label">Fix:</div><pre>private volatile long sessionHandle;</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">Missing volatile on sessionHandle for thread safety</div>
+                <div class="issue-location">sdf4j-jce/src/main/java/org/openhitls/sdf4j/jce/mac/HmacSM3.java:31</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CLAUDE</span>
+                    <span class="confidence-badge evaluate">置信度: 需评估</span>
+                </div>
+                <pre>private long sessionHandle;</pre>
+                <div class="problem"><strong>Issue:</strong> sessionHandle should be volatile for proper memory visibility.</div>
+                <div class="fix-label">Fix:</div><pre>private volatile long sessionHandle;</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">Missing volatile on sessionHandle for thread safety</div>
+                <div class="issue-location">sdf4j-jce/src/main/java/org/openhitls/sdf4j/jce/mac/SM4Mac.java:34</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CLAUDE</span>
+                    <span class="confidence-badge evaluate">置信度: 需评估</span>
+                </div>
+                <pre>private long sessionHandle;</pre>
+                <div class="problem"><strong>Issue:</strong> sessionHandle should be volatile for proper memory visibility.</div>
+                <div class="fix-label">Fix:</div><pre>private volatile long sessionHandle;</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">Missing volatile on sessionHandle for thread safety</div>
+                <div class="issue-location">sdf4j-jce/src/main/java/org/openhitls/sdf4j/jce/digest/SM3MessageDigest.java:26</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CLAUDE</span>
+                    <span class="confidence-badge evaluate">置信度: 需评估</span>
+                </div>
+                <pre>private long sessionHandle;</pre>
+                <div class="problem"><strong>Issue:</strong> sessionHandle should be volatile for proper memory visibility between constructor and other methods.</div>
+                <div class="fix-label">Fix:</div><pre>private volatile long sessionHandle;</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">Missing volatile on sessionHandle for thread safety</div>
+                <div class="issue-location">sdf4j-jce/src/main/java/org/openhitls/sdf4j/jce/cipher/SM2Cipher.java:38</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CLAUDE</span>
+                    <span class="confidence-badge evaluate">置信度: 需评估</span>
+                </div>
+                <pre>private long sessionHandle;</pre>
+                <div class="problem"><strong>Issue:</strong> sessionHandle should be volatile for proper memory visibility between constructor and other methods.</div>
+                <div class="fix-label">Fix:</div><pre>private volatile long sessionHandle;</pre>
+            </div>
+</div>
+<div class="section"><div class="section-title low">Low</div>
+<div class="issue">
+                <div class="issue-title">Missing null check on bytes parameter</div>
+                <div class="issue-location">sdf4j-jce/src/main/java/org/openhitls/sdf4j/jce/random/SDFSecureRandom.java:40-48</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CLAUDE</span>
+                    <span class="confidence-badge evaluate">置信度: 需评估</span>
+                </div>
+                <pre>if (bytes == null || bytes.length == 0) {
+    return;
+}
+byte[] random = SDFJceNative.generateRandom(sessionHandle, bytes.length);
+if (random == null) {
+    throw new IllegalStateException("Failed to generate random bytes: native call returned null");
+}
+System.arraycopy(random, 0, bytes, 0, bytes.length);</pre>
+                <div class="problem"><strong>Issue:</strong> The null check on line 41-43 checks `bytes == null` but the check `bytes.length == 0` in the same condition could potentially throw NPE if bytes is null. However, looking at the actual code flow, the check `bytes == null || bytes.length == 0` uses short-circuit evaluation, so if bytes is null, bytes.length is never evaluated. This is actually a false positive - the code is correct.</div>
+                
+            </div>
+<div class="issue">
+                <div class="issue-title">Deprecated Maven javadoc parameter</div>
+                <div class="issue-location">script/build_with_simulator.sh:68</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CLAUDE</span>
+                    <span class="confidence-badge trusted">置信度: 可信</span>
+                </div>
+                <pre>mvn javadoc:javadoc -pl sdf4j -Dadditionalparam=-Xwerror || exit 1</pre>
+                <div class="problem"><strong>Issue:</strong> The -Dadditionalparam flag is deprecated in Maven Javadoc Plugin 3.0+. Use -DadditionalOptions instead for forward compatibility.</div>
+                <div class="fix-label">Fix:</div><pre>mvn javadoc:javadoc -pl sdf4j -DadditionalOptions=-Xwerror || exit 1</pre>
+            </div>
+</div>
+</div></body></html>

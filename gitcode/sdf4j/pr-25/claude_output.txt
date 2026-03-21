@@ -1,0 +1,219 @@
+Now I have a comprehensive understanding of the changes. Let me identify and output the issues found:
+
+===ISSUE===
+FILE: sdf4j-jce/src/main/java/org/openhitls/sdf4j/jce/signature/SM2Signature.java
+LINE: 130-143
+SEVERITY: high
+TITLE: Resource leak in engineSign() when pre-sign operations fail
+PROBLEM: The try-finally block only wraps the sm2Sign() call. If calculateZ() or calculateE() throw exceptions (lines 131, 134), releaseSession() will not be called, leaking the SDF session handle.
+CODE:
+```
+// Calculate Z value according to GM/T 0009-2012
+byte[] z = SM2Util.calculateZ(sessionHandle, userId, publicKey.getX(), publicKey.getY());
+
+// Calculate e = SM3(Z || M)
+byte[] e = SM2Util.calculateE(sessionHandle, z, dataBytes);
+
+// Sign the hash e (returns r||s format, 64 bytes)
+try {
+    byte[] rawSignature = SDFJceNative.sm2Sign(sessionHandle, privateKey.getKeyBytes(), e);
+    return DERCodec.rawToDer(rawSignature);
+} finally {
+    releaseSession();
+}
+```
+FIX:
+```
+// Calculate Z value according to GM/T 0009-2012
+// Calculate e = SM3(Z || M)
+// Sign the hash e (returns r||s format, 64 bytes)
+try {
+    byte[] z = SM2Util.calculateZ(sessionHandle, userId, publicKey.getX(), publicKey.getY());
+    byte[] e = SM2Util.calculateE(sessionHandle, z, dataBytes);
+    byte[] rawSignature = SDFJceNative.sm2Sign(sessionHandle, privateKey.getKeyBytes(), e);
+    return DERCodec.rawToDer(rawSignature);
+} finally {
+    releaseSession();
+}
+```
+===END===
+
+===ISSUE===
+FILE: sdf4j-jce/src/main/java/org/openhitls/sdf4j/jce/signature/SM2Signature.java
+LINE: 155-169
+SEVERITY: high
+TITLE: Resource leak in engineVerify() when pre-verify operations fail
+PROBLEM: The try-finally block only wraps the sm2Verify() call. If calculateZ() (line 156), calculateE() (line 159), or derToRaw() (line 162) throw exceptions, releaseSession() will not be called, leaking the SDF session handle.
+CODE:
+```
+// Calculate Z value according to GM/T 0009-2012
+byte[] z = SM2Util.calculateZ(sessionHandle, userId, publicKey.getX(), publicKey.getY());
+
+// Calculate e = SM3(Z || M)
+byte[] e = SM2Util.calculateE(sessionHandle, z, dataBytes);
+
+// Convert signature to raw format (r||s, 64 bytes) from DER format
+byte[] rawSignature = DERCodec.derToRaw(sigBytes);
+
+// Verify the signature (expects r||s format, 64 bytes)
+try {
+    return SDFJceNative.sm2Verify(sessionHandle, publicKey.getX(), publicKey.getY(), e, rawSignature);
+} finally {
+    releaseSession();
+}
+```
+FIX:
+```
+try {
+    // Calculate Z value according to GM/T 0009-2012
+    byte[] z = SM2Util.calculateZ(sessionHandle, userId, publicKey.getX(), publicKey.getY());
+    // Calculate e = SM3(Z || M)
+    byte[] e = SM2Util.calculateE(sessionHandle, z, dataBytes);
+    // Convert signature to raw format (r||s, 64 bytes) from DER format
+    byte[] rawSignature = DERCodec.derToRaw(sigBytes);
+    // Verify the signature (expects r||s format, 64 bytes)
+    return SDFJceNative.sm2Verify(sessionHandle, publicKey.getX(), publicKey.getY(), e, rawSignature);
+} finally {
+    releaseSession();
+}
+```
+===END===
+
+===ISSUE===
+FILE: sdf4j-jce/src/main/java/org/openhitls/sdf4j/jce/cipher/SM4Cipher.java
+LINE: 49
+SEVERITY: medium
+TITLE: Missing volatile on sessionHandle for thread safety
+PROBLEM: sessionHandle is accessed from multiple methods (acquireSession, releaseSession, doFinal) without proper synchronization. While JCE Cipher objects are not required to be thread-safe, the lack of volatile can cause memory visibility issues between constructor and other methods, especially in concurrent scenarios where the object might be shared improperly.
+CODE:
+```
+protected long sessionHandle;
+```
+FIX:
+```
+protected volatile long sessionHandle;
+```
+===END===
+
+===ISSUE===
+FILE: sdf4j-jce/src/main/java/org/openhitls/sdf4j/jce/signature/SM2Signature.java
+LINE: 44
+SEVERITY: medium
+TITLE: Missing volatile on sessionHandle for thread safety
+PROBLEM: Same as SM4Cipher - sessionHandle should be volatile for proper memory visibility between constructor, acquireSession(), and releaseSession().
+CODE:
+```
+private long sessionHandle;
+```
+FIX:
+```
+private volatile long sessionHandle;
+```
+===END===
+
+===ISSUE===
+FILE: sdf4j-jce/src/main/java/org/openhitls/sdf4j/jce/mac/HmacSM3.java
+LINE: 33
+SEVERITY: medium
+TITLE: Missing volatile on sessionHandle for thread safety
+PROBLEM: Same as SM4Cipher - sessionHandle should be volatile for proper memory visibility.
+CODE:
+```
+private long sessionHandle;
+```
+FIX:
+```
+private volatile long sessionHandle;
+```
+===END===
+
+===ISSUE===
+FILE: sdf4j-jce/src/main/java/org/openhitls/sdf4j/jce/mac/SM4Mac.java
+LINE: 36
+SEVERITY: medium
+TITLE: Missing volatile on sessionHandle for thread safety
+PROBLEM: Same as SM4Cipher - sessionHandle should be volatile for proper memory visibility.
+CODE:
+```
+private long sessionHandle;
+```
+FIX:
+```
+private volatile long sessionHandle;
+```
+===END===
+
+===ISSUE===
+FILE: sdf4j-jce/src/main/java/org/openhitls/sdf4j/jce/digest/SM3MessageDigest.java
+LINE: 27
+SEVERITY: medium
+TITLE: Missing volatile on sessionHandle for thread safety
+PROBLEM: Same as SM4Cipher - sessionHandle should be volatile for proper memory visibility.
+CODE:
+```
+private long sessionHandle;
+```
+FIX:
+```
+private volatile long sessionHandle;
+```
+===END===
+
+===ISSUE===
+FILE: sdf4j-jce/src/main/java/org/openhitls/sdf4j/jce/cipher/SM2Cipher.java
+LINE: 39
+SEVERITY: medium
+TITLE: Missing volatile on sessionHandle for thread safety
+PROBLEM: Same as SM4Cipher - sessionHandle should be volatile for proper memory visibility.
+CODE:
+```
+private long sessionHandle;
+```
+FIX:
+```
+private volatile long sessionHandle;
+```
+===END===
+
+===ISSUE===
+FILE: sdf4j-jce/src/main/java/org/openhitls/sdf4j/jce/random/SDFSecureRandom.java
+LINE: 43-50
+SEVERITY: medium
+TITLE: Missing null check on random byte array before use
+PROBLEM: The null check is done on 'bytes' but SDFJceNative.generateRandom could return null, which would cause NullPointerException in System.arraycopy.
+CODE:
+```
+byte[] random = SDFJceNative.generateRandom(sessionHandle, bytes.length);
+if (random == null) {
+    throw new IllegalStateException("Failed to generate random bytes: native call returned null");
+}
+System.arraycopy(random, 0, bytes, 0, bytes.length);
+```
+FIX:
+```
+if (bytes == null) {
+    return;
+}
+byte[] random = SDFJceNative.generateRandom(sessionHandle, bytes.length);
+if (random == null) {
+    throw new IllegalStateException("Failed to generate random bytes: native call returned null");
+}
+System.arraycopy(random, 0, bytes, 0, bytes.length);
+```
+===END===
+
+===ISSUE===
+FILE: script/build_with_simulator.sh
+LINE: 68
+SEVERITY: low
+TITLE: Deprecated Maven javadoc parameter
+PROBLEM: The -Dadditionalparam flag is deprecated in Maven Javadoc Plugin 3.0+. Use -DadditionalOptions instead for forward compatibility.
+CODE:
+```
+mvn javadoc:javadoc -pl sdf4j -Dadditionalparam=-Xwerror || exit 1
+```
+FIX:
+```
+mvn javadoc:javadoc -pl sdf4j -DadditionalOptions=-Xwerror || exit 1
+```
+===END===

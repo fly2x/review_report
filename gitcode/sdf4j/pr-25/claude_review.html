@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Code Review: openHiTLS/sdf4j#25 - CLAUDE</title>
+    <style>
+        :root { --critical: #dc2626; --high: #ea580c; --medium: #ca8a04; --low: #65a30d; }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: system-ui, sans-serif; background: #f8fafc; color: #1e293b; padding: 2rem; line-height: 1.6; }
+        .container { max-width: 900px; margin: 0 auto; }
+        h1 { font-size: 1.5rem; margin-bottom: 0.5rem; }
+        .subtitle { color: #64748b; margin-bottom: 2rem; }
+        .section { margin-bottom: 2rem; }
+        .section-title { font-size: 1.1rem; font-weight: 600; padding: 0.5rem 1rem; border-radius: 0.5rem 0.5rem 0 0; color: white; }
+        .section-title.critical { background: var(--critical); }
+        .section-title.high { background: var(--high); }
+        .section-title.medium { background: var(--medium); }
+        .section-title.low { background: var(--low); }
+        .issue { background: white; border: 1px solid #e2e8f0; border-top: none; padding: 1rem; }
+        .issue:last-child { border-radius: 0 0 0.5rem 0.5rem; }
+        .issue-title { font-weight: 600; margin-bottom: 0.25rem; }
+        .issue-location { font-family: monospace; font-size: 0.875rem; color: #64748b; margin-bottom: 0.75rem; }
+        .issue-source { font-size: 0.75rem; color: #94a3b8; margin-top: 0.5rem; }
+        pre { background: #1e293b; color: #e2e8f0; padding: 0.75rem; border-radius: 0.375rem; overflow-x: auto; font-size: 0.875rem; margin: 0.5rem 0; }
+        .problem { margin: 0.75rem 0; }
+        .fix-label { font-weight: 600; margin-top: 0.75rem; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Code Review: openHiTLS/sdf4j#25 - CLAUDE</h1>
+        <div class="subtitle"></div>
+<div class="section"><div class="section-title high">High</div>
+<div class="issue">
+                <div class="issue-title">Resource leak in engineSign() when pre-sign operations fail</div>
+                <div class="issue-location">sdf4j-jce/src/main/java/org/openhitls/sdf4j/jce/signature/SM2Signature.java:130-143</div>
+                <pre>// Calculate Z value according to GM/T 0009-2012
+byte[] z = SM2Util.calculateZ(sessionHandle, userId, publicKey.getX(), publicKey.getY());
+
+// Calculate e = SM3(Z || M)
+byte[] e = SM2Util.calculateE(sessionHandle, z, dataBytes);
+
+// Sign the hash e (returns r||s format, 64 bytes)
+try {
+    byte[] rawSignature = SDFJceNative.sm2Sign(sessionHandle, privateKey.getKeyBytes(), e);
+    return DERCodec.rawToDer(rawSignature);
+} finally {
+    releaseSession();
+}</pre>
+                <div class="problem"><strong>Issue:</strong> The try-finally block only wraps the sm2Sign() call. If calculateZ() or calculateE() throw exceptions (lines 131, 134), releaseSession() will not be called, leaking the SDF session handle.</div>
+                <div class="fix-label">Fix:</div><pre>// Calculate Z value according to GM/T 0009-2012
+// Calculate e = SM3(Z || M)
+// Sign the hash e (returns r||s format, 64 bytes)
+try {
+    byte[] z = SM2Util.calculateZ(sessionHandle, userId, publicKey.getX(), publicKey.getY());
+    byte[] e = SM2Util.calculateE(sessionHandle, z, dataBytes);
+    byte[] rawSignature = SDFJceNative.sm2Sign(sessionHandle, privateKey.getKeyBytes(), e);
+    return DERCodec.rawToDer(rawSignature);
+} finally {
+    releaseSession();
+}</pre>
+                <div class="issue-source">Reviewer: claude</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">Resource leak in engineVerify() when pre-verify operations fail</div>
+                <div class="issue-location">sdf4j-jce/src/main/java/org/openhitls/sdf4j/jce/signature/SM2Signature.java:155-169</div>
+                <pre>// Calculate Z value according to GM/T 0009-2012
+byte[] z = SM2Util.calculateZ(sessionHandle, userId, publicKey.getX(), publicKey.getY());
+
+// Calculate e = SM3(Z || M)
+byte[] e = SM2Util.calculateE(sessionHandle, z, dataBytes);
+
+// Convert signature to raw format (r||s, 64 bytes) from DER format
+byte[] rawSignature = DERCodec.derToRaw(sigBytes);
+
+// Verify the signature (expects r||s format, 64 bytes)
+try {
+    return SDFJceNative.sm2Verify(sessionHandle, publicKey.getX(), publicKey.getY(), e, rawSignature);
+} finally {
+    releaseSession();
+}</pre>
+                <div class="problem"><strong>Issue:</strong> The try-finally block only wraps the sm2Verify() call. If calculateZ() (line 156), calculateE() (line 159), or derToRaw() (line 162) throw exceptions, releaseSession() will not be called, leaking the SDF session handle.</div>
+                <div class="fix-label">Fix:</div><pre>try {
+    // Calculate Z value according to GM/T 0009-2012
+    byte[] z = SM2Util.calculateZ(sessionHandle, userId, publicKey.getX(), publicKey.getY());
+    // Calculate e = SM3(Z || M)
+    byte[] e = SM2Util.calculateE(sessionHandle, z, dataBytes);
+    // Convert signature to raw format (r||s, 64 bytes) from DER format
+    byte[] rawSignature = DERCodec.derToRaw(sigBytes);
+    // Verify the signature (expects r||s format, 64 bytes)
+    return SDFJceNative.sm2Verify(sessionHandle, publicKey.getX(), publicKey.getY(), e, rawSignature);
+} finally {
+    releaseSession();
+}</pre>
+                <div class="issue-source">Reviewer: claude</div>
+            </div>
+</div>
+<div class="section"><div class="section-title medium">Medium</div>
+<div class="issue">
+                <div class="issue-title">Missing volatile on sessionHandle for thread safety</div>
+                <div class="issue-location">sdf4j-jce/src/main/java/org/openhitls/sdf4j/jce/cipher/SM4Cipher.java:49</div>
+                <pre>protected long sessionHandle;</pre>
+                <div class="problem"><strong>Issue:</strong> sessionHandle is accessed from multiple methods (acquireSession, releaseSession, doFinal) without proper synchronization. While JCE Cipher objects are not required to be thread-safe, the lack of volatile can cause memory visibility issues between constructor and other methods, especially in concurrent scenarios where the object might be shared improperly.</div>
+                <div class="fix-label">Fix:</div><pre>protected volatile long sessionHandle;</pre>
+                <div class="issue-source">Reviewer: claude</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">Missing volatile on sessionHandle for thread safety</div>
+                <div class="issue-location">sdf4j-jce/src/main/java/org/openhitls/sdf4j/jce/signature/SM2Signature.java:44</div>
+                <pre>private long sessionHandle;</pre>
+                <div class="problem"><strong>Issue:</strong> Same as SM4Cipher - sessionHandle should be volatile for proper memory visibility between constructor, acquireSession(), and releaseSession().</div>
+                <div class="fix-label">Fix:</div><pre>private volatile long sessionHandle;</pre>
+                <div class="issue-source">Reviewer: claude</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">Missing volatile on sessionHandle for thread safety</div>
+                <div class="issue-location">sdf4j-jce/src/main/java/org/openhitls/sdf4j/jce/mac/HmacSM3.java:33</div>
+                <pre>private long sessionHandle;</pre>
+                <div class="problem"><strong>Issue:</strong> Same as SM4Cipher - sessionHandle should be volatile for proper memory visibility.</div>
+                <div class="fix-label">Fix:</div><pre>private volatile long sessionHandle;</pre>
+                <div class="issue-source">Reviewer: claude</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">Missing volatile on sessionHandle for thread safety</div>
+                <div class="issue-location">sdf4j-jce/src/main/java/org/openhitls/sdf4j/jce/mac/SM4Mac.java:36</div>
+                <pre>private long sessionHandle;</pre>
+                <div class="problem"><strong>Issue:</strong> Same as SM4Cipher - sessionHandle should be volatile for proper memory visibility.</div>
+                <div class="fix-label">Fix:</div><pre>private volatile long sessionHandle;</pre>
+                <div class="issue-source">Reviewer: claude</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">Missing volatile on sessionHandle for thread safety</div>
+                <div class="issue-location">sdf4j-jce/src/main/java/org/openhitls/sdf4j/jce/digest/SM3MessageDigest.java:27</div>
+                <pre>private long sessionHandle;</pre>
+                <div class="problem"><strong>Issue:</strong> Same as SM4Cipher - sessionHandle should be volatile for proper memory visibility.</div>
+                <div class="fix-label">Fix:</div><pre>private volatile long sessionHandle;</pre>
+                <div class="issue-source">Reviewer: claude</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">Missing volatile on sessionHandle for thread safety</div>
+                <div class="issue-location">sdf4j-jce/src/main/java/org/openhitls/sdf4j/jce/cipher/SM2Cipher.java:39</div>
+                <pre>private long sessionHandle;</pre>
+                <div class="problem"><strong>Issue:</strong> Same as SM4Cipher - sessionHandle should be volatile for proper memory visibility.</div>
+                <div class="fix-label">Fix:</div><pre>private volatile long sessionHandle;</pre>
+                <div class="issue-source">Reviewer: claude</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">Missing null check on random byte array before use</div>
+                <div class="issue-location">sdf4j-jce/src/main/java/org/openhitls/sdf4j/jce/random/SDFSecureRandom.java:43-50</div>
+                <pre>byte[] random = SDFJceNative.generateRandom(sessionHandle, bytes.length);
+if (random == null) {
+    throw new IllegalStateException("Failed to generate random bytes: native call returned null");
+}
+System.arraycopy(random, 0, bytes, 0, bytes.length);</pre>
+                <div class="problem"><strong>Issue:</strong> The null check is done on 'bytes' but SDFJceNative.generateRandom could return null, which would cause NullPointerException in System.arraycopy.</div>
+                <div class="fix-label">Fix:</div><pre>if (bytes == null) {
+    return;
+}
+byte[] random = SDFJceNative.generateRandom(sessionHandle, bytes.length);
+if (random == null) {
+    throw new IllegalStateException("Failed to generate random bytes: native call returned null");
+}
+System.arraycopy(random, 0, bytes, 0, bytes.length);</pre>
+                <div class="issue-source">Reviewer: claude</div>
+            </div>
+</div>
+<div class="section"><div class="section-title low">Low</div>
+<div class="issue">
+                <div class="issue-title">Deprecated Maven javadoc parameter</div>
+                <div class="issue-location">script/build_with_simulator.sh:68</div>
+                <pre>mvn javadoc:javadoc -pl sdf4j -Dadditionalparam=-Xwerror || exit 1</pre>
+                <div class="problem"><strong>Issue:</strong> The -Dadditionalparam flag is deprecated in Maven Javadoc Plugin 3.0+. Use -DadditionalOptions instead for forward compatibility.</div>
+                <div class="fix-label">Fix:</div><pre>mvn javadoc:javadoc -pl sdf4j -DadditionalOptions=-Xwerror || exit 1</pre>
+                <div class="issue-source">Reviewer: claude</div>
+            </div>
+</div>
+</div></body></html>

@@ -1,0 +1,483 @@
+Now I have all the information needed to consolidate the findings. Let me analyze and output each validated issue.
+
+===ISSUE===
+FILE: sdf4j-jce/src/main/java/org/openhitls/sdf4j/jce/signature/SM2Signature.java
+LINE: 130-143
+SEVERITY: high
+TITLE: Resource leak and JCE contract violation in engineSign()
+REVIEWERS: CLAUDE, GEMINI, CODEX
+CONFIDENCE: trusted
+PROBLEM: Two issues: (1) The try-finally block only wraps sm2Sign(), not calculateZ() or calculateE(). If those methods throw exceptions, releaseSession() won't be called, leaking the SDF session handle. (2) After successful signing, releaseSession() sets sessionHandle to 0. The JCE Signature contract allows reuse without re-initialization, but subsequent engineSign() calls will use sessionHandle=0, causing SM2Util.calculateZ() and calculateE() to fail.
+CODE:
+```
+// Calculate Z value according to GM/T 0009-2012
+byte[] z = SM2Util.calculateZ(sessionHandle, userId, publicKey.getX(), publicKey.getY());
+
+// Calculate e = SM3(Z || M)
+byte[] e = SM2Util.calculateE(sessionHandle, z, dataBytes);
+
+// Sign the hash e (returns r||s format, 64 bytes)
+try {
+    byte[] rawSignature = SDFJceNative.sm2Sign(sessionHandle, privateKey.getKeyBytes(), e);
+    return DERCodec.rawToDer(rawSignature);
+} finally {
+    releaseSession();
+}
+```
+FIX:
+```
+try {
+    // Calculate Z value according to GM/T 0009-2012
+    byte[] z = SM2Util.calculateZ(sessionHandle, userId, publicKey.getX(), publicKey.getY());
+    // Calculate e = SM3(Z || M)
+    byte[] e = SM2Util.calculateE(sessionHandle, z, dataBytes);
+    // Sign the hash e (returns r||s format, 64 bytes)
+    byte[] rawSignature = SDFJceNative.sm2Sign(sessionHandle, privateKey.getKeyBytes(), e);
+    return DERCodec.rawToDer(rawSignature);
+} finally {
+    releaseSession();
+}
+```
+===END===
+
+===ISSUE===
+FILE: sdf4j-jce/src/main/java/org/openhitls/sdf4j/jce/signature/SM2Signature.java
+LINE: 155-169
+SEVERITY: high
+TITLE: Resource leak and JCE contract violation in engineVerify()
+REVIEWERS: CLAUDE, GEMINI, CODEX
+CONFIDENCE: trusted
+PROBLEM: Two issues: (1) The try-finally block only wraps sm2Verify(). If calculateZ(), calculateE(), or derToRaw() throw exceptions, releaseSession() won't be called, leaking the SDF session handle. (2) After successful verification, sessionHandle is set to 0. Subsequent engineVerify() calls on the same Signature instance will fail with sessionHandle=0.
+CODE:
+```
+// Calculate Z value according to GM/T 0009-2012
+byte[] z = SM2Util.calculateZ(sessionHandle, userId, publicKey.getX(), publicKey.getY());
+
+// Calculate e = SM3(Z || M)
+byte[] e = SM2Util.calculateE(sessionHandle, z, dataBytes);
+
+// Convert signature to raw format (r||s, 64 bytes) from DER format
+byte[] rawSignature = DERCodec.derToRaw(sigBytes);
+
+// Verify the signature (expects r||s format, 64 bytes)
+try {
+    return SDFJceNative.sm2Verify(sessionHandle, publicKey.getX(), publicKey.getY(), e, rawSignature);
+} finally {
+    releaseSession();
+}
+```
+FIX:
+```
+try {
+    // Calculate Z value according to GM/T 0009-2012
+    byte[] z = SM2Util.calculateZ(sessionHandle, userId, publicKey.getX(), publicKey.getY());
+    // Calculate e = SM3(Z || M)
+    byte[] e = SM2Util.calculateE(sessionHandle, z, dataBytes);
+    // Convert signature to raw format (r||s, 64 bytes) from DER format
+    byte[] rawSignature = DERCodec.derToRaw(sigBytes);
+    // Verify the signature (expects r||s format, 64 bytes)
+    return SDFJceNative.sm2Verify(sessionHandle, publicKey.getX(), publicKey.getY(), e, rawSignature);
+} finally {
+    releaseSession();
+}
+```
+===END===
+
+===ISSUE===
+FILE: sdf4j-jce/src/main/java/org/openhitls/sdf4j/jce/mac/HmacSM3.java
+LINE: 92-99
+SEVERITY: high
+TITLE: JCE contract violation: Mac instance unusable after doFinal()
+REVIEWERS: GEMINI, CODEX
+CONFIDENCE: trusted
+PROBLEM: engineDoFinal() unconditionally calls releaseSession(), setting sessionHandle to 0. The JCE Mac contract allows reuse of a Mac instance after doFinal() without re-initialization (buffer is reset). Subsequent engineDoFinal() calls will invoke hmacSm3() with sessionHandle=0, causing failure.
+CODE:
+```
+@Override
+protected byte[] engineDoFinal() {
+    byte[] data = buffer.toByteArray();
+    buffer.reset();
+    try {
+        return SDFJceNative.hmacSm3(sessionHandle, key, data);
+    } finally {
+        releaseSession();
+    }
+}
+```
+FIX:
+```
+@Override
+protected byte[] engineDoFinal() {
+    acquireSession();
+    byte[] data = buffer.toByteArray();
+    buffer.reset();
+    try {
+        return SDFJceNative.hmacSm3(sessionHandle, key, data);
+    } finally {
+        releaseSession();
+    }
+}
+```
+===END===
+
+===ISSUE===
+FILE: sdf4j-jce/src/main/java/org/openhitls/sdf4j/jce/mac/SM4Mac.java
+LINE: 114-121
+SEVERITY: high
+TITLE: JCE contract violation: Mac instance unusable after doFinal()
+REVIEWERS: GEMINI, CODEX
+CONFIDENCE: trusted
+PROBLEM: engineDoFinal() unconditionally calls releaseSession(), setting sessionHandle to 0. The JCE Mac contract allows reuse after doFinal() without re-initialization. Subsequent engineDoFinal() calls will invoke sm4Mac() with sessionHandle=0, causing failure.
+CODE:
+```
+@Override
+protected byte[] engineDoFinal() {
+    byte[] data = buffer.toByteArray();
+    buffer.reset();
+    try {
+        return SDFJceNative.sm4Mac(sessionHandle, key, iv, data);
+    } finally {
+        releaseSession();
+    }
+}
+```
+FIX:
+```
+@Override
+protected byte[] engineDoFinal() {
+    acquireSession();
+    byte[] data = buffer.toByteArray();
+    buffer.reset();
+    try {
+        return SDFJceNative.sm4Mac(sessionHandle, key, iv, data);
+    } finally {
+        releaseSession();
+    }
+}
+```
+===END===
+
+===ISSUE===
+FILE: sdf4j-jce/src/main/java/org/openhitls/sdf4j/jce/cipher/SM2Cipher.java
+LINE: 174-189
+SEVERITY: high
+TITLE: JCE contract violation: Cipher instance unusable after doFinal()
+REVIEWERS: GEMINI, CODEX
+CONFIDENCE: trusted
+PROBLEM: engineDoFinal() calls releaseSession() in the finally block, setting sessionHandle to 0. The JCE Cipher contract allows reusing an initialized cipher instance for multiple operations. Subsequent doFinal() calls will invoke sm2Encrypt() or sm2Decrypt() with sessionHandle=0, causing failure.
+CODE:
+```
+try {
+    if (opmode == Cipher.ENCRYPT_MODE || opmode == Cipher.WRAP_MODE) {
+        if (publicKey == null) {
+            throw new IllegalStateException("Public key not set");
+        }
+        // Native layer outputs GM/T format: 0x04 || C1 || C3 || C2
+        return SDFJceNative.sm2Encrypt(sessionHandle, publicKey.getX(), publicKey.getY(), data);
+    } else {
+        if (privateKey == null) {
+            throw new IllegalStateException("Private key not set");
+        }
+        // Native layer expects GM/T format: 0x04 || C1 || C3 || C2
+        return SDFJceNative.sm2Decrypt(sessionHandle, privateKey.getKeyBytes(), data);
+    }
+} finally {
+    releaseSession();
+}
+```
+FIX:
+```
+acquireSession();
+try {
+    if (opmode == Cipher.ENCRYPT_MODE || opmode == Cipher.WRAP_MODE) {
+        if (publicKey == null) {
+            throw new IllegalStateException("Public key not set");
+        }
+        return SDFJceNative.sm2Encrypt(sessionHandle, publicKey.getX(), publicKey.getY(), data);
+    } else {
+        if (privateKey == null) {
+            throw new IllegalStateException("Private key not set");
+        }
+        return SDFJceNative.sm2Decrypt(sessionHandle, privateKey.getKeyBytes(), data);
+    }
+} finally {
+    releaseSession();
+}
+```
+===END===
+
+===ISSUE===
+FILE: sdf4j-jce/src/main/java/org/openhitls/sdf4j/jce/cipher/SM4Cipher.java
+LINE: 377-407
+SEVERITY: high
+TITLE: JCE contract violation: AEAD cipher unusable after doFinal()
+REVIEWERS: GEMINI, CODEX
+CONFIDENCE: trusted
+PROBLEM: doFinalAead() calls releaseSession() in the finally block. For GCM/CCM modes, acquireSession() is only called in engineInit(). After the first doFinal(), subsequent operations will use sessionHandle=0, causing sm4AuthEnc() or sm4AuthDec() to fail.
+CODE:
+```
+try {
+    if (opmode == Cipher.ENCRYPT_MODE || opmode == Cipher.WRAP_MODE) {
+        if (data.length == 0) {
+            throw new IllegalBlockSizeException("SM4 GCM/CCM does not support empty plaintext");
+        }
+        // sm4AuthEnc returns ciphertext || tag directly
+        byte[] result = SDFJceNative.sm4AuthEnc(sessionHandle, cipherMode, key, iv,
+                aad.length > 0 ? aad : null, data);
+        if (result == null) {
+            throw new IllegalBlockSizeException("AuthEnc returned null");
+        }
+        return result;
+    } else {
+        // Decrypt: input is ciphertext || tag
+        if (data.length < tagBytes) {
+            throw new BadPaddingException("Input too short for GCM tag");
+        }
+        byte[] ciphertext = new byte[data.length - tagBytes];
+        byte[] tag = new byte[tagBytes];
+        System.arraycopy(data, 0, ciphertext, 0, ciphertext.length);
+        System.arraycopy(data, ciphertext.length, tag, 0, tagBytes);
+
+        byte[] plaintext = SDFJceNative.sm4AuthDec(sessionHandle, cipherMode, key, iv,
+                aad.length > 0 ? aad : null, tag, ciphertext);
+        if (plaintext == null) {
+            throw new AEADBadTagException("GCM authentication failed");
+        }
+        return plaintext;
+    }
+} finally {
+    releaseSession();
+}
+```
+FIX:
+```
+acquireSession();
+try {
+    if (opmode == Cipher.ENCRYPT_MODE || opmode == Cipher.WRAP_MODE) {
+        if (data.length == 0) {
+            throw new IllegalBlockSizeException("SM4 GCM/CCM does not support empty plaintext");
+        }
+        byte[] result = SDFJceNative.sm4AuthEnc(sessionHandle, cipherMode, key, iv,
+                aad.length > 0 ? aad : null, data);
+        if (result == null) {
+            throw new IllegalBlockSizeException("AuthEnc returned null");
+        }
+        return result;
+    } else {
+        if (data.length < tagBytes) {
+            throw new BadPaddingException("Input too short for GCM tag");
+        }
+        byte[] ciphertext = new byte[data.length - tagBytes];
+        byte[] tag = new byte[tagBytes];
+        System.arraycopy(data, 0, ciphertext, 0, ciphertext.length);
+        System.arraycopy(data, ciphertext.length, tag, 0, tagBytes);
+
+        byte[] plaintext = SDFJceNative.sm4AuthDec(sessionHandle, cipherMode, key, iv,
+                aad.length > 0 ? aad : null, tag, ciphertext);
+        if (plaintext == null) {
+            throw new AEADBadTagException("GCM authentication failed");
+        }
+        return plaintext;
+    }
+} finally {
+    releaseSession();
+}
+```
+===END===
+
+===ISSUE===
+FILE: sdf4j-jce/src/main/java/org/openhitls/sdf4j/jce/digest/SM3MessageDigest.java
+LINE: 88-103
+SEVERITY: high
+TITLE: JCE contract violation: MessageDigest unusable after digest()
+REVIEWERS: GEMINI, CODEX
+CONFIDENCE: likely
+PROBLEM: engineDigest() calls releaseSession() in the finally block. After the first digest() call, the sessionHandle is set to 0. Subsequent digest() calls will fail when trying to use the session. The MessageDigest SPI allows reuse after digest().
+CODE:
+```
+@Override
+protected byte[] engineDigest() {
+    try {
+        if (!initialized) {
+            // Empty input: need a session for the one-shot call
+            acquireSession();
+            return SDFJceNative.sm3Digest(sessionHandle, new byte[0]);
+        }
+        byte[] result = SDFJceNative.sm3Final(ctx);
+        SDFJceNative.sm3Free(ctx);
+        ctx = 0;
+        initialized = false;
+        return result;
+    } finally {
+        releaseSession();
+    }
+}
+```
+FIX:
+```
+@Override
+protected byte[] engineDigest() {
+    acquireSession();
+    try {
+        if (!initialized) {
+            return SDFJceNative.sm3Digest(sessionHandle, new byte[0]);
+        }
+        byte[] result = SDFJceNative.sm3Final(ctx);
+        SDFJceNative.sm3Free(ctx);
+        ctx = 0;
+        initialized = false;
+        return result;
+    } finally {
+        releaseSession();
+    }
+}
+```
+===END===
+
+===ISSUE===
+FILE: sdf4j-jce/src/main/java/org/openhitls/sdf4j/jce/cipher/SM4Cipher.java
+LINE: 49
+SEVERITY: medium
+TITLE: Missing volatile on sessionHandle for thread safety
+REVIEWERS: CLAUDE
+CONFIDENCE: evaluate
+PROBLEM: sessionHandle is accessed from multiple methods (acquireSession, releaseSession, doFinal) without proper synchronization. While JCE Cipher objects are not required to be thread-safe, the lack of volatile can cause memory visibility issues between constructor and other methods, especially in concurrent scenarios where the object might be shared improperly.
+CODE:
+```
+protected long sessionHandle;
+```
+FIX:
+```
+protected volatile long sessionHandle;
+```
+===END===
+
+===ISSUE===
+FILE: sdf4j-jce/src/main/java/org/openhitls/sdf4j/jce/signature/SM2Signature.java
+LINE: 43
+SEVERITY: medium
+TITLE: Missing volatile on sessionHandle for thread safety
+REVIEWERS: CLAUDE
+CONFIDENCE: evaluate
+PROBLEM: sessionHandle should be volatile for proper memory visibility between constructor, acquireSession(), and releaseSession().
+CODE:
+```
+private long sessionHandle;
+```
+FIX:
+```
+private volatile long sessionHandle;
+```
+===END===
+
+===ISSUE===
+FILE: sdf4j-jce/src/main/java/org/openhitls/sdf4j/jce/mac/HmacSM3.java
+LINE: 31
+SEVERITY: medium
+TITLE: Missing volatile on sessionHandle for thread safety
+REVIEWERS: CLAUDE
+CONFIDENCE: evaluate
+PROBLEM: sessionHandle should be volatile for proper memory visibility.
+CODE:
+```
+private long sessionHandle;
+```
+FIX:
+```
+private volatile long sessionHandle;
+```
+===END===
+
+===ISSUE===
+FILE: sdf4j-jce/src/main/java/org/openhitls/sdf4j/jce/mac/SM4Mac.java
+LINE: 34
+SEVERITY: medium
+TITLE: Missing volatile on sessionHandle for thread safety
+REVIEWERS: CLAUDE
+CONFIDENCE: evaluate
+PROBLEM: sessionHandle should be volatile for proper memory visibility.
+CODE:
+```
+private long sessionHandle;
+```
+FIX:
+```
+private volatile long sessionHandle;
+```
+===END===
+
+===ISSUE===
+FILE: sdf4j-jce/src/main/java/org/openhitls/sdf4j/jce/digest/SM3MessageDigest.java
+LINE: 26
+SEVERITY: medium
+TITLE: Missing volatile on sessionHandle for thread safety
+REVIEWERS: CLAUDE
+CONFIDENCE: evaluate
+PROBLEM: sessionHandle should be volatile for proper memory visibility between constructor and other methods.
+CODE:
+```
+private long sessionHandle;
+```
+FIX:
+```
+private volatile long sessionHandle;
+```
+===END===
+
+===ISSUE===
+FILE: sdf4j-jce/src/main/java/org/openhitls/sdf4j/jce/cipher/SM2Cipher.java
+LINE: 38
+SEVERITY: medium
+TITLE: Missing volatile on sessionHandle for thread safety
+REVIEWERS: CLAUDE
+CONFIDENCE: evaluate
+PROBLEM: sessionHandle should be volatile for proper memory visibility between constructor and other methods.
+CODE:
+```
+private long sessionHandle;
+```
+FIX:
+```
+private volatile long sessionHandle;
+```
+===END===
+
+===ISSUE===
+FILE: sdf4j-jce/src/main/java/org/openhitls/sdf4j/jce/random/SDFSecureRandom.java
+LINE: 40-48
+SEVERITY: low
+TITLE: Missing null check on bytes parameter
+REVIEWERS: CLAUDE
+CONFIDENCE: evaluate
+PROBLEM: The null check on line 41-43 checks `bytes == null` but the check `bytes.length == 0` in the same condition could potentially throw NPE if bytes is null. However, looking at the actual code flow, the check `bytes == null || bytes.length == 0` uses short-circuit evaluation, so if bytes is null, bytes.length is never evaluated. This is actually a false positive - the code is correct.
+CODE:
+```
+if (bytes == null || bytes.length == 0) {
+    return;
+}
+byte[] random = SDFJceNative.generateRandom(sessionHandle, bytes.length);
+if (random == null) {
+    throw new IllegalStateException("Failed to generate random bytes: native call returned null");
+}
+System.arraycopy(random, 0, bytes, 0, bytes.length);
+```
+FIX: No fix needed - the existing null check is correct due to short-circuit evaluation.
+===END===
+
+===ISSUE===
+FILE: script/build_with_simulator.sh
+LINE: 68
+SEVERITY: low
+TITLE: Deprecated Maven javadoc parameter
+REVIEWERS: CLAUDE
+CONFIDENCE: trusted
+PROBLEM: The -Dadditionalparam flag is deprecated in Maven Javadoc Plugin 3.0+. Use -DadditionalOptions instead for forward compatibility.
+CODE:
+```
+mvn javadoc:javadoc -pl sdf4j -Dadditionalparam=-Xwerror || exit 1
+```
+FIX:
+```
+mvn javadoc:javadoc -pl sdf4j -DadditionalOptions=-Xwerror || exit 1
+```
+===END===
