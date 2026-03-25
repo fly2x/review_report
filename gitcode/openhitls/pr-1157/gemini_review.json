@@ -1,0 +1,12 @@
+[
+  {
+    "source": "gemini",
+    "file": "crypto/rsa/src/rsa_keyop.c",
+    "line": "174-194",
+    "severity": "high",
+    "title": "Stale CRT parameters retained when setting new private key without factors",
+    "problem": "When setting a new private key (`CRYPT_RSA_SetPrvKey`) that does not include CRT parameters (`prv->p == NULL`), the code conditionally skips replacing the `p`, `q`, `dP`, `dQ`, and `qInv` fields in `ctx->key`. This leaves the old CRT components from any previously set private key in the context. Since `n` and `d` are unconditionally updated to the new key's values, subsequent operations (like decryption or signing) will attempt to use the new `n` and `d` with the old, mismatched CRT factors, leading to incorrect cryptographic results or failures.",
+    "code": "if (prv->p != NULL) {\n        BN_Destroy(ctx->key.p);\n        ctx->key.p = tmpCtx.key.p;\n        ctx->key.p = NULL;\n\n        BN_Destroy(ctx->key.q);\n        ctx->key.q = tmpCtx.key.q;\n        ctx->key.q = NULL;\n\n        BN_Destroy(ctx->key.dP);\n        ctx->key.dP = tmpCtx.key.dP;\n        ctx->key.dP = NULL;\n\n        BN_Destroy(ctx->key.dQ);\n        ctx->key.dQ = tmpCtx.key.dQ;\n        ctx->key.dQ = NULL;\n\n        BN_Destroy(ctx->key.qInv);\n        ctx->key.qInv = tmpCtx.key.qInv;\n        ctx->key.qInv = NULL;\n    }",
+    "fix": "BN_Destroy(ctx->key.p);\n    ctx->key.p = tmpCtx.key.p;\n    ctx->key.p = NULL;\n\n    BN_Destroy(ctx->key.q);\n    ctx->key.q = tmpCtx.key.q;\n    ctx->key.q = NULL;\n\n    BN_Destroy(ctx->key.dP);\n    ctx->key.dP = tmpCtx.key.dP;\n    ctx->key.dP = NULL;\n\n    BN_Destroy(ctx->key.dQ);\n    ctx->key.dQ = tmpCtx.key.dQ;\n    ctx->key.dQ = NULL;\n\n    BN_Destroy(ctx->key.qInv);\n    ctx->key.qInv = tmpCtx.key.qInv;\n    ctx->key.qInv = NULL;"
+  }
+]

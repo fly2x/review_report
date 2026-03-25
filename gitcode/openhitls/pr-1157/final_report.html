@@ -1,0 +1,270 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Final Report: openHiTLS/openhitls#1157</title>
+    <style>
+        :root { --critical: #dc2626; --high: #ea580c; --medium: #ca8a04; --low: #65a30d;
+                 --trusted: #059669; --likely: #0284c7; --evaluate: #7c3aed; }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: system-ui, sans-serif; background: #f8fafc; color: #1e293b; padding: 2rem; line-height: 1.6; }
+        .container { max-width: 900px; margin: 0 auto; }
+        h1 { font-size: 1.75rem; margin-bottom: 0.5rem; }
+        .subtitle { color: #64748b; margin-bottom: 1rem; }
+        .stats { display: flex; gap: 1rem; margin-bottom: 2rem; flex-wrap: wrap; }
+        .stat { background: white; border: 1px solid #e2e8f0; border-radius: 0.5rem; padding: 1rem; min-width: 100px; text-align: center; }
+        .stat-value { font-size: 1.5rem; font-weight: 700; }
+        .stat-label { font-size: 0.875rem; color: #64748b; }
+        .stat.critical .stat-value { color: var(--critical); }
+        .stat.high .stat-value { color: var(--high); }
+        .stat.medium .stat-value { color: var(--medium); }
+        .stat.low .stat-value { color: var(--low); }
+        .reviewers { background: #e0e7ff; color: #3730a3; padding: 0.5rem 1rem; border-radius: 0.5rem; margin-bottom: 2rem; }
+        .section { margin-bottom: 2rem; }
+        .section-title { font-size: 1.1rem; font-weight: 600; padding: 0.5rem 1rem; border-radius: 0.5rem 0.5rem 0 0; color: white; }
+        .section-title.critical { background: var(--critical); }
+        .section-title.high { background: var(--high); }
+        .section-title.medium { background: var(--medium); }
+        .section-title.low { background: var(--low); }
+        .issue { background: white; border: 1px solid #e2e8f0; border-top: none; padding: 1rem; }
+        .issue:last-child { border-radius: 0 0 0.5rem 0.5rem; }
+        .issue-title { font-weight: 600; margin-bottom: 0.25rem; }
+        .issue-location { font-family: monospace; font-size: 0.875rem; color: #64748b; margin-bottom: 0.5rem; }
+        .issue-meta { font-size: 0.75rem; margin-bottom: 0.75rem; display: flex; gap: 0.75rem; align-items: center; }
+        .issue-meta .reviewers { background: #f1f5f9; color: #475569; padding: 0.25rem 0.5rem; border-radius: 0.25rem; margin: 0; }
+        .confidence-badge { padding: 0.25rem 0.5rem; border-radius: 0.25rem; font-weight: 500; }
+        .confidence-badge.trusted { background: #d1fae5; color: #065f46; }
+        .confidence-badge.likely { background: #dbeafe; color: #1e40af; }
+        .confidence-badge.evaluate { background: #ede9fe; color: #5b21b6; }
+        pre { background: #1e293b; color: #e2e8f0; padding: 0.75rem; border-radius: 0.375rem; overflow-x: auto; font-size: 0.875rem; margin: 0.5rem 0; }
+        .problem { margin: 0.75rem 0; }
+        .fix-label { font-weight: 600; margin-top: 0.75rem; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Final Code Review Report</h1>
+        <div class="subtitle">openHiTLS/openhitls - PR #1157</div>
+        <p style="margin-bottom: 1rem;"></p>
+
+        <div class="stats">
+            <div class="stat"><div class="stat-value">4</div><div class="stat-label">Total</div></div>
+            <div class="stat critical"><div class="stat-value">0</div><div class="stat-label">Critical</div></div>
+            <div class="stat high"><div class="stat-value">3</div><div class="stat-label">High</div></div>
+            <div class="stat medium"><div class="stat-value">1</div><div class="stat-label">Medium</div></div>
+            <div class="stat low"><div class="stat-value">0</div><div class="stat-label">Low</div></div>
+        </div>
+
+        <div class="reviewers">Reviewers: claude, gemini, codex</div>
+<div class="section"><div class="section-title high">High</div>
+<div class="issue">
+                <div class="issue-title">Stale CRT parameters retained when setting new private key without factors</div>
+                <div class="issue-location">crypto/rsa/src/rsa_keyop.c:175-195</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CODEX, GEMINI</span>
+                    <span class="confidence-badge trusted">置信度: 可信</span>
+                </div>
+                <pre>if (prv-&gt;p != NULL) {
+    BN_Destroy(ctx-&gt;key.p);
+    ctx-&gt;key.p = tmpCtx.key.p;
+    tmpCtx.key.p = NULL;
+
+    BN_Destroy(ctx-&gt;key.q);
+    ctx-&gt;key.q = tmpCtx.key.q;
+    tmpCtx.key.q = NULL;
+
+    BN_Destroy(ctx-&gt;key.dP);
+    ctx-&gt;key.dP = tmpCtx.key.dP;
+    tmpCtx.key.dP = NULL;
+
+    BN_Destroy(ctx-&gt;key.dQ);
+    ctx-&gt;key.dQ = tmpCtx.key.dQ;
+    tmpCtx.key.dQ = NULL;
+
+    BN_Destroy(ctx-&gt;key.qInv);
+    ctx-&gt;key.qInv = tmpCtx.key.qInv;
+    tmpCtx.key.qInv = NULL;
+}</pre>
+                <div class="problem"><strong>Issue:</strong> When CRYPT_RSA_SetPrvKey is called with a private key that does not include CRT parameters (prv->p == NULL), the code conditionally skips replacing the p, q, dP, dQ, and qInv fields in ctx->key. Since n and d are unconditionally updated to the new key's values, subsequent operations will attempt to use the new n with the old, mismatched CRT factors. The rsa_encdec.c code selects CRT mode whenever ctx->key.p is non-NULL, causing incorrect cryptographic results.</div>
+                <div class="fix-label">Fix:</div><pre>/* Always replace CRT parameters to clear stale values from previous key */
+BN_Destroy(ctx-&gt;key.p);
+ctx-&gt;key.p = tmpCtx.key.p;
+tmpCtx.key.p = NULL;
+
+BN_Destroy(ctx-&gt;key.q);
+ctx-&gt;key.q = tmpCtx.key.q;
+tmpCtx.key.q = NULL;
+
+BN_Destroy(ctx-&gt;key.dP);
+ctx-&gt;key.dP = tmpCtx.key.dP;
+tmpCtx.key.dP = NULL;
+
+BN_Destroy(ctx-&gt;key.dQ);
+ctx-&gt;key.dQ = tmpCtx.key.dQ;
+tmpCtx.key.dQ = NULL;
+
+BN_Destroy(ctx-&gt;key.qInv);
+ctx-&gt;key.qInv = tmpCtx.key.qInv;
+tmpCtx.key.qInv = NULL;</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">Loading private key without exponent e leaves mismatched public key in context</div>
+                <div class="issue-location">crypto/rsa/src/rsa_keyop.c:159-203</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CODEX</span>
+                    <span class="confidence-badge trusted">置信度: 可信</span>
+                </div>
+                <pre>/* All validation passed. Now atomically replace the private key fields in ctx.
+ * Public key fields (n, e, mont, hasPubKey) are preserved. */
+BN_Destroy(ctx-&gt;key.n);
+ctx-&gt;key.n = tmpCtx.key.n;
+tmpCtx.key.n = NULL;
+
+BN_Destroy(ctx-&gt;key.d);
+ctx-&gt;key.d = tmpCtx.key.d;
+tmpCtx.key.d = NULL;
+
+if (prv-&gt;e != NULL) {
+    BN_Destroy(ctx-&gt;key.e);
+    ctx-&gt;key.e = tmpCtx.key.e;
+    tmpCtx.key.e = NULL;
+}
+
+/* Rebuild mont since n has changed */
+BN_MontDestroy(ctx-&gt;key.mont);
+ctx-&gt;key.mont = NULL;
+if (ctx-&gt;key.hasPubKey &amp;&amp; ctx-&gt;key.n != NULL) {
+    ctx-&gt;key.mont = BN_MontCreate(ctx-&gt;key.n);
+}
+ctx-&gt;key.hasPrvKey = true;</pre>
+                <div class="problem"><strong>Issue:</strong> n is always replaced when loading a private key, but e is only replaced when prv->e != NULL. The comment says "Public key fields (n, e, mont, hasPubKey) are preserved", but preserving e when n changes creates an invalid public key (n_new + e_old) that never existed. Subsequent calls to CRYPT_RSA_GetPubKey, public encrypt, or comparison will use this mismatched key material.</div>
+                <div class="fix-label">Fix:</div><pre>BN_Destroy(ctx-&gt;key.n);
+ctx-&gt;key.n = tmpCtx.key.n;
+tmpCtx.key.n = NULL;
+
+BN_Destroy(ctx-&gt;key.d);
+ctx-&gt;key.d = tmpCtx.key.d;
+tmpCtx.key.d = NULL;
+
+BN_Destroy(ctx-&gt;key.e);
+if (prv-&gt;e != NULL) {
+    ctx-&gt;key.e = tmpCtx.key.e;
+    tmpCtx.key.e = NULL;
+    ctx-&gt;key.hasPubKey = true;
+} else {
+    ctx-&gt;key.e = NULL;
+    ctx-&gt;key.hasPubKey = false;
+}
+
+BN_MontDestroy(ctx-&gt;key.mont);
+ctx-&gt;key.mont = NULL;
+if (ctx-&gt;key.hasPubKey) {
+    ctx-&gt;key.mont = BN_MontCreate(ctx-&gt;key.n);
+    if (ctx-&gt;key.mont == NULL) {
+        ret = CRYPT_MEM_ALLOC_FAIL;
+        BSL_ERR_PUSH_ERROR(ret);
+        goto ERR;
+    }
+}
+
+ctx-&gt;key.hasPrvKey = true;</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">SetPubKey creates key inconsistency by not invalidating private key when replacing modulus n</div>
+                <div class="issue-location">crypto/rsa/src/rsa_keyop.c:286-296</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CLAUDE, CODEX</span>
+                    <span class="confidence-badge trusted">置信度: 可信</span>
+                </div>
+                <pre>// Only replace public key fields; preserve existing private key fields
+BN_Destroy(ctx-&gt;key.n);
+ctx-&gt;key.n = newKey.n;
+newKey.n = NULL;
+BN_Destroy(ctx-&gt;key.e);
+ctx-&gt;key.e = newKey.e;
+newKey.e = NULL;
+BN_MontDestroy(ctx-&gt;key.mont);
+ctx-&gt;key.mont = newKey.mont;
+newKey.mont = NULL;
+ctx-&gt;key.hasPubKey = true;
+return ret;</pre>
+                <div class="problem"><strong>Issue:</strong> When SetPubKey is called on a context that already has a private key (hasPrvKey=true), it replaces the modulus n without clearing hasPrvKey or the private key fields (d, p, q, dP, dQ, qInv). Since n is shared between public and private key in the flat storage, this creates an inconsistent state where the private key fields were computed from the old n but the context now has a new n. Subsequent private key operations (decrypt/sign) will use inconsistent key material, producing incorrect results without any error indication.</div>
+                <div class="fix-label">Fix:</div><pre>// Only replace public key fields; preserve existing private key fields
+BN_Destroy(ctx-&gt;key.n);
+ctx-&gt;key.n = newKey.n;
+newKey.n = NULL;
+BN_Destroy(ctx-&gt;key.e);
+ctx-&gt;key.e = newKey.e;
+newKey.e = NULL;
+BN_MontDestroy(ctx-&gt;key.mont);
+ctx-&gt;key.mont = newKey.mont;
+newKey.mont = NULL;
+ctx-&gt;key.hasPubKey = true;
+
+/* The modulus n is shared between public and private key. When n is replaced,
+ * the private key fields (d, p, q, dP, dQ, qInv) derived from the old n become invalid.
+ * Clear hasPrvKey and free the private key fields to prevent use of inconsistent key material. */
+if (ctx-&gt;key.hasPrvKey) {
+    BN_Destroy(ctx-&gt;key.d);
+    BN_Destroy(ctx-&gt;key.p);
+    BN_Destroy(ctx-&gt;key.q);
+    BN_Destroy(ctx-&gt;key.dP);
+    BN_Destroy(ctx-&gt;key.dQ);
+    BN_Destroy(ctx-&gt;key.qInv);
+    ctx-&gt;key.d = ctx-&gt;key.p = ctx-&gt;key.q = NULL;
+    ctx-&gt;key.dP = ctx-&gt;key.dQ = ctx-&gt;key.qInv = NULL;
+    ctx-&gt;key.hasPrvKey = false;
+}
+return ret;</pre>
+            </div>
+</div>
+<div class="section"><div class="section-title medium">Medium</div>
+<div class="issue">
+                <div class="issue-title">CRYPT_RSA_Cmp reports false equality for private-only contexts without exponent</div>
+                <div class="issue-location">crypto/rsa/src/rsa_keyop.c:463-476</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CODEX</span>
+                    <span class="confidence-badge trusted">置信度: 可信</span>
+                </div>
+                <pre>if (a-&gt;key.hasPrvKey &amp;&amp; b-&gt;key.hasPrvKey) {
+    RETURN_RET_IF(BN_Cmp(a-&gt;key.n, b-&gt;key.n) != 0 || BN_Cmp(a-&gt;key.e, b-&gt;key.e) != 0, CRYPT_RSA_PUBKEY_NOT_EQUAL);
+    return CRYPT_SUCCESS;
+}
+if (a-&gt;key.hasPubKey &amp;&amp; b-&gt;key.hasPubKey) {
+    RETURN_RET_IF(BN_Cmp(a-&gt;key.n, b-&gt;key.n) != 0 || BN_Cmp(a-&gt;key.e, b-&gt;key.e) != 0, CRYPT_RSA_PUBKEY_NOT_EQUAL);
+    return CRYPT_SUCCESS;
+}
+if (a-&gt;key.hasPrvKey &amp;&amp; b-&gt;key.hasPubKey) {
+    RETURN_RET_IF(BN_Cmp(a-&gt;key.n, b-&gt;key.n) != 0 || BN_Cmp(a-&gt;key.e, b-&gt;key.e) != 0, CRYPT_RSA_PUBKEY_NOT_EQUAL);
+    return CRYPT_SUCCESS;
+}
+if (a-&gt;key.hasPubKey &amp;&amp; b-&gt;key.hasPrvKey) {
+    RETURN_RET_IF(BN_Cmp(a-&gt;key.n, b-&gt;key.n) != 0 || BN_Cmp(a-&gt;key.e, b-&gt;key.e) != 0, CRYPT_RSA_PUBKEY_NOT_EQUAL);
+    return CRYPT_SUCCESS;
+}
+return CRYPT_RSA_NO_KEY_INFO;</pre>
+                <div class="problem"><strong>Issue:</strong> In CRYPT_RSA_Cmp, when both contexts have hasPrvKey, the function compares n and e. If neither private key carries e (e is NULL), BN_Cmp(NULL, NULL) returns 0, causing two completely different private keys to be treated as equal. This is a false positive and behavioral regression from the old implementation which returned CRYPT_RSA_NO_KEY_INFO in such cases.</div>
+                <div class="fix-label">Fix:</div><pre>if (a-&gt;key.hasPubKey &amp;&amp; b-&gt;key.hasPubKey) {
+    RETURN_RET_IF(BN_Cmp(a-&gt;key.n, b-&gt;key.n) != 0 ||
+                  BN_Cmp(a-&gt;key.e, b-&gt;key.e) != 0,
+                  CRYPT_RSA_PUBKEY_NOT_EQUAL);
+    return CRYPT_SUCCESS;
+}
+/* Compare private key to public key: only if private key has e */
+if (a-&gt;key.hasPrvKey &amp;&amp; a-&gt;key.e != NULL &amp;&amp; !BN_IsZero(a-&gt;key.e) &amp;&amp; b-&gt;key.hasPubKey) {
+    RETURN_RET_IF(BN_Cmp(a-&gt;key.n, b-&gt;key.n) != 0 ||
+                  BN_Cmp(a-&gt;key.e, b-&gt;key.e) != 0,
+                  CRYPT_RSA_PUBKEY_NOT_EQUAL);
+    return CRYPT_SUCCESS;
+}
+if (a-&gt;key.hasPubKey &amp;&amp; b-&gt;key.hasPrvKey &amp;&amp; b-&gt;key.e != NULL &amp;&amp; !BN_IsZero(b-&gt;key.e)) {
+    RETURN_RET_IF(BN_Cmp(a-&gt;key.n, b-&gt;key.n) != 0 ||
+                  BN_Cmp(a-&gt;key.e, b-&gt;key.e) != 0,
+                  CRYPT_RSA_PUBKEY_NOT_EQUAL);
+    return CRYPT_SUCCESS;
+}
+return CRYPT_RSA_NO_KEY_INFO;</pre>
+            </div>
+</div>
+</div></body></html>

@@ -1,0 +1,66 @@
+{
+  "context": {
+    "owner": "openHiTLS",
+    "repo": "openhitls",
+    "pr_id": "1157",
+    "title": "",
+    "reviewers": [
+      "claude",
+      "gemini",
+      "codex"
+    ]
+  },
+  "statistics": {
+    "total": 4,
+    "critical": 0,
+    "high": 3,
+    "medium": 1,
+    "low": 0
+  },
+  "issues": [
+    {
+      "file": "crypto/rsa/src/rsa_keyop.c",
+      "line": "175-195",
+      "severity": "high",
+      "title": "Stale CRT parameters retained when setting new private key without factors",
+      "reviewers": "CODEX, GEMINI",
+      "confidence": "trusted",
+      "problem": "When CRYPT_RSA_SetPrvKey is called with a private key that does not include CRT parameters (prv->p == NULL), the code conditionally skips replacing the p, q, dP, dQ, and qInv fields in ctx->key. Since n and d are unconditionally updated to the new key's values, subsequent operations will attempt to use the new n with the old, mismatched CRT factors. The rsa_encdec.c code selects CRT mode whenever ctx->key.p is non-NULL, causing incorrect cryptographic results.",
+      "code": "if (prv->p != NULL) {\n    BN_Destroy(ctx->key.p);\n    ctx->key.p = tmpCtx.key.p;\n    tmpCtx.key.p = NULL;\n\n    BN_Destroy(ctx->key.q);\n    ctx->key.q = tmpCtx.key.q;\n    tmpCtx.key.q = NULL;\n\n    BN_Destroy(ctx->key.dP);\n    ctx->key.dP = tmpCtx.key.dP;\n    tmpCtx.key.dP = NULL;\n\n    BN_Destroy(ctx->key.dQ);\n    ctx->key.dQ = tmpCtx.key.dQ;\n    tmpCtx.key.dQ = NULL;\n\n    BN_Destroy(ctx->key.qInv);\n    ctx->key.qInv = tmpCtx.key.qInv;\n    tmpCtx.key.qInv = NULL;\n}",
+      "fix": "/* Always replace CRT parameters to clear stale values from previous key */\nBN_Destroy(ctx->key.p);\nctx->key.p = tmpCtx.key.p;\ntmpCtx.key.p = NULL;\n\nBN_Destroy(ctx->key.q);\nctx->key.q = tmpCtx.key.q;\ntmpCtx.key.q = NULL;\n\nBN_Destroy(ctx->key.dP);\nctx->key.dP = tmpCtx.key.dP;\ntmpCtx.key.dP = NULL;\n\nBN_Destroy(ctx->key.dQ);\nctx->key.dQ = tmpCtx.key.dQ;\ntmpCtx.key.dQ = NULL;\n\nBN_Destroy(ctx->key.qInv);\nctx->key.qInv = tmpCtx.key.qInv;\ntmpCtx.key.qInv = NULL;"
+    },
+    {
+      "file": "crypto/rsa/src/rsa_keyop.c",
+      "line": "159-203",
+      "severity": "high",
+      "title": "Loading private key without exponent e leaves mismatched public key in context",
+      "reviewers": "CODEX",
+      "confidence": "trusted",
+      "problem": "n is always replaced when loading a private key, but e is only replaced when prv->e != NULL. The comment says \"Public key fields (n, e, mont, hasPubKey) are preserved\", but preserving e when n changes creates an invalid public key (n_new + e_old) that never existed. Subsequent calls to CRYPT_RSA_GetPubKey, public encrypt, or comparison will use this mismatched key material.",
+      "code": "/* All validation passed. Now atomically replace the private key fields in ctx.\n * Public key fields (n, e, mont, hasPubKey) are preserved. */\nBN_Destroy(ctx->key.n);\nctx->key.n = tmpCtx.key.n;\ntmpCtx.key.n = NULL;\n\nBN_Destroy(ctx->key.d);\nctx->key.d = tmpCtx.key.d;\ntmpCtx.key.d = NULL;\n\nif (prv->e != NULL) {\n    BN_Destroy(ctx->key.e);\n    ctx->key.e = tmpCtx.key.e;\n    tmpCtx.key.e = NULL;\n}\n\n/* Rebuild mont since n has changed */\nBN_MontDestroy(ctx->key.mont);\nctx->key.mont = NULL;\nif (ctx->key.hasPubKey && ctx->key.n != NULL) {\n    ctx->key.mont = BN_MontCreate(ctx->key.n);\n}\nctx->key.hasPrvKey = true;",
+      "fix": "BN_Destroy(ctx->key.n);\nctx->key.n = tmpCtx.key.n;\ntmpCtx.key.n = NULL;\n\nBN_Destroy(ctx->key.d);\nctx->key.d = tmpCtx.key.d;\ntmpCtx.key.d = NULL;\n\nBN_Destroy(ctx->key.e);\nif (prv->e != NULL) {\n    ctx->key.e = tmpCtx.key.e;\n    tmpCtx.key.e = NULL;\n    ctx->key.hasPubKey = true;\n} else {\n    ctx->key.e = NULL;\n    ctx->key.hasPubKey = false;\n}\n\nBN_MontDestroy(ctx->key.mont);\nctx->key.mont = NULL;\nif (ctx->key.hasPubKey) {\n    ctx->key.mont = BN_MontCreate(ctx->key.n);\n    if (ctx->key.mont == NULL) {\n        ret = CRYPT_MEM_ALLOC_FAIL;\n        BSL_ERR_PUSH_ERROR(ret);\n        goto ERR;\n    }\n}\n\nctx->key.hasPrvKey = true;"
+    },
+    {
+      "file": "crypto/rsa/src/rsa_keyop.c",
+      "line": "286-296",
+      "severity": "high",
+      "title": "SetPubKey creates key inconsistency by not invalidating private key when replacing modulus n",
+      "reviewers": "CLAUDE, CODEX",
+      "confidence": "trusted",
+      "problem": "When SetPubKey is called on a context that already has a private key (hasPrvKey=true), it replaces the modulus n without clearing hasPrvKey or the private key fields (d, p, q, dP, dQ, qInv). Since n is shared between public and private key in the flat storage, this creates an inconsistent state where the private key fields were computed from the old n but the context now has a new n. Subsequent private key operations (decrypt/sign) will use inconsistent key material, producing incorrect results without any error indication.",
+      "code": "// Only replace public key fields; preserve existing private key fields\nBN_Destroy(ctx->key.n);\nctx->key.n = newKey.n;\nnewKey.n = NULL;\nBN_Destroy(ctx->key.e);\nctx->key.e = newKey.e;\nnewKey.e = NULL;\nBN_MontDestroy(ctx->key.mont);\nctx->key.mont = newKey.mont;\nnewKey.mont = NULL;\nctx->key.hasPubKey = true;\nreturn ret;",
+      "fix": "// Only replace public key fields; preserve existing private key fields\nBN_Destroy(ctx->key.n);\nctx->key.n = newKey.n;\nnewKey.n = NULL;\nBN_Destroy(ctx->key.e);\nctx->key.e = newKey.e;\nnewKey.e = NULL;\nBN_MontDestroy(ctx->key.mont);\nctx->key.mont = newKey.mont;\nnewKey.mont = NULL;\nctx->key.hasPubKey = true;\n\n/* The modulus n is shared between public and private key. When n is replaced,\n * the private key fields (d, p, q, dP, dQ, qInv) derived from the old n become invalid.\n * Clear hasPrvKey and free the private key fields to prevent use of inconsistent key material. */\nif (ctx->key.hasPrvKey) {\n    BN_Destroy(ctx->key.d);\n    BN_Destroy(ctx->key.p);\n    BN_Destroy(ctx->key.q);\n    BN_Destroy(ctx->key.dP);\n    BN_Destroy(ctx->key.dQ);\n    BN_Destroy(ctx->key.qInv);\n    ctx->key.d = ctx->key.p = ctx->key.q = NULL;\n    ctx->key.dP = ctx->key.dQ = ctx->key.qInv = NULL;\n    ctx->key.hasPrvKey = false;\n}\nreturn ret;"
+    },
+    {
+      "file": "crypto/rsa/src/rsa_keyop.c",
+      "line": "463-476",
+      "severity": "medium",
+      "title": "CRYPT_RSA_Cmp reports false equality for private-only contexts without exponent",
+      "reviewers": "CODEX",
+      "confidence": "trusted",
+      "problem": "In CRYPT_RSA_Cmp, when both contexts have hasPrvKey, the function compares n and e. If neither private key carries e (e is NULL), BN_Cmp(NULL, NULL) returns 0, causing two completely different private keys to be treated as equal. This is a false positive and behavioral regression from the old implementation which returned CRYPT_RSA_NO_KEY_INFO in such cases.",
+      "code": "if (a->key.hasPrvKey && b->key.hasPrvKey) {\n    RETURN_RET_IF(BN_Cmp(a->key.n, b->key.n) != 0 || BN_Cmp(a->key.e, b->key.e) != 0, CRYPT_RSA_PUBKEY_NOT_EQUAL);\n    return CRYPT_SUCCESS;\n}\nif (a->key.hasPubKey && b->key.hasPubKey) {\n    RETURN_RET_IF(BN_Cmp(a->key.n, b->key.n) != 0 || BN_Cmp(a->key.e, b->key.e) != 0, CRYPT_RSA_PUBKEY_NOT_EQUAL);\n    return CRYPT_SUCCESS;\n}\nif (a->key.hasPrvKey && b->key.hasPubKey) {\n    RETURN_RET_IF(BN_Cmp(a->key.n, b->key.n) != 0 || BN_Cmp(a->key.e, b->key.e) != 0, CRYPT_RSA_PUBKEY_NOT_EQUAL);\n    return CRYPT_SUCCESS;\n}\nif (a->key.hasPubKey && b->key.hasPrvKey) {\n    RETURN_RET_IF(BN_Cmp(a->key.n, b->key.n) != 0 || BN_Cmp(a->key.e, b->key.e) != 0, CRYPT_RSA_PUBKEY_NOT_EQUAL);\n    return CRYPT_SUCCESS;\n}\nreturn CRYPT_RSA_NO_KEY_INFO;",
+      "fix": "if (a->key.hasPubKey && b->key.hasPubKey) {\n    RETURN_RET_IF(BN_Cmp(a->key.n, b->key.n) != 0 ||\n                  BN_Cmp(a->key.e, b->key.e) != 0,\n                  CRYPT_RSA_PUBKEY_NOT_EQUAL);\n    return CRYPT_SUCCESS;\n}\n/* Compare private key to public key: only if private key has e */\nif (a->key.hasPrvKey && a->key.e != NULL && !BN_IsZero(a->key.e) && b->key.hasPubKey) {\n    RETURN_RET_IF(BN_Cmp(a->key.n, b->key.n) != 0 ||\n                  BN_Cmp(a->key.e, b->key.e) != 0,\n                  CRYPT_RSA_PUBKEY_NOT_EQUAL);\n    return CRYPT_SUCCESS;\n}\nif (a->key.hasPubKey && b->key.hasPrvKey && b->key.e != NULL && !BN_IsZero(b->key.e)) {\n    RETURN_RET_IF(BN_Cmp(a->key.n, b->key.n) != 0 ||\n                  BN_Cmp(a->key.e, b->key.e) != 0,\n                  CRYPT_RSA_PUBKEY_NOT_EQUAL);\n    return CRYPT_SUCCESS;\n}\nreturn CRYPT_RSA_NO_KEY_INFO;"
+    }
+  ]
+}

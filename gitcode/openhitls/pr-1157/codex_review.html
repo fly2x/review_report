@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Code Review: openHiTLS/openhitls#1157 - CODEX</title>
+    <style>
+        :root { --critical: #dc2626; --high: #ea580c; --medium: #ca8a04; --low: #65a30d; }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: system-ui, sans-serif; background: #f8fafc; color: #1e293b; padding: 2rem; line-height: 1.6; }
+        .container { max-width: 900px; margin: 0 auto; }
+        h1 { font-size: 1.5rem; margin-bottom: 0.5rem; }
+        .subtitle { color: #64748b; margin-bottom: 2rem; }
+        .section { margin-bottom: 2rem; }
+        .section-title { font-size: 1.1rem; font-weight: 600; padding: 0.5rem 1rem; border-radius: 0.5rem 0.5rem 0 0; color: white; }
+        .section-title.critical { background: var(--critical); }
+        .section-title.high { background: var(--high); }
+        .section-title.medium { background: var(--medium); }
+        .section-title.low { background: var(--low); }
+        .issue { background: white; border: 1px solid #e2e8f0; border-top: none; padding: 1rem; }
+        .issue:last-child { border-radius: 0 0 0.5rem 0.5rem; }
+        .issue-title { font-weight: 600; margin-bottom: 0.25rem; }
+        .issue-location { font-family: monospace; font-size: 0.875rem; color: #64748b; margin-bottom: 0.75rem; }
+        .issue-source { font-size: 0.75rem; color: #94a3b8; margin-top: 0.5rem; }
+        pre { background: #1e293b; color: #e2e8f0; padding: 0.75rem; border-radius: 0.375rem; overflow-x: auto; font-size: 0.875rem; margin: 0.5rem 0; }
+        .problem { margin: 0.75rem 0; }
+        .fix-label { font-weight: 600; margin-top: 0.75rem; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Code Review: openHiTLS/openhitls#1157 - CODEX</h1>
+        <div class="subtitle"></div>
+<div class="section"><div class="section-title high">High</div>
+<div class="issue">
+                <div class="issue-title">Replacing an RSA private key can leave stale CRT parameters active</div>
+                <div class="issue-location">crypto/rsa/src/rsa_keyop.c:175-195</div>
+                <pre>if (prv-&gt;p != NULL) {
+        BN_Destroy(ctx-&gt;key.p);
+        ctx-&gt;key.p = tmpCtx.key.p;
+        tmpCtx.key.p = NULL;
+
+        BN_Destroy(ctx-&gt;key.q);
+        ctx-&gt;key.q = tmpCtx.key.q;
+        tmpCtx.key.q = NULL;
+
+        BN_Destroy(ctx-&gt;key.dP);
+        ctx-&gt;key.dP = tmpCtx.key.dP;
+        tmpCtx.key.dP = NULL;
+
+        BN_Destroy(ctx-&gt;key.dQ);
+        ctx-&gt;key.dQ = tmpCtx.key.dQ;
+        tmpCtx.key.dQ = NULL;
+
+        BN_Destroy(ctx-&gt;key.qInv);
+        ctx-&gt;key.qInv = tmpCtx.key.qInv;
+        tmpCtx.key.qInv = NULL;
+    }</pre>
+                <div class="problem"><strong>Issue:</strong> The new flat-key update path only copies `p/q/dP/dQ/qInv` when the incoming key includes `p`. If the context previously held a CRT-capable key and the caller loads an `n,d`-only private key, the old CRT factors stay in `ctx->key`. `rsa_encdec.c` now selects CRT whenever `ctx->key.p` is nonzero, so later decrypt/sign operations will run with CRT data from the previous key instead of falling back to plain `d mod n`.</div>
+                <div class="fix-label">Fix:</div><pre>BN_Destroy(ctx-&gt;key.p);
+    ctx-&gt;key.p = tmpCtx.key.p;
+    tmpCtx.key.p = NULL;
+
+    BN_Destroy(ctx-&gt;key.q);
+    ctx-&gt;key.q = tmpCtx.key.q;
+    tmpCtx.key.q = NULL;
+
+    BN_Destroy(ctx-&gt;key.dP);
+    ctx-&gt;key.dP = tmpCtx.key.dP;
+    tmpCtx.key.dP = NULL;
+
+    BN_Destroy(ctx-&gt;key.dQ);
+    ctx-&gt;key.dQ = tmpCtx.key.dQ;
+    tmpCtx.key.dQ = NULL;
+
+    BN_Destroy(ctx-&gt;key.qInv);
+    ctx-&gt;key.qInv = tmpCtx.key.qInv;
+    tmpCtx.key.qInv = NULL;</pre>
+                <div class="issue-source">Reviewer: codex</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">Loading a private key without e can leave a mismatched public key in the context</div>
+                <div class="issue-location">crypto/rsa/src/rsa_keyop.c:159-203</div>
+                <pre>BN_Destroy(ctx-&gt;key.n);
+    ctx-&gt;key.n = tmpCtx.key.n;
+    tmpCtx.key.n = NULL;
+
+    BN_Destroy(ctx-&gt;key.d);
+    ctx-&gt;key.d = tmpCtx.key.d;
+    tmpCtx.key.d = NULL;
+
+    if (prv-&gt;e != NULL) {
+        BN_Destroy(ctx-&gt;key.e);
+        ctx-&gt;key.e = tmpCtx.key.e;
+        tmpCtx.key.e = NULL;
+    }
+
+    /* Rebuild mont since n has changed */
+    BN_MontDestroy(ctx-&gt;key.mont);
+    ctx-&gt;key.mont = NULL;
+    if (ctx-&gt;key.hasPubKey &amp;&amp; ctx-&gt;key.n != NULL) {
+        ctx-&gt;key.mont = BN_MontCreate(ctx-&gt;key.n);
+    }
+    ctx-&gt;key.hasPrvKey = true;</pre>
+                <div class="problem"><strong>Issue:</strong> `n` is always replaced, but `e` is only replaced when `prv->e != NULL`, while `hasPubKey` is preserved. If the context already has a public key and a different private key is loaded without `e`, the shared public half becomes `n_new + e_old`. After that, `CRYPT_RSA_GetPubKey`, `CRYPT_RSA_PubEnc`, comparison, and any exported public material use a public key that never existed.</div>
+                <div class="fix-label">Fix:</div><pre>BN_Destroy(ctx-&gt;key.n);
+    ctx-&gt;key.n = tmpCtx.key.n;
+    tmpCtx.key.n = NULL;
+
+    BN_Destroy(ctx-&gt;key.d);
+    ctx-&gt;key.d = tmpCtx.key.d;
+    tmpCtx.key.d = NULL;
+
+    BN_Destroy(ctx-&gt;key.e);
+    if (prv-&gt;e != NULL) {
+        ctx-&gt;key.e = tmpCtx.key.e;
+        tmpCtx.key.e = NULL;
+        ctx-&gt;key.hasPubKey = true;
+    } else {
+        ctx-&gt;key.e = NULL;
+        ctx-&gt;key.hasPubKey = false;
+    }
+
+    BN_MontDestroy(ctx-&gt;key.mont);
+    ctx-&gt;key.mont = NULL;
+    if (ctx-&gt;key.hasPubKey) {
+        ctx-&gt;key.mont = BN_MontCreate(ctx-&gt;key.n);
+        if (ctx-&gt;key.mont == NULL) {
+            ret = CRYPT_MEM_ALLOC_FAIL;
+            BSL_ERR_PUSH_ERROR(ret);
+            goto ERR;
+        }
+    }
+
+    ctx-&gt;key.hasPrvKey = true;</pre>
+                <div class="issue-source">Reviewer: codex</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">SetPubKey can silently invalidate an existing private key</div>
+                <div class="issue-location">crypto/rsa/src/rsa_keyop.c:286-296</div>
+                <pre>// Only replace public key fields; preserve existing private key fields
+    BN_Destroy(ctx-&gt;key.n);
+    ctx-&gt;key.n = newKey.n;
+    newKey.n = NULL;
+    BN_Destroy(ctx-&gt;key.e);
+    ctx-&gt;key.e = newKey.e;
+    newKey.e = NULL;
+    BN_MontDestroy(ctx-&gt;key.mont);
+    ctx-&gt;key.mont = newKey.mont;
+    newKey.mont = NULL;
+    ctx-&gt;key.hasPubKey = true;</pre>
+                <div class="problem"><strong>Issue:</strong> With the new flat storage, `n/e` are shared by both halves of the key. This block overwrites them even when `hasPrvKey` is already set, but it leaves `d/p/q/dP/dQ/qInv` untouched. A context that previously held a private key can therefore end up with `n/e` from one key and private factors from another, and private decrypt/sign operations will still proceed because `hasPrvKey` stays true.</div>
+                <div class="fix-label">Fix:</div><pre>if (ctx-&gt;key.hasPrvKey &amp;&amp;
+        (ctx-&gt;key.n == NULL || BN_Cmp(ctx-&gt;key.n, newKey.n) != 0 ||
+         (ctx-&gt;key.e != NULL &amp;&amp; BN_Cmp(ctx-&gt;key.e, newKey.e) != 0))) {
+        ret = CRYPT_RSA_ERR_INPUT_VALUE;
+        BSL_ERR_PUSH_ERROR(ret);
+        goto ERR;
+    }
+
+    BN_Destroy(ctx-&gt;key.n);
+    ctx-&gt;key.n = newKey.n;
+    newKey.n = NULL;
+    BN_Destroy(ctx-&gt;key.e);
+    ctx-&gt;key.e = newKey.e;
+    newKey.e = NULL;
+    BN_MontDestroy(ctx-&gt;key.mont);
+    ctx-&gt;key.mont = newKey.mont;
+    newKey.mont = NULL;
+    ctx-&gt;key.hasPubKey = true;</pre>
+                <div class="issue-source">Reviewer: codex</div>
+            </div>
+</div>
+<div class="section"><div class="section-title medium">Medium</div>
+<div class="issue">
+                <div class="issue-title">CRYPT_RSA_Cmp now reports equality for private-only contexts</div>
+                <div class="issue-location">crypto/rsa/src/rsa_keyop.c:463-476</div>
+                <pre>if (a-&gt;key.hasPrvKey &amp;&amp; b-&gt;key.hasPrvKey) {
+        RETURN_RET_IF(BN_Cmp(a-&gt;key.n, b-&gt;key.n) != 0 || BN_Cmp(a-&gt;key.e, b-&gt;key.e) != 0, CRYPT_RSA_PUBKEY_NOT_EQUAL);
+        return CRYPT_SUCCESS;
+    }
+    if (a-&gt;key.hasPubKey &amp;&amp; b-&gt;key.hasPubKey) {
+        RETURN_RET_IF(BN_Cmp(a-&gt;key.n, b-&gt;key.n) != 0 || BN_Cmp(a-&gt;key.e, b-&gt;key.e) != 0, CRYPT_RSA_PUBKEY_NOT_EQUAL);
+        return CRYPT_SUCCESS;
+    }
+    if (a-&gt;key.hasPrvKey &amp;&amp; b-&gt;key.hasPubKey) {
+        RETURN_RET_IF(BN_Cmp(a-&gt;key.n, b-&gt;key.n) != 0 || BN_Cmp(a-&gt;key.e, b-&gt;key.e) != 0, CRYPT_RSA_PUBKEY_NOT_EQUAL);
+        return CRYPT_SUCCESS;
+    }
+    if (a-&gt;key.hasPubKey &amp;&amp; b-&gt;key.hasPrvKey) {
+        RETURN_RET_IF(BN_Cmp(a-&gt;key.n, b-&gt;key.n) != 0 || BN_Cmp(a-&gt;key.e, b-&gt;key.e) != 0, CRYPT_RSA_PUBKEY_NOT_EQUAL);
+        return CRYPT_SUCCESS;
+    }</pre>
+                <div class="problem"><strong>Issue:</strong> `CRYPT_RSA_Cmp` is supposed to compare public keys, but the new first branch returns `CRYPT_SUCCESS` when both contexts only have `hasPrvKey`. If neither private key carries `e`, `BN_Cmp(NULL, NULL)` returns 0, so two contexts with no public key are treated as equal. This is a false positive and a behavioral regression from the old implementation, which returned `CRYPT_RSA_NO_KEY_INFO` in that case.</div>
+                <div class="fix-label">Fix:</div><pre>if (a-&gt;key.hasPubKey &amp;&amp; b-&gt;key.hasPubKey) {
+        RETURN_RET_IF(BN_Cmp(a-&gt;key.n, b-&gt;key.n) != 0 ||
+                      BN_Cmp(a-&gt;key.e, b-&gt;key.e) != 0,
+                      CRYPT_RSA_PUBKEY_NOT_EQUAL);
+        return CRYPT_SUCCESS;
+    }
+    if (a-&gt;key.hasPrvKey &amp;&amp; a-&gt;key.e != NULL &amp;&amp; !BN_IsZero(a-&gt;key.e) &amp;&amp; b-&gt;key.hasPubKey) {
+        RETURN_RET_IF(BN_Cmp(a-&gt;key.n, b-&gt;key.n) != 0 ||
+                      BN_Cmp(a-&gt;key.e, b-&gt;key.e) != 0,
+                      CRYPT_RSA_PUBKEY_NOT_EQUAL);
+        return CRYPT_SUCCESS;
+    }
+    if (a-&gt;key.hasPubKey &amp;&amp; b-&gt;key.hasPrvKey &amp;&amp; b-&gt;key.e != NULL &amp;&amp; !BN_IsZero(b-&gt;key.e)) {
+        RETURN_RET_IF(BN_Cmp(a-&gt;key.n, b-&gt;key.n) != 0 ||
+                      BN_Cmp(a-&gt;key.e, b-&gt;key.e) != 0,
+                      CRYPT_RSA_PUBKEY_NOT_EQUAL);
+        return CRYPT_SUCCESS;
+    }
+    return CRYPT_RSA_NO_KEY_INFO;</pre>
+                <div class="issue-source">Reviewer: codex</div>
+            </div>
+</div>
+</div></body></html>
