@@ -1,0 +1,52 @@
+[
+  {
+    "source": "codex",
+    "file": "crypto/drbg/src/drbg.c",
+    "line": "333-343",
+    "severity": "high",
+    "title": "DRBG_Generate dereferences ctx/out before validating them",
+    "problem": "The public DRBG generate entry point no longer checks `ctx` and `out` before using them. A `NULL` `ctx` now crashes at `ctx->maxRequest`/`ctx->state`, and a `NULL` `out` is forwarded into the provider `generate` callback. This regresses the documented `CRYPT_NULL_INPUT` behavior into a null-dereference.",
+    "code": "if (CRYPT_CHECK_BUF_INVALID(adin, adinLen)) {\n        BSL_ERR_PUSH_ERROR(CRYPT_NULL_INPUT);\n        return CRYPT_NULL_INPUT;\n    }\n\n    if (outLen > ctx->maxRequest || adinLen > ctx->maxAdinLen) {\n        BSL_ERR_PUSH_ERROR(CRYPT_DRBG_INVALID_LEN);\n        return CRYPT_DRBG_INVALID_LEN;\n    }\n\n    if (ctx->state != DRBG_STATE_READY) {",
+    "fix": "if (ctx == NULL || out == NULL) {\n        BSL_ERR_PUSH_ERROR(CRYPT_NULL_INPUT);\n        return CRYPT_NULL_INPUT;\n    }\n\n    if (CRYPT_CHECK_BUF_INVALID(adin, adinLen)) {\n        BSL_ERR_PUSH_ERROR(CRYPT_NULL_INPUT);\n        return CRYPT_NULL_INPUT;\n    }\n\n    if (outLen > ctx->maxRequest || adinLen > ctx->maxAdinLen) {\n        BSL_ERR_PUSH_ERROR(CRYPT_DRBG_INVALID_LEN);\n        return CRYPT_DRBG_INVALID_LEN;\n    }"
+  },
+  {
+    "source": "codex",
+    "file": "pki/x509_verify/src/hitls_x509_verify.c",
+    "line": "1542-1544",
+    "severity": "high",
+    "title": "Freed verify chain is left dangling in storeCtx",
+    "problem": "`HITLS_X509_CertVerify` frees `storeCtx->certChain` but no longer clears the pointer. Any later `HITLS_X509_StoreCtxFree()` or `HITLS_X509_StoreCtxCtrl(...GET_CERTCHAIN...)` will operate on freed memory, turning a successful verify into a use-after-free/double-free hazard when the store context is reused.",
+    "code": "EXIT:\n    BSL_LIST_FREE(storeCtx->certChain, (BSL_LIST_PFUNC_FREE)HITLS_X509_CertFree);\n    return ret;",
+    "fix": "EXIT:\n    BSL_LIST_FREE(storeCtx->certChain, (BSL_LIST_PFUNC_FREE)HITLS_X509_CertFree);\n    storeCtx->certChain = NULL;\n    return ret;"
+  },
+  {
+    "source": "codex",
+    "file": "crypto/bn/src/bn_sqrt.c",
+    "line": "309-310",
+    "severity": "medium",
+    "title": "Optimizer cleanup is skipped on temporary-BN allocation failure",
+    "problem": "`OptimizerStart(opt)` is successful, but `RETURN_RET_IF_ERR(OptimizerGetXBn(...))` returns immediately on failure. That bypasses the function's `ERR:` epilogue and never calls `OptimizerEnd(opt)`, leaving the caller's optimizer stack depth unbalanced after an allocation error.",
+    "code": "RETURN_RET_IF_ERR(OptimizerStart(opt), ret);\n    RETURN_RET_IF_ERR(OptimizerGetXBn(opt, p->size, 5, bns), ret); // get 5 BNs",
+    "fix": "ret = OptimizerStart(opt);\n    if (ret != CRYPT_SUCCESS) {\n        BSL_ERR_PUSH_ERROR(ret);\n        return ret;\n    }\n\n    ret = OptimizerGetXBn(opt, p->size, 5, bns);\n    if (ret != CRYPT_SUCCESS) {\n        BSL_ERR_PUSH_ERROR(ret);\n        goto ERR;\n    }"
+  },
+  {
+    "source": "codex",
+    "file": "crypto/rsa/src/rsa_keygen.c",
+    "line": "86-112",
+    "severity": "medium",
+    "title": "RSA dup now fails on valid contexts with optional components omitted",
+    "problem": "These helpers switched from `GOTO_ERR_IF_SRC_NOT_NULL` to `GOTO_ERR_IF_DST_NULL`, so they now call `BN_Dup()` even when the source field is intentionally `NULL`. That breaks duplication of valid RSA private keys without optional `e`/CRT members and valid generation contexts that only carry `bits/e`.",
+    "code": "GOTO_ERR_IF_DST_NULL(newPriKey->n, BN_Dup(prvKey->n), CRYPT_MEM_ALLOC_FAIL);\n    GOTO_ERR_IF_DST_NULL(newPriKey->d, BN_Dup(prvKey->d), CRYPT_MEM_ALLOC_FAIL);\n    GOTO_ERR_IF_DST_NULL(newPriKey->p, BN_Dup(prvKey->p), CRYPT_MEM_ALLOC_FAIL);\n    GOTO_ERR_IF_DST_NULL(newPriKey->q, BN_Dup(prvKey->q), CRYPT_MEM_ALLOC_FAIL);\n    GOTO_ERR_IF_DST_NULL(newPriKey->dP, BN_Dup(prvKey->dP), CRYPT_MEM_ALLOC_FAIL);\n    GOTO_ERR_IF_DST_NULL(newPriKey->dQ, BN_Dup(prvKey->dQ), CRYPT_MEM_ALLOC_FAIL);\n    GOTO_ERR_IF_DST_NULL(newPriKey->qInv, BN_Dup(prvKey->qInv), CRYPT_MEM_ALLOC_FAIL);\n    GOTO_ERR_IF_DST_NULL(newPriKey->e, BN_Dup(prvKey->e), CRYPT_MEM_ALLOC_FAIL);\n...\n    GOTO_ERR_IF_DST_NULL(newPara->e, BN_Dup(para->e), CRYPT_MEM_ALLOC_FAIL);\n    GOTO_ERR_IF_DST_NULL(newPara->p, BN_Dup(para->p), CRYPT_MEM_ALLOC_FAIL);\n    GOTO_ERR_IF_DST_NULL(newPara->q, BN_Dup(para->q), CRYPT_MEM_ALLOC_FAIL);",
+    "fix": "GOTO_ERR_IF_DST_NULL(newPriKey->n, BN_Dup(prvKey->n), CRYPT_MEM_ALLOC_FAIL);\n    GOTO_ERR_IF_DST_NULL(newPriKey->d, BN_Dup(prvKey->d), CRYPT_MEM_ALLOC_FAIL);\n    GOTO_ERR_IF_SRC_NOT_NULL(newPriKey->p, prvKey->p, BN_Dup(prvKey->p), CRYPT_MEM_ALLOC_FAIL);\n    GOTO_ERR_IF_SRC_NOT_NULL(newPriKey->q, prvKey->q, BN_Dup(prvKey->q), CRYPT_MEM_ALLOC_FAIL);\n    GOTO_ERR_IF_SRC_NOT_NULL(newPriKey->dP, prvKey->dP, BN_Dup(prvKey->dP), CRYPT_MEM_ALLOC_FAIL);\n    GOTO_ERR_IF_SRC_NOT_NULL(newPriKey->dQ, prvKey->dQ, BN_Dup(prvKey->dQ), CRYPT_MEM_ALLOC_FAIL);\n    GOTO_ERR_IF_SRC_NOT_NULL(newPriKey->qInv, prvKey->qInv, BN_Dup(prvKey->qInv), CRYPT_MEM_ALLOC_FAIL);\n    GOTO_ERR_IF_SRC_NOT_NULL(newPriKey->e, prvKey->e, BN_Dup(prvKey->e), CRYPT_MEM_ALLOC_FAIL);\n\n    newPara->bits = para->bits;\n    GOTO_ERR_IF_DST_NULL(newPara->e, BN_Dup(para->e), CRYPT_MEM_ALLOC_FAIL);\n    GOTO_ERR_IF_SRC_NOT_NULL(newPara->p, para->p, BN_Dup(para->p), CRYPT_MEM_ALLOC_FAIL);\n    GOTO_ERR_IF_SRC_NOT_NULL(newPara->q, para->q, BN_Dup(para->q), CRYPT_MEM_ALLOC_FAIL);"
+  },
+  {
+    "source": "codex",
+    "file": "crypto/bn/src/bn_mont.c",
+    "line": "287-295",
+    "severity": "medium",
+    "title": "BN_MontExp no longer supports a NULL optimizer",
+    "problem": "The old implementation created a temporary optimizer when `opt == NULL`. This refactor now forwards `NULL` straight into `MontExpCore`, which immediately starts using the optimizer. The API signature did not change, so callers that previously relied on the fallback will now crash.",
+    "code": "static int32_t MontExp(BN_BigNum *r, const BN_BigNum *a, const BN_BigNum *e, BN_Mont *mont,\n    BN_Optimizer *opt, bool consttime)\n{\n    int32_t ret = MontParaCheck(r, a, e, mont);\n    if (ret != CRYPT_SUCCESS) {\n        return ret;\n    }\n\n    return MontExpCore(r, a, e, mont, opt, consttime);\n}",
+    "fix": "static int32_t MontExp(BN_BigNum *r, const BN_BigNum *a, const BN_BigNum *e, BN_Mont *mont,\n    BN_Optimizer *opt, bool consttime)\n{\n    int32_t ret = MontParaCheck(r, a, e, mont);\n    if (ret != CRYPT_SUCCESS) {\n        return ret;\n    }\n\n    bool newOpt = (opt == NULL);\n    if (newOpt) {\n        opt = BN_OptimizerCreate();\n        if (opt == NULL) {\n            BSL_ERR_PUSH_ERROR(CRYPT_MEM_ALLOC_FAIL);\n            return CRYPT_MEM_ALLOC_FAIL;\n        }\n    }\n\n    ret = MontExpCore(r, a, e, mont, opt, consttime);\n    if (newOpt) {\n        BN_OptimizerDestroy(opt);\n    }\n    return ret;\n}"
+  }
+]

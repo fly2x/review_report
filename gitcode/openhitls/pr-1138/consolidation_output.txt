@@ -1,0 +1,324 @@
+===ISSUE===
+FILE: crypto/drbg/src/drbg.c
+LINE: 333-343
+SEVERITY: high
+TITLE: DRBG_Generate missing NULL check for ctx and out parameters
+REVIEWERS: CODEX
+CONFIDENCE: trusted
+PROBLEM: The public DRBG generate entry point no longer validates ctx and out before use. If ctx is NULL, the code crashes at ctx->maxRequest/ctx->state. If out is NULL, the null pointer is forwarded to the provider generate callback. This regresses the documented CRYPT_NULL_INPUT behavior into a null-dereference vulnerability.
+CODE:
+```
+int32_t DRBG_Generate(DRBG_Ctx *ctx,
+    uint8_t *out, uint32_t outLen, const uint8_t *adin, uint32_t adinLen)
+{
+    int32_t ret;
+    CRYPT_Data adinData = {(uint8_t*)(uintptr_t)adin, adinLen};
+
+    if (CRYPT_CHECK_BUF_INVALID(adin, adinLen)) {
+        BSL_ERR_PUSH_ERROR(CRYPT_NULL_INPUT);
+        return CRYPT_NULL_INPUT;
+    }
+
+    if (outLen > ctx->maxRequest || adinLen > ctx->maxAdinLen) {
+```
+FIX:
+```
+int32_t DRBG_Generate(DRBG_Ctx *ctx,
+    uint8_t *out, uint32_t outLen, const uint8_t *adin, uint32_t adinLen)
+{
+    int32_t ret;
+    CRYPT_Data adinData = {(uint8_t*)(uintptr_t)adin, adinLen};
+
+    if (ctx == NULL || out == NULL) {
+        BSL_ERR_PUSH_ERROR(CRYPT_NULL_INPUT);
+        return CRYPT_NULL_INPUT;
+    }
+
+    if (CRYPT_CHECK_BUF_INVALID(adin, adinLen)) {
+        BSL_ERR_PUSH_ERROR(CRYPT_NULL_INPUT);
+        return CRYPT_NULL_INPUT;
+    }
+
+    if (outLen > ctx->maxRequest || adinLen > ctx->maxAdinLen) {
+```
+===END===
+
+===ISSUE===
+FILE: pki/x509_verify/src/hitls_x509_verify.c
+LINE: 1541-1544
+SEVERITY: high
+TITLE: HITLS_X509_CertVerify leaves dangling pointer after freeing certChain
+REVIEWERS: CODEX
+CONFIDENCE: trusted
+PROBLEM: HITLS_X509_CertVerify frees storeCtx->certChain but no longer clears the pointer. Subsequent calls to HITLS_X509_StoreCtxFree() or HITLS_X509_StoreCtxCtrl(...GET_CERTCHAIN...) will operate on freed memory, creating a use-after-free/double-free hazard when the store context is reused after a successful verification.
+CODE:
+```
+EXIT:
+    BSL_LIST_FREE(storeCtx->certChain, (BSL_LIST_PFUNC_FREE)HITLS_X509_CertFree);
+    return ret;
+}
+```
+FIX:
+```
+EXIT:
+    BSL_LIST_FREE(storeCtx->certChain, (BSL_LIST_PFUNC_FREE)HITLS_X509_CertFree);
+    storeCtx->certChain = NULL;
+    return ret;
+}
+```
+===END===
+
+===ISSUE===
+FILE: pki/x509_verify/src/hitls_x509_verify.c
+LINE: 408-419
+SEVERITY: high
+TITLE: X509_AddCAPath NULL check for val parameter removed
+REVIEWERS: CLAUDE
+CONFIDENCE: trusted
+PROBLEM: The NULL check for the val parameter was removed. If val is NULL but valLen is a valid non-zero number, the function will crash at line 419 when calling memcmp(existPath, caPath, valLen) where caPath is NULL (cast from val).
+CODE:
+```
+static int32_t X509_AddCAPath(HITLS_X509_StoreCtx *storeCtx, const void *val, uint32_t valLen)
+{
+    if (valLen == 0 || valLen > MAX_PATH_LEN) {
+        BSL_ERR_PUSH_ERROR(HITLS_X509_ERR_INVALID_PARAM);
+        return HITLS_X509_ERR_INVALID_PARAM;
+    }
+    const char *caPath = (const char *)val;
+    ...
+    if (strlen(existPath) == valLen && memcmp(existPath, caPath, valLen) == 0) {
+```
+FIX:
+```
+static int32_t X509_AddCAPath(HITLS_X509_StoreCtx *storeCtx, const void *val, uint32_t valLen)
+{
+    if (val == NULL || valLen == 0 || valLen > MAX_PATH_LEN) {
+        BSL_ERR_PUSH_ERROR(HITLS_X509_ERR_INVALID_PARAM);
+        return HITLS_X509_ERR_INVALID_PARAM;
+    }
+    const char *caPath = (const char *)val;
+    ...
+```
+===END===
+
+===ISSUE===
+FILE: crypto/rsa/src/rsa_encdec.c
+LINE: 702
+SEVERITY: high
+TITLE: BssaUnBlind ignores BN_Bin2Bn return value causing incorrect cryptographic output
+REVIEWERS: CLAUDE
+CONFIDENCE: trusted
+PROBLEM: The function ignores the return value of BN_Bin2Bn. If the function fails (e.g., memory allocation in BnExtend), z is zeroized and the computation proceeds with z=0, causing incorrect cryptographic output instead of returning an error. This is a security issue as it produces silent incorrect results.
+CODE:
+```
+(void)BN_Bin2Bn(z, input, inputLen);
+GOTO_ERR_IF(BN_ModMul(s, z, blind->rInv, n, opt), ret);
+```
+FIX:
+```
+GOTO_ERR_IF(BN_Bin2Bn(z, input, inputLen), ret);
+GOTO_ERR_IF(BN_ModMul(s, z, blind->rInv, n, opt), ret);
+```
+===END===
+
+===ISSUE===
+FILE: crypto/rsa/src/rsa_encdec.c
+LINE: 52
+SEVERITY: medium
+TITLE: InputRangeCheck ignores BN_SubLimb error handling
+REVIEWERS: CLAUDE
+CONFIDENCE: trusted
+PROBLEM: BN_SubLimb can fail with CRYPT_NULL_INPUT or CRYPT_MEM_ALLOC_FAIL. Ignoring the error means if nMinusOne allocation fails, the comparison with n-1 is incorrectly performed, potentially accepting invalid input values that should be rejected.
+CODE:
+```
+(void)BN_SubLimb(nMinusOne, n, 1);
+if (BN_Cmp(input, nMinusOne) >= 0) {
+    ret = CRYPT_RSA_ERR_INPUT_VALUE;
+```
+FIX:
+```
+ret = BN_SubLimb(nMinusOne, n, 1);
+if (ret != CRYPT_SUCCESS) {
+    BSL_ERR_PUSH_ERROR(ret);
+    BN_Destroy(nMinusOne);
+    return ret;
+}
+if (BN_Cmp(input, nMinusOne) >= 0) {
+    ret = CRYPT_RSA_ERR_INPUT_VALUE;
+```
+===END===
+
+===ISSUE===
+FILE: crypto/bn/src/bn_sqrt.c
+LINE: 309-310
+SEVERITY: medium
+TITLE: BN_ModSqrt skips optimizer cleanup on OptimizerGetXBn failure
+REVIEWERS: CODEX
+CONFIDENCE: trusted
+PROBLEM: If OptimizerStart(opt) succeeds but OptimizerGetXBn(...) fails, RETURN_RET_IF_ERR returns immediately without calling OptimizerEnd(opt). This leaves the caller's optimizer stack depth unbalanced after an allocation error, potentially causing memory corruption or crashes in subsequent operations.
+CODE:
+```
+RETURN_RET_IF_ERR(OptimizerStart(opt), ret);
+RETURN_RET_IF_ERR(OptimizerGetXBn(opt, p->size, 5, bns), ret); // get 5 BNs
+```
+FIX:
+```
+ret = OptimizerStart(opt);
+if (ret != CRYPT_SUCCESS) {
+    BSL_ERR_PUSH_ERROR(ret);
+    return ret;
+}
+
+ret = OptimizerGetXBn(opt, p->size, 5, bns);
+if (ret != CRYPT_SUCCESS) {
+    BSL_ERR_PUSH_ERROR(ret);
+    goto ERR;
+}
+```
+===END===
+
+===ISSUE===
+FILE: crypto/rsa/src/rsa_keygen.c
+LINE: 86-112
+SEVERITY: medium
+TITLE: RSA duplication fails on valid contexts with optional NULL components
+REVIEWERS: CODEX
+CONFIDENCE: trusted
+PROBLEM: The duplication functions changed from GOTO_ERR_IF_SRC_NOT_NULL to GOTO_ERR_IF_DST_NULL. They now call BN_Dup() even when source fields (p, q, dP, dQ, qInv, e) are intentionally NULL. This breaks duplication of valid RSA private keys without optional CRT members and generation contexts that only carry bits/e. BN_Dup(NULL) returns NULL, causing the duplication to fail with CRYPT_MEM_ALLOC_FAIL for valid keys.
+CODE:
+```
+GOTO_ERR_IF_DST_NULL(newPriKey->n, BN_Dup(prvKey->n), CRYPT_MEM_ALLOC_FAIL);
+GOTO_ERR_IF_DST_NULL(newPriKey->d, BN_Dup(prvKey->d), CRYPT_MEM_ALLOC_FAIL);
+GOTO_ERR_IF_DST_NULL(newPriKey->p, BN_Dup(prvKey->p), CRYPT_MEM_ALLOC_FAIL);
+GOTO_ERR_IF_DST_NULL(newPriKey->q, BN_Dup(prvKey->q), CRYPT_MEM_ALLOC_FAIL);
+GOTO_ERR_IF_DST_NULL(newPriKey->dP, BN_Dup(prvKey->dP), CRYPT_MEM_ALLOC_FAIL);
+```
+FIX:
+```
+GOTO_ERR_IF_DST_NULL(newPriKey->n, BN_Dup(prvKey->n), CRYPT_MEM_ALLOC_FAIL);
+GOTO_ERR_IF_DST_NULL(newPriKey->d, BN_Dup(prvKey->d), CRYPT_MEM_ALLOC_FAIL);
+GOTO_ERR_IF_SRC_NOT_NULL(newPriKey->p, prvKey->p, BN_Dup(prvKey->p), CRYPT_MEM_ALLOC_FAIL);
+GOTO_ERR_IF_SRC_NOT_NULL(newPriKey->q, prvKey->q, BN_Dup(prvKey->q), CRYPT_MEM_ALLOC_FAIL);
+GOTO_ERR_IF_SRC_NOT_NULL(newPriKey->dP, prvKey->dP, BN_Dup(prvKey->dP), CRYPT_MEM_ALLOC_FAIL);
+```
+===END===
+
+===ISSUE===
+FILE: crypto/bn/src/bn_mont.c
+LINE: 287-295
+SEVERITY: medium
+TITLE: BN_MontExp no longer creates temporary optimizer when opt is NULL
+REVIEWERS: CODEX
+CONFIDENCE: trusted
+PROBLEM: The implementation that created a temporary optimizer when opt == NULL was removed. MontExp now forwards NULL directly to MontExpCore, which immediately uses the optimizer. The API signature did not change, so callers that previously relied on the automatic fallback will now crash with a null dereference.
+CODE:
+```
+static int32_t MontExp(BN_BigNum *r, const BN_BigNum *a, const BN_BigNum *e, BN_Mont *mont,
+    BN_Optimizer *opt, bool consttime)
+{
+    int32_t ret = MontParaCheck(r, a, e, mont);
+    if (ret != CRYPT_SUCCESS) {
+        return ret;
+    }
+
+    return MontExpCore(r, a, e, mont, opt, consttime);
+}
+```
+FIX:
+```
+static int32_t MontExp(BN_BigNum *r, const BN_BigNum *a, const BN_BigNum *e, BN_Mont *mont,
+    BN_Optimizer *opt, bool consttime)
+{
+    int32_t ret = MontParaCheck(r, a, e, mont);
+    if (ret != CRYPT_SUCCESS) {
+        return ret;
+    }
+
+    bool newOpt = (opt == NULL);
+    if (newOpt) {
+        opt = BN_OptimizerCreate();
+        if (opt == NULL) {
+            BSL_ERR_PUSH_ERROR(CRYPT_MEM_ALLOC_FAIL);
+            return CRYPT_MEM_ALLOC_FAIL;
+        }
+    }
+
+    ret = MontExpCore(r, a, e, mont, opt, consttime);
+    if (newOpt) {
+        BN_OptimizerDestroy(opt);
+    }
+    return ret;
+}
+```
+===END===
+
+===ISSUE===
+FILE: crypto/rsa/src/rsa_keygen.c
+LINE: 258-259
+SEVERITY: low
+TITLE: RSA_GetPublicExp allocates more memory than needed for r1 and r2
+REVIEWERS: CLAUDE
+CONFIDENCE: likely
+PROBLEM: r1 and r2 are allocated with bits size instead of bits>>1. Since r1 = p - 1 and r2 = q - 1 where p and q are roughly bits/2 sized primes, they fit in bits/2 + 1 bits. Using bits size is wasteful for a bin size optimization PR.
+CODE:
+```
+BN_BigNum *r1 = BN_Create(bits);
+BN_BigNum *r2 = BN_Create(bits);
+```
+FIX:
+```
+BN_BigNum *r1 = BN_Create(bits >> 1);
+BN_BigNum *r2 = BN_Create(bits >> 1);
+```
+===END===
+
+===ISSUE===
+FILE: crypto/drbg/src/drbg_ctr.c
+LINE: 202
+SEVERITY: low
+TITLE: memcpy_s error handling removed in DRBG_CtrBCCUpdate
+REVIEWERS: CLAUDE
+CONFIDENCE: likely
+PROBLEM: Ignoring memcpy_s return value removes bounds checking validation. While the code ensures valid sizes (cpyLen is min of two positive values), this reduces robustness for defensive programming.
+CODE:
+```
+(void)memcpy_s(temp + tempPos, left, in->data + offset, cpyLen);
+```
+FIX:
+```
+if (memcpy_s(temp + tempPos, left, in->data + offset, cpyLen) != EOK) {
+    BSL_ERR_PUSH_ERROR(CRYPT_SECUREC_FAIL);
+    return CRYPT_SECUREC_FAIL;
+}
+```
+===END===
+
+===ISSUE===
+FILE: bsl/uio/src/uio_tcp.c
+LINE: 143-152, 130-141
+SEVERITY: medium
+TITLE: TcpGetFd and TcpSetFd removed NULL check for uio->ctx
+REVIEWERS: CLAUDE
+CONFIDENCE: evaluate
+PROBLEM: The functions no longer check if uio->ctx is NULL before accessing ctx->fd. While TcpSocketCtrl now checks uio->ctx == NULL before routing to these functions, TcpSetFd and TcpGetFd can be called directly, bypassing this protection. This reduces defensive robustness.
+CODE:
+```
+static int32_t TcpGetFd(BSL_UIO *uio, int32_t size, int32_t *fd)
+{
+    ...
+    TcpPrameters *ctx = uio->ctx;
+    *fd = ctx->fd;
+```
+FIX:
+```
+static int32_t TcpGetFd(BSL_UIO *uio, int32_t size, int32_t *fd)
+{
+    ...
+    TcpPrameters *ctx = uio->ctx;
+    if (ctx == NULL) {
+        BSL_ERR_PUSH_ERROR(BSL_UIO_UNINITIALIZED);
+        return BSL_UIO_UNINITIALIZED;
+    }
+    *fd = ctx->fd;
+```
+===END===

@@ -33,55 +33,9 @@
         <div class="subtitle"></div>
 <div class="section"><div class="section-title high">High</div>
 <div class="issue">
-                <div class="issue-title">Re-use of consumed SHAKE128 output in MLDSA_RejNTTPoly</div>
-                <div class="issue-location">crypto/mldsa/src/asm/export_ml_dsa_armv8.c:108-110</div>
-                <pre>uint32_t j = 0;
-    for (uint32_t i = gensize; i &lt; MLDSA_N;) {
-        const uint32_t w0 = CRYPT_HTOLE32(buf[j]);</pre>
-                <div class="problem"><strong>Issue:</strong> In `MLDSA_RejNTTPoly`, `buf` is populated with SHAKE128 output and consumed by `MldRejUniformAsm`. If `MldRejUniformAsm` doesn't generate all `MLDSA_N` coefficients, the loop is meant to generate the remaining ones. However, `j` is reset to 0 without squeezing a new SHAKE128 block, causing the code to incorrectly reuse and process the already-consumed, modified bytes from `buf`.</div>
-                <div class="fix-label">Fix:</div><pre>uint32_t j = 0;
-    if (gensize &lt; MLDSA_N) {
-        GOTO_ERR_IF(hashMethod-&gt;squeeze(mdCtx, (uint8_t *)buf, outlen), ret);
-    }
-    for (uint32_t i = gensize; i &lt; MLDSA_N;) {
-        const uint32_t w0 = CRYPT_HTOLE32(buf[j]);</pre>
-                <div class="issue-source">Reviewer: gemini</div>
-            </div>
-</div>
-<div class="section"><div class="section-title medium">Medium</div>
-<div class="issue">
-                <div class="issue-title">Unused parameter s2 and divergent behavior in MLDSA_VectorsCaddQ</div>
-                <div class="issue-location">crypto/mldsa/src/noasm/export_mldsa_c.c:269-275</div>
-                <pre>void MLDSA_VectorsCaddQ(int32_t w[MLDSA_N], int32_t s2[MLDSA_N])
-{
-    (void) s2;
-    for (uint32_t i = 0; i &lt; MLDSA_N; i++) {
-        w[i] += (MLDSA_Q &amp; (((MLDSA_Q + 1) / 2 - w[i] - 1) &gt;&gt; 31));
-        MLDSA_MOD_Q(w[i]);
-    }
-}</pre>
-                <div class="problem"><strong>Issue:</strong> In the `noasm` implementation of `MLDSA_VectorsCaddQ`, the parameter `s2` is completely ignored (`(void) s2;`), while the ASM implementation (`VecCaddq`) adds `s2` to `w`. This divergence means the two implementations do completely different things.</div>
-                <div class="fix-label">Fix:</div><pre>void MLDSA_VectorsCaddQ(int32_t w[MLDSA_N], int32_t s2[MLDSA_N])
-{
-    for (uint32_t i = 0; i &lt; MLDSA_N; i++) {
-        w[i] += s2[i];
-        w[i] += (MLDSA_Q &amp; (w[i] &gt;&gt; 31));
-    }
-}</pre>
-                <div class="issue-source">Reviewer: gemini</div>
-            </div>
-<div class="issue">
-                <div class="issue-title">MLDSA_Batch_Decompose discards r0 and fails to update array a</div>
-                <div class="issue-location">crypto/mldsa/src/noasm/export_mldsa_c.c:75-81</div>
+                <div class="issue-title">Missing negative value correction in MLDSA_Batch_Decompose</div>
+                <div class="issue-location">crypto/mldsa/src/noasm/export_mldsa_c.c:76-83</div>
                 <pre>void MLDSA_Batch_Decompose(const CRYPT_ML_DSA_Ctx *ctx, int32_t a[MLDSA_N], int32_t r1[MLDSA_N])
-{
-    for (uint32_t i = 0; i &lt; MLDSA_N; i++) {
-        int32_t r0;
-        MLDSA_Decompose(ctx, a[i], &amp;r1[i], &amp;r0);
-    }
-}</pre>
-                <div class="problem"><strong>Issue:</strong> In the `noasm` implementation of `MLDSA_Batch_Decompose`, the result `r0` from `MLDSA_Decompose` is written to a local variable and discarded. It fails to update `a[i]`, which diverges from the ASM implementation (`BatchDecompose88` / `BatchDecompose32`) where `a` is modified in-place to store the `r0` values.</div>
-                <div class="fix-label">Fix:</div><pre>void MLDSA_Batch_Decompose(const CRYPT_ML_DSA_Ctx *ctx, int32_t a[MLDSA_N], int32_t r1[MLDSA_N])
 {
     for (uint32_t i = 0; i &lt; MLDSA_N; i++) {
         int32_t r0;
@@ -89,41 +43,16 @@
         a[i] = r0;
     }
 }</pre>
-                <div class="issue-source">Reviewer: gemini</div>
-            </div>
-</div>
-<div class="section"><div class="section-title low">Low</div>
-<div class="issue">
-                <div class="issue-title">Unnecessary (void) cast for used parameter h</div>
-                <div class="issue-location">crypto/mldsa/src/asm/export_ml_dsa_armv8.c:44-46</div>
-                <pre>void MLDSA_UseHint(const CRYPT_ML_DSA_Ctx *ctx, int32_t *const h[MLDSA_K_MAX], int32_t *w[MLDSA_K_MAX])
+                <div class="problem"><strong>Issue:</strong> In `ml_dsa_core.c`, the original `ComputesW` function correctly added `MLDSA_Q` to negative values of `w[i][j]` before calling `Decompose()`. The refactored code extracts this loop into `MLDSA_Batch_Decompose()`. While the assembly version (`BatchDecompose88`/`32`) includes this correction via the `finit` macro, the C fallback version in `export_mldsa_c.c` omits it. Since `MLDSA_ComputesINVNTT()` can yield negative values, passing a negative `int32_t` directly to `MLDSA_Decompose()` causes the cast to `uint32_t` to produce a huge number, breaking the decomposition logic.</div>
+                <div class="fix-label">Fix:</div><pre>void MLDSA_Batch_Decompose(const CRYPT_ML_DSA_Ctx *ctx, int32_t a[MLDSA_N], int32_t r1[MLDSA_N])
 {
-    (void) h;</pre>
-                <div class="problem"><strong>Issue:</strong> The parameter `h` is cast to void to suppress an unused parameter warning, but it is actually used later in the function (`fp(w[i], h[i]);`).</div>
-                <div class="fix-label">Fix:</div><pre>void MLDSA_UseHint(const CRYPT_ML_DSA_Ctx *ctx, int32_t *const h[MLDSA_K_MAX], int32_t *w[MLDSA_K_MAX])
-{</pre>
-                <div class="issue-source">Reviewer: gemini</div>
-            </div>
-<div class="issue">
-                <div class="issue-title">Unnecessary (void) cast for used parameter s</div>
-                <div class="issue-location">crypto/mldsa/src/asm/export_ml_dsa_armv8.c:158-160</div>
-                <pre>int32_t MLDSA_RejBoundedPolyEta2(int32_t *a, const uint8_t *s)
-{
-    (void) s;</pre>
-                <div class="problem"><strong>Issue:</strong> The parameter `s` is cast to void to suppress an unused parameter warning, but it is actually used later in the function (`GOTO_ERR_IF(hashMethod->update(mdCtx, s, MLDSA_PRIVATE_SEED_LEN + 2), ret);`).</div>
-                <div class="fix-label">Fix:</div><pre>int32_t MLDSA_RejBoundedPolyEta2(int32_t *a, const uint8_t *s)
-{</pre>
-                <div class="issue-source">Reviewer: gemini</div>
-            </div>
-<div class="issue">
-                <div class="issue-title">Unnecessary (void) cast for used parameter s</div>
-                <div class="issue-location">crypto/mldsa/src/asm/export_ml_dsa_armv8.c:211-213</div>
-                <pre>int32_t MLDSA_RejBoundedPolyEta4(int32_t *a, const uint8_t *s)
-{
-    (void) s;</pre>
-                <div class="problem"><strong>Issue:</strong> The parameter `s` is cast to void to suppress an unused parameter warning, but it is actually used later in the function (`GOTO_ERR_IF(hashMethod->update(mdCtx, s, MLDSA_PRIVATE_SEED_LEN + 2), ret);`).</div>
-                <div class="fix-label">Fix:</div><pre>int32_t MLDSA_RejBoundedPolyEta4(int32_t *a, const uint8_t *s)
-{</pre>
+    for (uint32_t i = 0; i &lt; MLDSA_N; i++) {
+        int32_t r0;
+        a[i] = a[i] + (MLDSA_Q &amp; (a[i] &gt;&gt; 31));
+        MLDSA_Decompose(ctx, a[i], &amp;r1[i], &amp;r0);
+        a[i] = r0;
+    }
+}</pre>
                 <div class="issue-source">Reviewer: gemini</div>
             </div>
 </div>

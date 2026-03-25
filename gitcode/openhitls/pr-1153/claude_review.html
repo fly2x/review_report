@@ -31,83 +31,19 @@
     <div class="container">
         <h1>Code Review: openHiTLS/openhitls#1153 - CLAUDE</h1>
         <div class="subtitle"></div>
-<div class="section"><div class="section-title critical">Critical</div>
-<div class="issue">
-                <div class="issue-title">Incorrect buffer index initialization in MLDSA_RejBoundedPolyEta2</div>
-                <div class="issue-location">crypto/mldsa/src/asm/export_ml_dsa_armv8.c:182</div>
-                <pre>gensize = MldRejUniformEta2Asm(a, buf, bufLen, MLD_REJ_UNIFORM_ETA_TABLE);
-
-for (uint32_t i = gensize, j = bufLen+1; i &lt; MLDSA_N; j++) {
-    if (j &gt;= CRYPT_SHAKE256_BLOCKSIZE) {</pre>
-                <div class="problem"><strong>Issue:</strong> The fallback loop initializes j = bufLen+1 (137), which immediately triggers a buffer refill on the first iteration (j >= CRYPT_SHAKE256_BLOCKSIZE). This skips bytes from the buffer that were just fetched from SHAKE256. The C reference implementation uses j = 0. This could cause incorrect polynomial generation and weaken cryptographic security.</div>
-                <div class="fix-label">Fix:</div><pre>gensize = MldRejUniformEta2Asm(a, buf, bufLen, MLD_REJ_UNIFORM_ETA_TABLE);
-
-for (uint32_t i = gensize, j = 0; i &lt; MLDSA_N; j++) {
-    if (j == CRYPT_SHAKE256_BLOCKSIZE) {</pre>
-                <div class="issue-source">Reviewer: claude</div>
-            </div>
-<div class="issue">
-                <div class="issue-title">Incorrect buffer index initialization in MLDSA_RejBoundedPolyEta4</div>
-                <div class="issue-location">crypto/mldsa/src/asm/export_ml_dsa_armv8.c:235</div>
-                <pre>gensize = MldRejUniformEta4Asm(a, buf, bufLen, MLD_REJ_UNIFORM_ETA_TABLE);
-
-for (uint32_t i = gensize, j = bufLen+1; i &lt; MLDSA_N; j++) {
-    if (j &gt;= CRYPT_SHAKE256_BLOCKSIZE) {</pre>
-                <div class="problem"><strong>Issue:</strong> Similar to issue in Eta2, the loop initializes j = bufLen+1 (273), causing immediate buffer refill and skipping valid bytes. Additionally, the condition compares j against CRYPT_SHAKE256_BLOCKSIZE (136) instead of bufLen (272), which is inconsistent with the 2-block buffer allocation.</div>
-                <div class="fix-label">Fix:</div><pre>gensize = MldRejUniformEta4Asm(a, buf, bufLen, MLD_REJ_UNIFORM_ETA_TABLE);
-
-for (uint32_t i = gensize, j = 0; i &lt; MLDSA_N; j++) {
-    if (j == CRYPT_SHAKE256_BLOCKSIZE) {</pre>
-                <div class="issue-source">Reviewer: claude</div>
-            </div>
-</div>
-<div class="section"><div class="section-title high">High</div>
-<div class="issue">
-                <div class="issue-title">Memory allocation bug fix for MLDSAKeyGenCreateMatrix</div>
-                <div class="issue-location">crypto/mldsa/src/ml_dsa_core.c:95-102</div>
-                <pre>for (uint8_t i = 0; i &lt; l; i++) {
-    MLDSA_SET_VECTOR_MEM(st-&gt;s1[i], buf);
-}
-for (uint8_t i = 0; i &lt; l; i++) {
-    MLDSA_SET_VECTOR_MEM(st-&gt;s1Ntt[i], buf);
-}</pre>
-                <div class="problem"><strong>Issue:</strong> The original code had a critical bug where s1[i] and s1Ntt[i] were assigned memory in the same loop iteration, causing them to point to overlapping memory regions. The fix correctly splits this into two separate loops. This is a correct fix for a memory corruption bug.</div>
-                
-                <div class="issue-source">Reviewer: claude</div>
-            </div>
-</div>
-<div class="section"><div class="section-title medium">Medium</div>
-<div class="issue">
-                <div class="issue-title">Inconsistent buffer handling in MLDSA_RejNTTPoly fallback loop</div>
-                <div class="issue-location">crypto/mldsa/src/asm/export_ml_dsa_armv8.c:108-109</div>
-                <pre>gensize = MldRejUniformAsm(a, (uint8_t *) buf, outlen, MLD_REJ_UNIFORM_TABLE);
-outlen = CRYPT_SHAKE128_BLOCKSIZE;
-buflen = CRYPT_SHAKE128_BLOCKSIZE / 4;
-
-uint32_t j = 0;
-for (uint32_t i = gensize; i &lt; MLDSA_N;) {</pre>
-                <div class="problem"><strong>Issue:</strong> After the assembly call processes 5 blocks of SHAKE128 data, the fallback loop starts with j = 0. This means it re-processes the buffer from the beginning rather than continuing from where the assembly function left off. The C reference implementation starts with j = 0 but in a different context (no initial assembly preprocessing).</div>
-                <div class="fix-label">Fix:</div><pre>gensize = MldRejUniformAsm(a, (uint8_t *) buf, outlen, MLD_REJ_UNIFORM_TABLE);
-// Calculate how many bytes were consumed by the assembly function
-uint32_t bytesConsumed = (gensize * 3 + 2) / 4 * sizeof(uint32_t); // Approximate
-uint32_t j = bytesConsumed / sizeof(uint32_t);
-buflen = outlen / sizeof(uint32_t);
-
-for (uint32_t i = gensize; i &lt; MLDSA_N;) {</pre>
-                <div class="issue-source">Reviewer: claude</div>
-            </div>
-</div>
 <div class="section"><div class="section-title low">Low</div>
 <div class="issue">
-                <div class="issue-title">Malformed comments missing mathematical symbols</div>
-                <div class="issue-location">crypto/mldsa/src/asm/export_ml_dsa_armv8.c:190</div>
-                <pre>// if  = 2 and b &lt; 15 then return 2  (b mod 5)
-...
-// 2  (b mod 5)</pre>
-                <div class="problem"><strong>Issue:</strong> The comments are missing mathematical operators (eta symbol η and minus sign -), making them incomplete and potentially misleading for developers trying to understand the algorithm.</div>
-                <div class="fix-label">Fix:</div><pre>// if η = 2 and b &lt; 15 then return 2 − (b mod 5)
-...
-// 2 − (b mod 5)</pre>
+                <div class="issue-title">Inconsistent register naming in PolyzUnpack19Asm</div>
+                <div class="issue-location">crypto/mldsa/src/asm/polyz_unpack_armv8.S:145-146</div>
+                <pre>polyz_unpack_19_loop:
+    ldr q_buf1, [buf, #16]
+    ldr d2, [buf, #32]
+    ldr q0, [buf], #40</pre>
+                <div class="problem"><strong>Issue:</strong> The PolyzUnpack19Asm function uses raw register names (d2, q0) instead of the defined aliases (buf2, buf0) used elsewhere in the code. This is inconsistent with the coding style and could cause confusion during maintenance. The code is functionally correct because d2 is the lower 64 bits of v2 (aliased as buf2), and the index table only accesses bytes 0-7 which are properly loaded.</div>
+                <div class="fix-label">Fix:</div><pre>polyz_unpack_19_loop:
+    ldr q_buf1, [buf, #16]
+    ldr q_buf2, [buf, #32]
+    ldr q_buf0, [buf], #40</pre>
                 <div class="issue-source">Reviewer: claude</div>
             </div>
 </div>

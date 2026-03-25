@@ -1,41 +1,50 @@
 # Change Review Task
 
-You are reviewing PR #1153 for openHiTLS/openhitls.
+You are reviewing PR #1138 for openHiTLS/openhitls.
 
 
 ## Local Repository Context
 
-- Repository root: `openhitls-1153/openhitls`
-- Base ref: `e6f9560091967dbcdddde9c74ce5a8aa771cba08`
-- Head ref: `mr-1153`
+- Repository root: `openhitls-1138/openhitls`
+- Base ref: `d9c4a7848c563c4519b981a4ddb9521950fa778d`
+- Head ref: `mr-1138`
 - The change under review is already checked out locally in this repository.
 
-## Changed Files (23 files)
+## Changed Files (132 files)
 
-**Source** (22 files):
-  - crypto/mldsa/src/asm/aarch64_zeta_table.c
-  - crypto/mldsa/src/asm/decompose_armv8.S
-  - crypto/mldsa/src/asm/export_ml_dsa_armv8.c
-  - crypto/mldsa/src/asm/export_ml_dsa_armv8.h
-  - crypto/mldsa/src/asm/intt_armv8.S
-  - crypto/mldsa/src/asm/ntt_armv8.S
-  - crypto/mldsa/src/asm/pointwise_acc_montgomery_armv8.S
-  - crypto/mldsa/src/asm/pointwise_montgomery_armv8.S
-  - crypto/mldsa/src/asm/polyz_unpack_armv8.S
-  - crypto/mldsa/src/asm/polyz_unpack_table.c
-  - crypto/mldsa/src/asm/power2round_armv8.S
-  - crypto/mldsa/src/asm/rej_uniform_armv8.S
-  - crypto/mldsa/src/asm/rej_uniform_eta2_armv8.S
-  - crypto/mldsa/src/asm/rej_uniform_eta4_armv8.S
-  - crypto/mldsa/src/asm/rej_uniform_table.c
-  - crypto/mldsa/src/asm/usehint_armv8.S
-  - crypto/mldsa/src/asm/validity_check_armv8.S
-  - crypto/mldsa/src/asm/vec_opts_x8_armv8.S
-  - crypto/mldsa/src/ml_dsa_core.c
-  - crypto/mldsa/src/ml_dsa_local.h
-  - ... and 2 more
+**Source** (124 files):
+  - bsl/asn1/src/bsl_asn1.c
+  - bsl/base64/src/bsl_base64.c
+  - bsl/buffer/src/bsl_buffer.c
+  - bsl/conf/src/bsl_conf_def.c
+  - bsl/err/src/avl.c
+  - bsl/err/src/err.c
+  - bsl/list/src/bsl_list.c
+  - bsl/sal/include/sal_time.h
+  - bsl/sal/src/sal_net.c
+  - bsl/sal/src/sal_time.c
+  - bsl/uio/src/uio_buffer.c
+  - bsl/uio/src/uio_file.c
+  - bsl/uio/src/uio_mem.c
+  - bsl/uio/src/uio_sctp.c
+  - bsl/uio/src/uio_tcp.c
+  - bsl/uio/src/uio_udp.c
+  - codecs/src/decode_chain.c
+  - config/macro_config/hitls_config_layer_bsl.h
+  - config/macro_config/hitls_config_layer_crypto.h
+  - crypto/aes/src/asm/crypt_aes_ctr_armv8.S
+  - ... and 104 more
 
-**Config** (1 files):
+**Test** (6 files):
+  - testcode/framework/tls/msg/src/pack_frame_msg.c
+  - testcode/sdv/testcase/crypto/hpke/test_suite_sdv_eal_hpke.c
+  - testcode/sdv/testcase/crypto/rsa/test_suite_sdv_eal_rsa_encrypt_decrypt.data
+  - testcode/sdv/testcase/pki/common/test_suite_sdv_common.c
+  - testcode/sdv/testcase/pki/common/test_suite_sdv_x509.c
+  - testcode/sdv/testcase/pki/verify/test_suite_sdv_x509_vfy.c
+
+**Config** (2 files):
+  - config/json/complete_options.json
   - config/json/feature.json
 
 
@@ -54,11 +63,11 @@ You are reviewing PR #1153 for openHiTLS/openhitls.
 Perform a thorough change review by:
 
 1. **Understand the Change**
-   - Read the diff stats: `git diff --stat e6f9560091967dbcdddde9c74ce5a8aa771cba08 mr-1153`
+   - Read the diff stats: `git diff --stat d9c4a7848c563c4519b981a4ddb9521950fa778d mr-1138`
    - Understand what this PR is trying to achieve
 
 2. **Review Each File**
-   - For each changed file, view its diff: `git diff e6f9560091967dbcdddde9c74ce5a8aa771cba08 mr-1153 -- <file>`
+   - For each changed file, view its diff: `git diff d9c4a7848c563c4519b981a4ddb9521950fa778d mr-1138 -- <file>`
    - If you need more context, read the full file or search for related code
    - Look for: security issues, logic errors, edge cases, error handling
    - Treat assembly files (`.S`, `.s`, `.asm`) as source code and review ABI/calling convention,

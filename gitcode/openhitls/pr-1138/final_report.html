@@ -1,0 +1,314 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Final Report: openHiTLS/openhitls#1138</title>
+    <style>
+        :root { --critical: #dc2626; --high: #ea580c; --medium: #ca8a04; --low: #65a30d;
+                 --trusted: #059669; --likely: #0284c7; --evaluate: #7c3aed; }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: system-ui, sans-serif; background: #f8fafc; color: #1e293b; padding: 2rem; line-height: 1.6; }
+        .container { max-width: 900px; margin: 0 auto; }
+        h1 { font-size: 1.75rem; margin-bottom: 0.5rem; }
+        .subtitle { color: #64748b; margin-bottom: 1rem; }
+        .stats { display: flex; gap: 1rem; margin-bottom: 2rem; flex-wrap: wrap; }
+        .stat { background: white; border: 1px solid #e2e8f0; border-radius: 0.5rem; padding: 1rem; min-width: 100px; text-align: center; }
+        .stat-value { font-size: 1.5rem; font-weight: 700; }
+        .stat-label { font-size: 0.875rem; color: #64748b; }
+        .stat.critical .stat-value { color: var(--critical); }
+        .stat.high .stat-value { color: var(--high); }
+        .stat.medium .stat-value { color: var(--medium); }
+        .stat.low .stat-value { color: var(--low); }
+        .reviewers { background: #e0e7ff; color: #3730a3; padding: 0.5rem 1rem; border-radius: 0.5rem; margin-bottom: 2rem; }
+        .section { margin-bottom: 2rem; }
+        .section-title { font-size: 1.1rem; font-weight: 600; padding: 0.5rem 1rem; border-radius: 0.5rem 0.5rem 0 0; color: white; }
+        .section-title.critical { background: var(--critical); }
+        .section-title.high { background: var(--high); }
+        .section-title.medium { background: var(--medium); }
+        .section-title.low { background: var(--low); }
+        .issue { background: white; border: 1px solid #e2e8f0; border-top: none; padding: 1rem; }
+        .issue:last-child { border-radius: 0 0 0.5rem 0.5rem; }
+        .issue-title { font-weight: 600; margin-bottom: 0.25rem; }
+        .issue-location { font-family: monospace; font-size: 0.875rem; color: #64748b; margin-bottom: 0.5rem; }
+        .issue-meta { font-size: 0.75rem; margin-bottom: 0.75rem; display: flex; gap: 0.75rem; align-items: center; }
+        .issue-meta .reviewers { background: #f1f5f9; color: #475569; padding: 0.25rem 0.5rem; border-radius: 0.25rem; margin: 0; }
+        .confidence-badge { padding: 0.25rem 0.5rem; border-radius: 0.25rem; font-weight: 500; }
+        .confidence-badge.trusted { background: #d1fae5; color: #065f46; }
+        .confidence-badge.likely { background: #dbeafe; color: #1e40af; }
+        .confidence-badge.evaluate { background: #ede9fe; color: #5b21b6; }
+        pre { background: #1e293b; color: #e2e8f0; padding: 0.75rem; border-radius: 0.375rem; overflow-x: auto; font-size: 0.875rem; margin: 0.5rem 0; }
+        .problem { margin: 0.75rem 0; }
+        .fix-label { font-weight: 600; margin-top: 0.75rem; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Final Code Review Report</h1>
+        <div class="subtitle">openHiTLS/openhitls - PR #1138</div>
+        <p style="margin-bottom: 1rem;"></p>
+
+        <div class="stats">
+            <div class="stat"><div class="stat-value">11</div><div class="stat-label">Total</div></div>
+            <div class="stat critical"><div class="stat-value">0</div><div class="stat-label">Critical</div></div>
+            <div class="stat high"><div class="stat-value">4</div><div class="stat-label">High</div></div>
+            <div class="stat medium"><div class="stat-value">5</div><div class="stat-label">Medium</div></div>
+            <div class="stat low"><div class="stat-value">2</div><div class="stat-label">Low</div></div>
+        </div>
+
+        <div class="reviewers">Reviewers: claude, gemini, codex</div>
+<div class="section"><div class="section-title high">High</div>
+<div class="issue">
+                <div class="issue-title">DRBG_Generate missing NULL check for ctx and out parameters</div>
+                <div class="issue-location">crypto/drbg/src/drbg.c:333-343</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CODEX</span>
+                    <span class="confidence-badge trusted">置信度: 可信</span>
+                </div>
+                <pre>int32_t DRBG_Generate(DRBG_Ctx *ctx,
+    uint8_t *out, uint32_t outLen, const uint8_t *adin, uint32_t adinLen)
+{
+    int32_t ret;
+    CRYPT_Data adinData = {(uint8_t*)(uintptr_t)adin, adinLen};
+
+    if (CRYPT_CHECK_BUF_INVALID(adin, adinLen)) {
+        BSL_ERR_PUSH_ERROR(CRYPT_NULL_INPUT);
+        return CRYPT_NULL_INPUT;
+    }
+
+    if (outLen &gt; ctx-&gt;maxRequest || adinLen &gt; ctx-&gt;maxAdinLen) {</pre>
+                <div class="problem"><strong>Issue:</strong> The public DRBG generate entry point no longer validates ctx and out before use. If ctx is NULL, the code crashes at ctx->maxRequest/ctx->state. If out is NULL, the null pointer is forwarded to the provider generate callback. This regresses the documented CRYPT_NULL_INPUT behavior into a null-dereference vulnerability.</div>
+                <div class="fix-label">Fix:</div><pre>int32_t DRBG_Generate(DRBG_Ctx *ctx,
+    uint8_t *out, uint32_t outLen, const uint8_t *adin, uint32_t adinLen)
+{
+    int32_t ret;
+    CRYPT_Data adinData = {(uint8_t*)(uintptr_t)adin, adinLen};
+
+    if (ctx == NULL || out == NULL) {
+        BSL_ERR_PUSH_ERROR(CRYPT_NULL_INPUT);
+        return CRYPT_NULL_INPUT;
+    }
+
+    if (CRYPT_CHECK_BUF_INVALID(adin, adinLen)) {
+        BSL_ERR_PUSH_ERROR(CRYPT_NULL_INPUT);
+        return CRYPT_NULL_INPUT;
+    }
+
+    if (outLen &gt; ctx-&gt;maxRequest || adinLen &gt; ctx-&gt;maxAdinLen) {</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">HITLS_X509_CertVerify leaves dangling pointer after freeing certChain</div>
+                <div class="issue-location">pki/x509_verify/src/hitls_x509_verify.c:1541-1544</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CODEX</span>
+                    <span class="confidence-badge trusted">置信度: 可信</span>
+                </div>
+                <pre>EXIT:
+    BSL_LIST_FREE(storeCtx-&gt;certChain, (BSL_LIST_PFUNC_FREE)HITLS_X509_CertFree);
+    return ret;
+}</pre>
+                <div class="problem"><strong>Issue:</strong> HITLS_X509_CertVerify frees storeCtx->certChain but no longer clears the pointer. Subsequent calls to HITLS_X509_StoreCtxFree() or HITLS_X509_StoreCtxCtrl(...GET_CERTCHAIN...) will operate on freed memory, creating a use-after-free/double-free hazard when the store context is reused after a successful verification.</div>
+                <div class="fix-label">Fix:</div><pre>EXIT:
+    BSL_LIST_FREE(storeCtx-&gt;certChain, (BSL_LIST_PFUNC_FREE)HITLS_X509_CertFree);
+    storeCtx-&gt;certChain = NULL;
+    return ret;
+}</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">X509_AddCAPath NULL check for val parameter removed</div>
+                <div class="issue-location">pki/x509_verify/src/hitls_x509_verify.c:408-419</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CLAUDE</span>
+                    <span class="confidence-badge trusted">置信度: 可信</span>
+                </div>
+                <pre>static int32_t X509_AddCAPath(HITLS_X509_StoreCtx *storeCtx, const void *val, uint32_t valLen)
+{
+    if (valLen == 0 || valLen &gt; MAX_PATH_LEN) {
+        BSL_ERR_PUSH_ERROR(HITLS_X509_ERR_INVALID_PARAM);
+        return HITLS_X509_ERR_INVALID_PARAM;
+    }
+    const char *caPath = (const char *)val;
+    ...
+    if (strlen(existPath) == valLen &amp;&amp; memcmp(existPath, caPath, valLen) == 0) {</pre>
+                <div class="problem"><strong>Issue:</strong> The NULL check for the val parameter was removed. If val is NULL but valLen is a valid non-zero number, the function will crash at line 419 when calling memcmp(existPath, caPath, valLen) where caPath is NULL (cast from val).</div>
+                <div class="fix-label">Fix:</div><pre>static int32_t X509_AddCAPath(HITLS_X509_StoreCtx *storeCtx, const void *val, uint32_t valLen)
+{
+    if (val == NULL || valLen == 0 || valLen &gt; MAX_PATH_LEN) {
+        BSL_ERR_PUSH_ERROR(HITLS_X509_ERR_INVALID_PARAM);
+        return HITLS_X509_ERR_INVALID_PARAM;
+    }
+    const char *caPath = (const char *)val;
+    ...</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">BssaUnBlind ignores BN_Bin2Bn return value causing incorrect cryptographic output</div>
+                <div class="issue-location">crypto/rsa/src/rsa_encdec.c:702</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CLAUDE</span>
+                    <span class="confidence-badge trusted">置信度: 可信</span>
+                </div>
+                <pre>(void)BN_Bin2Bn(z, input, inputLen);
+GOTO_ERR_IF(BN_ModMul(s, z, blind-&gt;rInv, n, opt), ret);</pre>
+                <div class="problem"><strong>Issue:</strong> The function ignores the return value of BN_Bin2Bn. If the function fails (e.g., memory allocation in BnExtend), z is zeroized and the computation proceeds with z=0, causing incorrect cryptographic output instead of returning an error. This is a security issue as it produces silent incorrect results.</div>
+                <div class="fix-label">Fix:</div><pre>GOTO_ERR_IF(BN_Bin2Bn(z, input, inputLen), ret);
+GOTO_ERR_IF(BN_ModMul(s, z, blind-&gt;rInv, n, opt), ret);</pre>
+            </div>
+</div>
+<div class="section"><div class="section-title medium">Medium</div>
+<div class="issue">
+                <div class="issue-title">InputRangeCheck ignores BN_SubLimb error handling</div>
+                <div class="issue-location">crypto/rsa/src/rsa_encdec.c:52</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CLAUDE</span>
+                    <span class="confidence-badge trusted">置信度: 可信</span>
+                </div>
+                <pre>(void)BN_SubLimb(nMinusOne, n, 1);
+if (BN_Cmp(input, nMinusOne) &gt;= 0) {
+    ret = CRYPT_RSA_ERR_INPUT_VALUE;</pre>
+                <div class="problem"><strong>Issue:</strong> BN_SubLimb can fail with CRYPT_NULL_INPUT or CRYPT_MEM_ALLOC_FAIL. Ignoring the error means if nMinusOne allocation fails, the comparison with n-1 is incorrectly performed, potentially accepting invalid input values that should be rejected.</div>
+                <div class="fix-label">Fix:</div><pre>ret = BN_SubLimb(nMinusOne, n, 1);
+if (ret != CRYPT_SUCCESS) {
+    BSL_ERR_PUSH_ERROR(ret);
+    BN_Destroy(nMinusOne);
+    return ret;
+}
+if (BN_Cmp(input, nMinusOne) &gt;= 0) {
+    ret = CRYPT_RSA_ERR_INPUT_VALUE;</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">BN_ModSqrt skips optimizer cleanup on OptimizerGetXBn failure</div>
+                <div class="issue-location">crypto/bn/src/bn_sqrt.c:309-310</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CODEX</span>
+                    <span class="confidence-badge trusted">置信度: 可信</span>
+                </div>
+                <pre>RETURN_RET_IF_ERR(OptimizerStart(opt), ret);
+RETURN_RET_IF_ERR(OptimizerGetXBn(opt, p-&gt;size, 5, bns), ret); // get 5 BNs</pre>
+                <div class="problem"><strong>Issue:</strong> If OptimizerStart(opt) succeeds but OptimizerGetXBn(...) fails, RETURN_RET_IF_ERR returns immediately without calling OptimizerEnd(opt). This leaves the caller's optimizer stack depth unbalanced after an allocation error, potentially causing memory corruption or crashes in subsequent operations.</div>
+                <div class="fix-label">Fix:</div><pre>ret = OptimizerStart(opt);
+if (ret != CRYPT_SUCCESS) {
+    BSL_ERR_PUSH_ERROR(ret);
+    return ret;
+}
+
+ret = OptimizerGetXBn(opt, p-&gt;size, 5, bns);
+if (ret != CRYPT_SUCCESS) {
+    BSL_ERR_PUSH_ERROR(ret);
+    goto ERR;
+}</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">RSA duplication fails on valid contexts with optional NULL components</div>
+                <div class="issue-location">crypto/rsa/src/rsa_keygen.c:86-112</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CODEX</span>
+                    <span class="confidence-badge trusted">置信度: 可信</span>
+                </div>
+                <pre>GOTO_ERR_IF_DST_NULL(newPriKey-&gt;n, BN_Dup(prvKey-&gt;n), CRYPT_MEM_ALLOC_FAIL);
+GOTO_ERR_IF_DST_NULL(newPriKey-&gt;d, BN_Dup(prvKey-&gt;d), CRYPT_MEM_ALLOC_FAIL);
+GOTO_ERR_IF_DST_NULL(newPriKey-&gt;p, BN_Dup(prvKey-&gt;p), CRYPT_MEM_ALLOC_FAIL);
+GOTO_ERR_IF_DST_NULL(newPriKey-&gt;q, BN_Dup(prvKey-&gt;q), CRYPT_MEM_ALLOC_FAIL);
+GOTO_ERR_IF_DST_NULL(newPriKey-&gt;dP, BN_Dup(prvKey-&gt;dP), CRYPT_MEM_ALLOC_FAIL);</pre>
+                <div class="problem"><strong>Issue:</strong> The duplication functions changed from GOTO_ERR_IF_SRC_NOT_NULL to GOTO_ERR_IF_DST_NULL. They now call BN_Dup() even when source fields (p, q, dP, dQ, qInv, e) are intentionally NULL. This breaks duplication of valid RSA private keys without optional CRT members and generation contexts that only carry bits/e. BN_Dup(NULL) returns NULL, causing the duplication to fail with CRYPT_MEM_ALLOC_FAIL for valid keys.</div>
+                <div class="fix-label">Fix:</div><pre>GOTO_ERR_IF_DST_NULL(newPriKey-&gt;n, BN_Dup(prvKey-&gt;n), CRYPT_MEM_ALLOC_FAIL);
+GOTO_ERR_IF_DST_NULL(newPriKey-&gt;d, BN_Dup(prvKey-&gt;d), CRYPT_MEM_ALLOC_FAIL);
+GOTO_ERR_IF_SRC_NOT_NULL(newPriKey-&gt;p, prvKey-&gt;p, BN_Dup(prvKey-&gt;p), CRYPT_MEM_ALLOC_FAIL);
+GOTO_ERR_IF_SRC_NOT_NULL(newPriKey-&gt;q, prvKey-&gt;q, BN_Dup(prvKey-&gt;q), CRYPT_MEM_ALLOC_FAIL);
+GOTO_ERR_IF_SRC_NOT_NULL(newPriKey-&gt;dP, prvKey-&gt;dP, BN_Dup(prvKey-&gt;dP), CRYPT_MEM_ALLOC_FAIL);</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">BN_MontExp no longer creates temporary optimizer when opt is NULL</div>
+                <div class="issue-location">crypto/bn/src/bn_mont.c:287-295</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CODEX</span>
+                    <span class="confidence-badge trusted">置信度: 可信</span>
+                </div>
+                <pre>static int32_t MontExp(BN_BigNum *r, const BN_BigNum *a, const BN_BigNum *e, BN_Mont *mont,
+    BN_Optimizer *opt, bool consttime)
+{
+    int32_t ret = MontParaCheck(r, a, e, mont);
+    if (ret != CRYPT_SUCCESS) {
+        return ret;
+    }
+
+    return MontExpCore(r, a, e, mont, opt, consttime);
+}</pre>
+                <div class="problem"><strong>Issue:</strong> The implementation that created a temporary optimizer when opt == NULL was removed. MontExp now forwards NULL directly to MontExpCore, which immediately uses the optimizer. The API signature did not change, so callers that previously relied on the automatic fallback will now crash with a null dereference.</div>
+                <div class="fix-label">Fix:</div><pre>static int32_t MontExp(BN_BigNum *r, const BN_BigNum *a, const BN_BigNum *e, BN_Mont *mont,
+    BN_Optimizer *opt, bool consttime)
+{
+    int32_t ret = MontParaCheck(r, a, e, mont);
+    if (ret != CRYPT_SUCCESS) {
+        return ret;
+    }
+
+    bool newOpt = (opt == NULL);
+    if (newOpt) {
+        opt = BN_OptimizerCreate();
+        if (opt == NULL) {
+            BSL_ERR_PUSH_ERROR(CRYPT_MEM_ALLOC_FAIL);
+            return CRYPT_MEM_ALLOC_FAIL;
+        }
+    }
+
+    ret = MontExpCore(r, a, e, mont, opt, consttime);
+    if (newOpt) {
+        BN_OptimizerDestroy(opt);
+    }
+    return ret;
+}</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">TcpGetFd and TcpSetFd removed NULL check for uio->ctx</div>
+                <div class="issue-location">bsl/uio/src/uio_tcp.c:143-152</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CLAUDE</span>
+                    <span class="confidence-badge evaluate">置信度: 需评估</span>
+                </div>
+                <pre>static int32_t TcpGetFd(BSL_UIO *uio, int32_t size, int32_t *fd)
+{
+    ...
+    TcpPrameters *ctx = uio-&gt;ctx;
+    *fd = ctx-&gt;fd;</pre>
+                <div class="problem"><strong>Issue:</strong> The functions no longer check if uio->ctx is NULL before accessing ctx->fd. While TcpSocketCtrl now checks uio->ctx == NULL before routing to these functions, TcpSetFd and TcpGetFd can be called directly, bypassing this protection. This reduces defensive robustness.</div>
+                <div class="fix-label">Fix:</div><pre>static int32_t TcpGetFd(BSL_UIO *uio, int32_t size, int32_t *fd)
+{
+    ...
+    TcpPrameters *ctx = uio-&gt;ctx;
+    if (ctx == NULL) {
+        BSL_ERR_PUSH_ERROR(BSL_UIO_UNINITIALIZED);
+        return BSL_UIO_UNINITIALIZED;
+    }
+    *fd = ctx-&gt;fd;</pre>
+            </div>
+</div>
+<div class="section"><div class="section-title low">Low</div>
+<div class="issue">
+                <div class="issue-title">RSA_GetPublicExp allocates more memory than needed for r1 and r2</div>
+                <div class="issue-location">crypto/rsa/src/rsa_keygen.c:258-259</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CLAUDE</span>
+                    <span class="confidence-badge likely">置信度: 较可信</span>
+                </div>
+                <pre>BN_BigNum *r1 = BN_Create(bits);
+BN_BigNum *r2 = BN_Create(bits);</pre>
+                <div class="problem"><strong>Issue:</strong> r1 and r2 are allocated with bits size instead of bits>>1. Since r1 = p - 1 and r2 = q - 1 where p and q are roughly bits/2 sized primes, they fit in bits/2 + 1 bits. Using bits size is wasteful for a bin size optimization PR.</div>
+                <div class="fix-label">Fix:</div><pre>BN_BigNum *r1 = BN_Create(bits &gt;&gt; 1);
+BN_BigNum *r2 = BN_Create(bits &gt;&gt; 1);</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">memcpy_s error handling removed in DRBG_CtrBCCUpdate</div>
+                <div class="issue-location">crypto/drbg/src/drbg_ctr.c:202</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CLAUDE</span>
+                    <span class="confidence-badge likely">置信度: 较可信</span>
+                </div>
+                <pre>(void)memcpy_s(temp + tempPos, left, in-&gt;data + offset, cpyLen);</pre>
+                <div class="problem"><strong>Issue:</strong> Ignoring memcpy_s return value removes bounds checking validation. While the code ensures valid sizes (cpyLen is min of two positive values), this reduces robustness for defensive programming.</div>
+                <div class="fix-label">Fix:</div><pre>if (memcpy_s(temp + tempPos, left, in-&gt;data + offset, cpyLen) != EOK) {
+    BSL_ERR_PUSH_ERROR(CRYPT_SECUREC_FAIL);
+    return CRYPT_SECUREC_FAIL;
+}</pre>
+            </div>
+</div>
+</div></body></html>

@@ -1,51 +1,12 @@
 [
   {
     "source": "claude",
-    "file": "crypto/mldsa/src/asm/export_ml_dsa_armv8.c",
-    "line": "182",
-    "severity": "critical",
-    "title": "Incorrect buffer index initialization in MLDSA_RejBoundedPolyEta2",
-    "problem": "The fallback loop initializes j = bufLen+1 (137), which immediately triggers a buffer refill on the first iteration (j >= CRYPT_SHAKE256_BLOCKSIZE). This skips bytes from the buffer that were just fetched from SHAKE256. The C reference implementation uses j = 0. This could cause incorrect polynomial generation and weaken cryptographic security.",
-    "code": "gensize = MldRejUniformEta2Asm(a, buf, bufLen, MLD_REJ_UNIFORM_ETA_TABLE);\n\nfor (uint32_t i = gensize, j = bufLen+1; i < MLDSA_N; j++) {\n    if (j >= CRYPT_SHAKE256_BLOCKSIZE) {",
-    "fix": "gensize = MldRejUniformEta2Asm(a, buf, bufLen, MLD_REJ_UNIFORM_ETA_TABLE);\n\nfor (uint32_t i = gensize, j = 0; i < MLDSA_N; j++) {\n    if (j == CRYPT_SHAKE256_BLOCKSIZE) {"
-  },
-  {
-    "source": "claude",
-    "file": "crypto/mldsa/src/asm/export_ml_dsa_armv8.c",
-    "line": "235",
-    "severity": "critical",
-    "title": "Incorrect buffer index initialization in MLDSA_RejBoundedPolyEta4",
-    "problem": "Similar to issue in Eta2, the loop initializes j = bufLen+1 (273), causing immediate buffer refill and skipping valid bytes. Additionally, the condition compares j against CRYPT_SHAKE256_BLOCKSIZE (136) instead of bufLen (272), which is inconsistent with the 2-block buffer allocation.",
-    "code": "gensize = MldRejUniformEta4Asm(a, buf, bufLen, MLD_REJ_UNIFORM_ETA_TABLE);\n\nfor (uint32_t i = gensize, j = bufLen+1; i < MLDSA_N; j++) {\n    if (j >= CRYPT_SHAKE256_BLOCKSIZE) {",
-    "fix": "gensize = MldRejUniformEta4Asm(a, buf, bufLen, MLD_REJ_UNIFORM_ETA_TABLE);\n\nfor (uint32_t i = gensize, j = 0; i < MLDSA_N; j++) {\n    if (j == CRYPT_SHAKE256_BLOCKSIZE) {"
-  },
-  {
-    "source": "claude",
-    "file": "crypto/mldsa/src/ml_dsa_core.c",
-    "line": "95-102",
-    "severity": "high",
-    "title": "Memory allocation bug fix for MLDSAKeyGenCreateMatrix",
-    "problem": "The original code had a critical bug where s1[i] and s1Ntt[i] were assigned memory in the same loop iteration, causing them to point to overlapping memory regions. The fix correctly splits this into two separate loops. This is a correct fix for a memory corruption bug.",
-    "code": "for (uint8_t i = 0; i < l; i++) {\n    MLDSA_SET_VECTOR_MEM(st->s1[i], buf);\n}\nfor (uint8_t i = 0; i < l; i++) {\n    MLDSA_SET_VECTOR_MEM(st->s1Ntt[i], buf);\n}"
-  },
-  {
-    "source": "claude",
-    "file": "crypto/mldsa/src/asm/export_ml_dsa_armv8.c",
-    "line": "108-109",
-    "severity": "medium",
-    "title": "Inconsistent buffer handling in MLDSA_RejNTTPoly fallback loop",
-    "problem": "After the assembly call processes 5 blocks of SHAKE128 data, the fallback loop starts with j = 0. This means it re-processes the buffer from the beginning rather than continuing from where the assembly function left off. The C reference implementation starts with j = 0 but in a different context (no initial assembly preprocessing).",
-    "code": "gensize = MldRejUniformAsm(a, (uint8_t *) buf, outlen, MLD_REJ_UNIFORM_TABLE);\noutlen = CRYPT_SHAKE128_BLOCKSIZE;\nbuflen = CRYPT_SHAKE128_BLOCKSIZE / 4;\n\nuint32_t j = 0;\nfor (uint32_t i = gensize; i < MLDSA_N;) {",
-    "fix": "gensize = MldRejUniformAsm(a, (uint8_t *) buf, outlen, MLD_REJ_UNIFORM_TABLE);\n// Calculate how many bytes were consumed by the assembly function\nuint32_t bytesConsumed = (gensize * 3 + 2) / 4 * sizeof(uint32_t); // Approximate\nuint32_t j = bytesConsumed / sizeof(uint32_t);\nbuflen = outlen / sizeof(uint32_t);\n\nfor (uint32_t i = gensize; i < MLDSA_N;) {"
-  },
-  {
-    "source": "claude",
-    "file": "crypto/mldsa/src/asm/export_ml_dsa_armv8.c",
-    "line": "190",
+    "file": "crypto/mldsa/src/asm/polyz_unpack_armv8.S",
+    "line": "145-146",
     "severity": "low",
-    "title": "Malformed comments missing mathematical symbols",
-    "problem": "The comments are missing mathematical operators (eta symbol η and minus sign -), making them incomplete and potentially misleading for developers trying to understand the algorithm.",
-    "code": "// if  = 2 and b < 15 then return 2  (b mod 5)\n...\n// 2  (b mod 5)",
-    "fix": "// if η = 2 and b < 15 then return 2 − (b mod 5)\n...\n// 2 − (b mod 5)"
+    "title": "Inconsistent register naming in PolyzUnpack19Asm",
+    "problem": "The PolyzUnpack19Asm function uses raw register names (d2, q0) instead of the defined aliases (buf2, buf0) used elsewhere in the code. This is inconsistent with the coding style and could cause confusion during maintenance. The code is functionally correct because d2 is the lower 64 bits of v2 (aliased as buf2), and the index table only accesses bytes 0-7 which are properly loaded.",
+    "code": "polyz_unpack_19_loop:\n    ldr q_buf1, [buf, #16]\n    ldr d2, [buf, #32]\n    ldr q0, [buf], #40",
+    "fix": "polyz_unpack_19_loop:\n    ldr q_buf1, [buf, #16]\n    ldr q_buf2, [buf, #32]\n    ldr q_buf0, [buf], #40"
   }
 ]

@@ -1,0 +1,82 @@
+[
+  {
+    "source": "claude",
+    "file": "crypto/rsa/src/rsa_encdec.c",
+    "line": "702",
+    "severity": "high",
+    "title": "Error handling removed in BssaUnBlind",
+    "problem": "The function ignores the return value of BN_Bn2Bn. If the function fails (e.g., memory allocation in BnExtend), z is zeroized and the computation proceeds with z=0, causing incorrect cryptographic output instead of returning an error.",
+    "code": "(void)BN_Bin2Bn(z, input, inputLen);\nGOTO_ERR_IF(BN_ModMul(s, z, blind->rInv, n, opt), ret);",
+    "fix": "GOTO_ERR_IF(BN_Bin2Bn(z, input, inputLen), ret);\nGOTO_ERR_IF(BN_ModMul(s, z, blind->rInv, n, opt), ret);"
+  },
+  {
+    "source": "claude",
+    "file": "pki/x509_verify/src/hitls_x509_verify.c",
+    "line": "408-419",
+    "severity": "high",
+    "title": "NULL check removed in X509_AddCAPath",
+    "problem": "The NULL check for val parameter was removed. If val is NULL but valLen is a valid number, the function will crash at line 419 when calling memcmp(existPath, caPath, valLen) where caPath is NULL.",
+    "code": "static int32_t X509_AddCAPath(HITLS_X509_StoreCtx *storeCtx, const void *val, uint32_t valLen)\n{\n    if (valLen == 0 || valLen > MAX_PATH_LEN) {\n        BSL_ERR_PUSH_ERROR(HITLS_X509_ERR_INVALID_PARAM);\n        return HITLS_X509_ERR_INVALID_PARAM;\n    }\n    const char *caPath = (const char *)val;\n    ...\n    if (strlen(existPath) == valLen && memcmp(existPath, caPath, valLen) == 0) {",
+    "fix": "static int32_t X509_AddCAPath(HITLS_X509_StoreCtx *storeCtx, const void *val, uint32_t valLen)\n{\n    if (val == NULL || valLen == 0 || valLen > MAX_PATH_LEN) {\n        BSL_ERR_PUSH_ERROR(HITLS_X509_ERR_INVALID_PARAM);\n        return HITLS_X509_ERR_INVALID_PARAM;\n    }\n    const char *caPath = (const char *)val;\n    ..."
+  },
+  {
+    "source": "claude",
+    "file": "crypto/rsa/src/rsa_encdec.c",
+    "line": "52",
+    "severity": "medium",
+    "title": "Error handling removed for BN_SubLimb",
+    "problem": "BN_SubLimb can fail with CRYPT_NULL_INPUT or CRYPT_MEM_ALLOC_FAIL. Ignoring the error means if nMinusOne allocation fails, the comparison with n-1 is skipped, potentially accepting invalid input values.",
+    "code": "(void)BN_SubLimb(nMinusOne, n, 1);\nif (BN_Cmp(input, nMinusOne) >= 0) {\n    ret = CRYPT_RSA_ERR_INPUT_VALUE;",
+    "fix": "ret = BN_SubLimb(nMinusOne, n, 1);\nif (ret != CRYPT_SUCCESS) {\n    BSL_ERR_PUSH_ERROR(ret);\n    BN_Destroy(nMinusOne);\n    return ret;\n}\nif (BN_Cmp(input, nMinusOne) >= 0) {"
+  },
+  {
+    "source": "claude",
+    "file": "bsl/uio/src/uio_tcp.c",
+    "line": "143-152",
+    "severity": "medium",
+    "title": "NULL check removed in TcpGetFd",
+    "problem": "The function no longer checks if uio->ctx is NULL before accessing ctx->fd. While uio->ctx should be non-NULL after BSL_UIO_New, this reduces robustness.",
+    "code": "static int32_t TcpGetFd(BSL_UIO *uio, int32_t size, int32_t *fd)\n{\n    ...\n    TcpPrameters *ctx = uio->ctx;\n    *fd = ctx->fd;",
+    "fix": "static int32_t TcpGetFd(BSL_UIO *uio, int32_t size, int32_t *fd)\n{\n    ...\n    TcpPrameters *ctx = uio->ctx;\n    if (ctx == NULL) {\n        BSL_ERR_PUSH_ERROR(BSL_UIO_UNINITIALIZED);\n        return BSL_UIO_UNINITIALIZED;\n    }\n    *fd = ctx->fd;"
+  },
+  {
+    "source": "claude",
+    "file": "bsl/uio/src/uio_tcp.c",
+    "line": "130-141",
+    "severity": "medium",
+    "title": "NULL check removed in TcpSetFd",
+    "problem": "The function no longer checks if uio->ctx is NULL before accessing ctx->fd. TcpSocketCtrl checks uio->ctx == NULL but TcpSetFd can be called directly.",
+    "code": "static int32_t TcpSetFd(BSL_UIO *uio, int32_t size, const int32_t *fd)\n{\n    ...\n    TcpPrameters *ctx = uio->ctx;\n    if (ctx->fd != -1) {",
+    "fix": "static int32_t TcpSetFd(BSL_UIO *uio, int32_t size, const int32_t *fd)\n{\n    ...\n    TcpPrameters *ctx = uio->ctx;\n    if (ctx == NULL) {\n        BSL_ERR_PUSH_ERROR(BSL_UIO_UNINITIALIZED);\n        return BSL_UIO_UNINITIALIZED;\n    }\n    if (ctx->fd != -1) {"
+  },
+  {
+    "source": "claude",
+    "file": "crypto/rsa/src/rsa_keygen.c",
+    "line": "258-259",
+    "severity": "low",
+    "title": "Unnecessary memory allocation in RSA_GetPublicExp",
+    "problem": "r1 and r2 are allocated with bits size instead of bits>>1. Since p-1 and q-1 (where p and q are roughly bits/2 sized primes) fit in bits/2 + 1 bits, using bits size is wasteful for a bin size optimization PR.",
+    "code": "BN_BigNum *r1 = BN_Create(bits);\nBN_BigNum *r2 = BN_Create(bits);\n// r1 = p - 1, r2 = q - 1 where p and q are ~bits/2 sized primes",
+    "fix": "BN_BigNum *r1 = BN_Create(bits >> 1);\nBN_BigNum *r2 = BN_Create(bits >> 1);"
+  },
+  {
+    "source": "claude",
+    "file": "crypto/drbg/src/drbg_ctr.c",
+    "line": "52-53",
+    "severity": "low",
+    "title": "Redundant NULL check removed in DRBG_CtrXor",
+    "problem": "The NULL check for dst was removed. While all callers pass stack-allocated temp buffer, this reduces defensive programming.",
+    "code": "static void DRBG_CtrXor(CRYPT_Data *dst, const CRYPT_Data *src)\n{\n    uint32_t xorlen;\n    if (CRYPT_IsDataNull(src)) {\n        return;\n    }",
+    "fix": "static void DRBG_CtrXor(CRYPT_Data *dst, const CRYPT_Data *src)\n{\n    uint32_t xorlen;\n    if (CRYPT_IsDataNull(dst) || CRYPT_IsDataNull(src)) {\n        return;\n    }"
+  },
+  {
+    "source": "claude",
+    "file": "crypto/drbg/src/drbg_ctr.c",
+    "line": "202",
+    "severity": "low",
+    "title": "memcpy_s error handling removed",
+    "problem": "Ignoring memcpy_s return value removes bounds checking validation, though the code ensures valid sizes.",
+    "code": "(void)memcpy_s(temp + tempPos, left, in->data + offset, cpyLen);",
+    "fix": "if (memcpy_s(temp + tempPos, left, in->data + offset, cpyLen) != EOK) {\n    BSL_ERR_PUSH_ERROR(CRYPT_SECUREC_FAIL);\n    return CRYPT_SECUREC_FAIL;\n}"
+  }
+]

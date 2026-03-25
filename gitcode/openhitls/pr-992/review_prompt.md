@@ -3,30 +3,37 @@
 You are reviewing PR #992 for openHiTLS/openhitls.
 
 
-## Changed Files (37 files)
+## Local Repository Context
 
-**Source** (24 files):
+- Repository root: `openhitls-992/openhitls`
+- Base ref: `c683dcba3ff7f18f20d4434b5ef6d22dd4a5d8a2`
+- Head ref: `mr-992`
+- The change under review is already checked out locally in this repository.
+
+## Changed Files (78 files)
+
+**Source** (65 files):
   - config/macro_config/hitls_config_layer_crypto.h
   - crypto/eal/src/eal_pkey_method.c
-  - crypto/lms/include/crypt_hss.h
-  - crypto/lms/include/crypt_lms.h
-  - crypto/lms/src/hss_api.c
-  - crypto/lms/src/hss_core.c
-  - crypto/lms/src/hss_local.h
-  - crypto/lms/src/hss_params.h
-  - crypto/lms/src/hss_utils.c
-  - crypto/lms/src/lms_api.c
-  - crypto/lms/src/lms_core.c
-  - crypto/lms/src/lms_hash.c
-  - crypto/lms/src/lms_hash.h
-  - crypto/lms/src/lms_local.h
-  - crypto/lms/src/lms_ots.c
-  - crypto/lms/src/lms_params.h
-  - crypto/provider/include/crypt_default_provderimpl.h
-  - crypto/provider/src/default/crypt_default_keymgmt.c
-  - crypto/provider/src/default/crypt_default_provider.c
-  - crypto/provider/src/default/crypt_default_sign.c
-  - ... and 4 more
+  - crypto/hbs/common/hbs_address.h
+  - crypto/hbs/common/hbs_common.h
+  - crypto/hbs/common/hbs_tree.c
+  - crypto/hbs/common/hbs_tree.h
+  - crypto/hbs/common/hbs_wots.c
+  - crypto/hbs/common/hbs_wots.h
+  - crypto/hbs/hss/src/hss_api.c
+  - crypto/hbs/hss/src/hss_core.c
+  - crypto/hbs/hss/src/hss_local.h
+  - crypto/hbs/hss/src/hss_params.h
+  - crypto/hbs/hss/src/hss_tree.c
+  - crypto/hbs/hss/src/hss_tree.h
+  - crypto/hbs/hss/src/hss_utils.c
+  - crypto/hbs/include/crypt_hss.h
+  - crypto/hbs/include/crypt_lms.h
+  - crypto/hbs/include/crypt_slh_dsa.h
+  - crypto/hbs/include/crypt_xmss.h
+  - crypto/hbs/lms/src/lms_address.c
+  - ... and 45 more
 
 **Test** (12 files):
   - crypto/provider/src/cmvp/cmvp_utils/cmvp_selftest_hss.c
@@ -46,18 +53,30 @@ You are reviewing PR #992 for openHiTLS/openhitls.
   - config/json/feature.json
 
 
+## Hard Constraints
+
+- Review ONLY the local repository checkout in the current working directory.
+- Use local git/file inspection only.
+- Do NOT search the web.
+- Do NOT open GitHub, GitLab, Gitee, or GitCode pages for this review.
+- Do NOT rely on remote PR pages or web search results for code analysis.
+- If a git command fails, retry with another local command or inspect the changed files directly.
+- If local tooling is limited, continue from the checked-out files and changed-file list instead of switching to network search.
+
 ## Your Task
 
 Perform a thorough change review by:
 
 1. **Understand the Change**
-   - Read the diff stats: `git diff --stat b5351df3e5473e944ea1170dd21102ff44ad9cdd mr-992`
+   - Read the diff stats: `git diff --stat c683dcba3ff7f18f20d4434b5ef6d22dd4a5d8a2 mr-992`
    - Understand what this PR is trying to achieve
 
 2. **Review Each File**
-   - For each changed file, view its diff: `git diff b5351df3e5473e944ea1170dd21102ff44ad9cdd mr-992 -- <file>`
+   - For each changed file, view its diff: `git diff c683dcba3ff7f18f20d4434b5ef6d22dd4a5d8a2 mr-992 -- <file>`
    - If you need more context, read the full file or search for related code
    - Look for: security issues, logic errors, edge cases, error handling
+   - Treat assembly files (`.S`, `.s`, `.asm`) as source code and review ABI/calling convention,
+     register and stack preservation, memory addressing, bounds, and architecture guards
    - For non-code files (docs/config), focus on correctness and safety of the content
 
 3. **Track Dependencies**
@@ -70,6 +89,8 @@ Perform a thorough change review by:
    - Logic: null/nil checks, boundary conditions, error paths
    - API: breaking changes, compatibility, proper error returns
    - Resources: leaks, proper cleanup, race conditions
+   - Assembly: calling convention mismatches, save/restore bugs, bad clobbers,
+     stack alignment, incorrect addressing, missing feature/architecture guards
    - Documentation (Markdown/docs): incorrect or outdated instructions, wrong flags/paths,
      broken references, misleading examples, missing steps, or unsafe guidance
    - Config/build/CI: insecure defaults, mismatched versions, missing required keys

@@ -11,111 +11,56 @@
     ]
   },
   "statistics": {
-    "total": 9,
-    "critical": 6,
-    "high": 0,
-    "medium": 0,
-    "low": 3
+    "total": 4,
+    "critical": 0,
+    "high": 2,
+    "medium": 1,
+    "low": 1
   },
   "issues": [
     {
-      "file": "crypto/mldsa/src/asm/export_ml_dsa_armv8.c",
-      "line": "182",
-      "severity": "critical",
-      "title": "Incorrect buffer index initialization in MLDSA_RejBoundedPolyEta2",
-      "reviewers": "CLAUDE",
-      "confidence": "trusted",
-      "problem": "The fallback loop initializes j = bufLen+1 (137), which immediately triggers j >= CRYPT_SHAKE256_BLOCKSIZE (136), causing an immediate buffer refill. This skips the bytes that were just fetched from SHAKE256. The C reference implementation (export_mldsa_c.c:170) uses j = 0, which is the correct initialization. This bug causes incorrect polynomial generation in the ML-DSA signature algorithm, weakening cryptographic security.",
-      "code": "gensize = MldRejUniformEta2Asm(a, buf, bufLen, MLD_REJ_UNIFORM_ETA_TABLE);\n\nfor (uint32_t i = gensize, j = bufLen+1; i < MLDSA_N; j++) {\n    if (j >= CRYPT_SHAKE256_BLOCKSIZE) {",
-      "fix": "gensize = MldRejUniformEta2Asm(a, buf, bufLen, MLD_REJ_UNIFORM_ETA_TABLE);\n\nfor (uint32_t i = gensize, j = 0; i < MLDSA_N; j++) {\n    if (j == CRYPT_SHAKE256_BLOCKSIZE) {"
-    },
-    {
-      "file": "crypto/mldsa/src/asm/export_ml_dsa_armv8.c",
-      "line": "235",
-      "severity": "critical",
-      "title": "Incorrect buffer index initialization in MLDSA_RejBoundedPolyEta4",
-      "reviewers": "CLAUDE",
-      "confidence": "trusted",
-      "problem": "Similar to the Eta2 function, the loop initializes j = bufLen+1 (273), causing immediate buffer refill and skipping valid SHAKE256 bytes. Additionally, the condition compares j against CRYPT_SHAKE256_BLOCKSIZE (136) instead of bufLen (272), which is inconsistent with the 2-block buffer allocation. The C reference implementation (export_mldsa_c.c:217) uses j = 0. This causes incorrect polynomial generation.",
-      "code": "gensize = MldRejUniformEta4Asm(a, buf, bufLen, MLD_REJ_UNIFORM_ETA_TABLE);\n\nfor (uint32_t i = gensize, j = bufLen+1; i < MLDSA_N; j++) {\n    if (j >= CRYPT_SHAKE256_BLOCKSIZE) {",
-      "fix": "gensize = MldRejUniformEta4Asm(a, buf, bufLen, MLD_REJ_UNIFORM_ETA_TABLE);\n\nfor (uint32_t i = gensize, j = 0; i < MLDSA_N; j++) {\n    if (j == CRYPT_SHAKE256_BLOCKSIZE) {"
-    },
-    {
-      "file": "crypto/mldsa/src/asm/export_ml_dsa_armv8.c",
-      "line": "108-149",
-      "severity": "critical",
-      "title": "MLDSA_RejNTTPoly reuses consumed SHAKE128 buffer bytes",
-      "reviewers": "GEMINI, CODEX",
-      "confidence": "trusted",
-      "problem": "After MldRejUniformAsm processes the initial SHAKE128 data and returns gensize < MLDSA_N coefficients, the scalar fallback loop starts with j = 0. This re-reads from buf[0] instead of squeezing a new SHAKE128 block, causing the ARMv8 implementation to diverge from the reference rejection sampler. The C reference implementation (export_mldsa_c.c:103) starts fresh with j = 0 after a single squeeze, but the ARMv8 version has already consumed 5 blocks via assembly.",
-      "code": "gensize = MldRejUniformAsm(a, (uint8_t *) buf, outlen, MLD_REJ_UNIFORM_TABLE);\noutlen = CRYPT_SHAKE128_BLOCKSIZE;\nbuflen = CRYPT_SHAKE128_BLOCKSIZE / 4;\n\nuint32_t j = 0;\nfor (uint32_t i = gensize; i < MLDSA_N;) {\n    const uint32_t w0 = CRYPT_HTOLE32(buf[j]);",
-      "fix": "gensize = MldRejUniformAsm(a, (uint8_t *) buf, outlen, MLD_REJ_UNIFORM_TABLE);\noutlen = CRYPT_SHAKE128_BLOCKSIZE;\nbuflen = CRYPT_SHAKE128_BLOCKSIZE / 4;\n\nif (gensize < MLDSA_N) {\n    GOTO_ERR_IF(hashMethod->squeeze(mdCtx, (uint8_t *)buf, outlen), ret);\n}\nuint32_t j = 0;\nfor (uint32_t i = gensize; i < MLDSA_N;) {"
-    },
-    {
-      "file": "crypto/mldsa/src/noasm/export_mldsa_c.c",
-      "line": "269-276",
-      "severity": "critical",
-      "title": "MLDSA_VectorsCaddQ ignores s2 parameter in noasm implementation",
-      "reviewers": "GEMINI",
-      "confidence": "trusted",
-      "problem": "The noasm implementation completely ignores the s2 parameter ((void) s2;) and only applies conditional modular reduction to w. However, the ARMv8 assembly version calls VecCaddq(w, w, s2) which adds s2 to w before modular reduction. This is a fundamental semantic difference - the two implementations do completely different operations, causing signature verification failures depending on which implementation is used.",
-      "code": "void MLDSA_VectorsCaddQ(int32_t w[MLDSA_N], int32_t s2[MLDSA_N])\n{\n    (void) s2;\n    for (uint32_t i = 0; i < MLDSA_N; i++) {\n        w[i] += (MLDSA_Q & (((MLDSA_Q + 1) / 2 - w[i] - 1) >> 31));\n        MLDSA_MOD_Q(w[i]);\n    }\n}",
-      "fix": "void MLDSA_VectorsCaddQ(int32_t w[MLDSA_N], int32_t s2[MLDSA_N])\n{\n    for (uint32_t i = 0; i < MLDSA_N; i++) {\n        w[i] += s2[i];\n        w[i] += (MLDSA_Q & (w[i] >> 31));\n    }\n}"
-    },
-    {
-      "file": "crypto/mldsa/src/noasm/export_mldsa_c.c",
-      "line": "75-81",
-      "severity": "critical",
-      "title": "MLDSA_Batch_Decompose fails to store r0 values in array a",
-      "reviewers": "GEMINI",
-      "confidence": "trusted",
-      "problem": "The noasm implementation writes r0 to a local variable and discards it. It fails to update a[i] with the r0 value. The ARMv8 assembly implementation (BatchDecompose88/BatchDecompose32) modifies the input array a in-place to store the r0 values while storing r1 in the output array. This divergence causes incorrect cryptographic computations.",
-      "code": "void MLDSA_Batch_Decompose(const CRYPT_ML_DSA_Ctx *ctx, int32_t a[MLDSA_N], int32_t r1[MLDSA_N])\n{\n    for (uint32_t i = 0; i < MLDSA_N; i++) {\n        int32_t r0;\n        MLDSA_Decompose(ctx, a[i], &r1[i], &r0);\n    }\n}",
-      "fix": "void MLDSA_Batch_Decompose(const CRYPT_ML_DSA_Ctx *ctx, int32_t a[MLDSA_N], int32_t r1[MLDSA_N])\n{\n    for (uint32_t i = 0; i < MLDSA_N; i++) {\n        int32_t r0;\n        MLDSA_Decompose(ctx, a[i], &r1[i], &r0);\n        a[i] = r0;\n    }\n}"
-    },
-    {
-      "file": "config/json/feature.json",
-      "line": "1417-1427",
-      "severity": "critical",
-      "title": "Build configuration references deleted ml_dsa_ntt.c path",
+      "file": "crypto/mldsa/src/asm/rej_uniform_armv8.S",
+      "line": "103-106",
+      "severity": "high",
+      "title": "AArch64 rejection sampler incorrectly rejects the valid value q-1",
       "reviewers": "CODEX",
       "confidence": "trusted",
-      "problem": "The ML-DSA source reorganization moved ml_dsa_ntt.c from crypto/mldsa/src/ to crypto/mldsa/src/noasm/, but the .srcs.public list still points to the old deleted path \"crypto/mldsa/src/ml_dsa_ntt.c\". The local source resolver always includes .srcs.public before variant-specific lists, so any build with mldsa enabled attempts to compile a non-existent source file, causing build failures.",
-      "code": "\".srcs\": {\n    \"public\": [\n        \"crypto/mldsa/src/ml_dsa_core.c\",\n        \"crypto/mldsa/src/ml_dsa_ntt.c\",\n        \"crypto/mldsa/src/ml_dsa.c\"\n    ],\n    \"no_asm\": \"crypto/mldsa/src/noasm/*.c\",",
-      "fix": "\".srcs\": {\n    \"public\": [\n        \"crypto/mldsa/src/ml_dsa_core.c\",\n        \"crypto/mldsa/src/ml_dsa.c\"\n    ],\n    \"no_asm\": \"crypto/mldsa/src/noasm/*.c\","
+      "problem": "The sampler loads `8380417 - 1` (q-1 = 0x7FE000) into `mldsa_q` and uses `cmhi` for unsigned greater-than comparison. This accepts only values `< q - 1`, so the valid coefficient `8380416` is rejected in both the main loop and the 24-byte tail path. The C version in `export_mldsa_c.c` correctly uses `(MLDSA_Q - 1 - t0) >> 31` which accepts values `<= 8380416`. This biases the rejection sampler on every armv8 build and makes the generated ML-DSA matrices diverge from the spec.",
+      "code": "// load q = 8380417 - 1\n    movz wtmp, #0xE000\n    movk wtmp, #0x7F, lsl #16    // 8380417 = 0x7FE001\n    dup mldsa_q.4s, wtmp\n...\n        cmhi tmp0.4s, mldsa_q.4s, val0.4s\n        cmhi tmp1.4s, mldsa_q.4s, val1.4s\n        cmhi tmp2.4s, mldsa_q.4s, val2.4s\n        cmhi tmp3.4s, mldsa_q.4s, val3.4s",
+      "fix": "// load q = 8380417\n    movz wtmp, #0xE001\n    movk wtmp, #0x7F, lsl #16\n    dup mldsa_q.4s, wtmp"
+    },
+    {
+      "file": "crypto/mldsa/src/noasm/export_mldsa_c.c",
+      "line": "75-82",
+      "severity": "high",
+      "title": "Missing negative value correction in MLDSA_Batch_Decompose",
+      "reviewers": "GEMINI",
+      "confidence": "trusted",
+      "problem": "In the original `ml_dsa_core.c`, `ComputesW` correctly added `MLDSA_Q` to negative values before calling `Decompose()`: `w[i][j] = w[i][j] + (MLDSA_Q & (w[i][j] >> 31))`. The refactored code extracts this loop into `MLDSA_Batch_Decompose()`. The assembly version (`BatchDecompose88`/`32`) includes this correction via the `finit` macro, but the C fallback version omits it. Since `MLDSA_ComputesINVNTT()` can yield negative values, passing a negative `int32_t` directly to `MLDSA_Decompose()` causes the cast to `uint32_t` to produce a huge number, breaking the decomposition logic.",
+      "code": "void MLDSA_Batch_Decompose(const CRYPT_ML_DSA_Ctx *ctx, int32_t a[MLDSA_N], int32_t r1[MLDSA_N])\n{\n    for (uint32_t i = 0; i < MLDSA_N; i++) {\n        int32_t r0;\n        MLDSA_Decompose(ctx, a[i], &r1[i], &r0);\n        a[i] = r0;\n    }\n}",
+      "fix": "void MLDSA_Batch_Decompose(const CRYPT_ML_DSA_Ctx *ctx, int32_t a[MLDSA_N], int32_t r1[MLDSA_N])\n{\n    for (uint32_t i = 0; i < MLDSA_N; i++) {\n        int32_t r0;\n        a[i] = a[i] + (MLDSA_Q & (a[i] >> 31));\n        MLDSA_Decompose(ctx, a[i], &r1[i], &r0);\n        a[i] = r0;\n    }\n}"
     },
     {
       "file": "crypto/mldsa/src/asm/export_ml_dsa_armv8.c",
-      "line": "46",
-      "severity": "low",
-      "title": "Unnecessary (void) cast for used parameter h",
-      "reviewers": "GEMINI",
-      "confidence": "likely",
-      "problem": "Parameter h is cast to void to suppress unused warning, but it is actually used at line 51 (fp(w[i], h[i]);). The (void) h; cast at line 46 is unnecessary and should be removed.",
-      "code": "void MLDSA_UseHint(const CRYPT_ML_DSA_Ctx *ctx, int32_t *const h[MLDSA_K_MAX], int32_t *w[MLDSA_K_MAX])\n{\n    (void) h;\n    void (*fp)(int32_t *, int32_t const *);\n    fp = ctx->info->k == K_VALUE_OF_MLDSA_44? Usehint88: Usehint32;\n\n    for (uint8_t i = 0; i < ctx->info->k; i++) {\n        fp(w[i], h[i]);\n    }\n}",
-      "fix": "void MLDSA_UseHint(const CRYPT_ML_DSA_Ctx *ctx, int32_t *const h[MLDSA_K_MAX], int32_t *w[MLDSA_K_MAX])\n{\n    void (*fp)(int32_t *, int32_t const *);"
+      "line": "100-104",
+      "severity": "medium",
+      "title": "In-place HTOLE32 conversion corrupts byte stream for big-endian armv8",
+      "reviewers": "CODEX",
+      "confidence": "trusted",
+      "problem": "`MldRejUniformAsm` consumes the SHAKE output as raw bytes, not as 32-bit words. The loop swaps every `uint32_t` in `buf` before passing it to the assembly routine. On big-endian AArch64 builds, this reverses the byte order inside each 4-byte chunk, causing the assembly to derive a different public matrix than the portable implementation. The project has big-endian support paths, so this breaks cross-platform consistency.",
+      "code": "GOTO_ERR_IF(hashMethod->squeeze(mdCtx, (uint8_t *)buf, outlen), ret);\nfor (uint32_t i = 0; i < buflen; i++) {\n    buf[i] = CRYPT_HTOLE32(buf[i]);\n}\nuint32_t gensize = 0;\ngensize = MldRejUniformAsm(a, (uint8_t *) buf, outlen, MLD_REJ_UNIFORM_TABLE);",
+      "fix": "GOTO_ERR_IF(hashMethod->squeeze(mdCtx, (uint8_t *)buf, outlen), ret);\nuint32_t gensize = 0;\ngensize = MldRejUniformAsm(a, (const uint8_t *)buf, outlen, MLD_REJ_UNIFORM_TABLE);"
     },
     {
-      "file": "crypto/mldsa/src/asm/export_ml_dsa_armv8.c",
-      "line": "160",
+      "file": "crypto/mldsa/src/asm/polyz_unpack_armv8.S",
+      "line": "145-146",
       "severity": "low",
-      "title": "Unnecessary (void) cast for used parameter s",
-      "reviewers": "GEMINI",
+      "title": "Inconsistent register naming in PolyzUnpack19Asm",
+      "reviewers": "CLAUDE",
       "confidence": "likely",
-      "problem": "Parameter s is cast to void at line 160, but it is used at line 177 (hashMethod->update(mdCtx, s, MLDSA_PRIVATE_SEED_LEN + 2)). The (void) s; cast is unnecessary.",
-      "code": "int32_t MLDSA_RejBoundedPolyEta2(int32_t *a, const uint8_t *s)\n{\n    (void) s;\n    uint8_t buf[CRYPT_SHAKE256_BLOCKSIZE] = {0};\n    ...\n    GOTO_ERR_IF(hashMethod->update(mdCtx, s, MLDSA_PRIVATE_SEED_LEN + 2), ret);",
-      "fix": "int32_t MLDSA_RejBoundedPolyEta2(int32_t *a, const uint8_t *s)\n{\n    uint8_t buf[CRYPT_SHAKE256_BLOCKSIZE] = {0};"
-    },
-    {
-      "file": "crypto/mldsa/src/asm/export_ml_dsa_armv8.c",
-      "line": "213",
-      "severity": "low",
-      "title": "Unnecessary (void) cast for used parameter s",
-      "reviewers": "GEMINI",
-      "confidence": "likely",
-      "problem": "Parameter s is cast to void at line 213, but it is used at line 230 (hashMethod->update(mdCtx, s, MLDSA_PRIVATE_SEED_LEN + 2)). The (void) s; cast is unnecessary.",
-      "code": "int32_t MLDSA_RejBoundedPolyEta4(int32_t *a, const uint8_t *s)\n{\n    (void) s;\n    uint8_t buf[2*CRYPT_SHAKE256_BLOCKSIZE] = {0};\n    ...\n    GOTO_ERR_IF(hashMethod->update(mdCtx, s, MLDSA_PRIVATE_SEED_LEN + 2), ret);",
-      "fix": "int32_t MLDSA_RejBoundedPolyEta4(int32_t *a, const uint8_t *s)\n{\n    uint8_t buf[2*CRYPT_SHAKE256_BLOCKSIZE] = {0};"
+      "problem": "The `PolyzUnpack19Asm` function uses raw register names (`d2`, `q0`) instead of the defined aliases (`s_buf2`, `q_buf0`) used elsewhere in the code. In contrast, `PolyzUnpack17Asm` consistently uses the aliases (`q_buf1`, `s_buf2`, `q_buf0`). This inconsistency could cause confusion during maintenance. The code is functionally correct because `d2` is the lower 64 bits of `v2`, and the index table only accesses bytes 0-7.",
+      "code": "polyz_unpack_19_loop:\n    ldr q_buf1, [buf, #16]\n    ldr d2, [buf, #32]\n    ldr q0, [buf], #40",
+      "fix": "polyz_unpack_19_loop:\n    ldr q_buf1, [buf, #16]\n    ldr q_buf2, [buf, #32]\n    ldr q_buf0, [buf], #40"
     }
   ]
 }
