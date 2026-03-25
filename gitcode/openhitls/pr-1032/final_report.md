@@ -2,54 +2,21 @@
 ## openHiTLS/openhitls - PR #1032
 
 ### Summary
-- **Total Issues**: 8
+- **Total Issues**: 10
 - **Critical**: 0
-- **High**: 3
-- **Medium**: 3
-- **Low**: 2
-- **Reviewers**: claude, gemini, codex
+- **High**: 5
+- **Medium**: 1
+- **Low**: 4
+- **Reviewers**: claude, codex
 
 ---
 
 
 ## High
 
-### Incorrect IP SAN comparison causing false verification failures
-`pki/x509_common/src/hitls_x509_util.c:182-186`
-**Reviewers**: CLAUDE, GEMINI, CODEX | **置信度**: 可信
-```
-} else if (gn->type == HITLS_X509_GN_IP) {
-    ret = memcmp(gn->value.data, hostname, gn->value.dataLen);
-    if (ret == HITLS_PKI_SUCCESS) {
-        break;
-    }
-}
-```
-**Issue**: The code compares raw IP address bytes from the certificate SAN (gn->value.data) directly against the hostname string using memcmp. This is fundamentally broken because:
-1. hostname is a string representation like "192.168.1.1" or "::1"
-2. gn->value.data contains raw binary IP bytes (4 bytes for IPv4, 16 for IPv6)
-3. The memcmp will never match valid IP addresses
-4. If hostname string is shorter than gn->value.dataLen (e.g., "::1" is 2 chars but IPv6 SAN is 16 bytes), this causes out-of-bounds read
-**Fix**:
-```
-} else if (gn->type == HITLS_X509_GN_IP) {
-    /* Parse hostname string to binary IP for comparison with SAN */
-    uint8_t ipbuf[16];
-    int af = (gn->value.dataLen == 4) ? AF_INET :
-             (gn->value.dataLen == 16) ? AF_INET6 : -1;
-    if (af != -1 && inet_pton(af, hostname, ipbuf) == 1 &&
-        memcmp(gn->value.data, ipbuf, gn->value.dataLen) == 0) {
-        ret = HITLS_PKI_SUCCESS;
-        break;
-    }
-}
-```
-
----
-
-### Big-endian bug and missing NULL check in SET_HOST_FLAG
+### Type mismatch in hostflag range check and pointer cast
 `tls/cert/hitls_x509_adapt/hitls_x509_cert_store.c:105-110`
-**Reviewers**: CLAUDE, GEMINI, CODEX | **置信度**: 可信
+**Reviewers**: CLAUDE | **置信度**: 可信
 ```
 case CERT_STORE_CTRL_SET_HOST_FLAG:
     if (*(int64_t *)input > UINT32_MAX || *(int64_t *)input < 0) {
@@ -58,38 +25,225 @@ case CERT_STORE_CTRL_SET_HOST_FLAG:
     return HITLS_X509_StoreCtxCtrl(store, HITLS_X509_STORECTX_SET_HOST_FLAG, (int64_t *)input,
         sizeof(uint32_t));
 ```
-**Issue**: Multiple issues:
-1. No NULL check on input before dereferencing - NULL input will crash
-2. The code casts input to int64_t* for validation, then passes (int64_t*)input with sizeof(uint32_t) to X509_SetHostFlags. On big-endian systems, dereferencing an int64_t* as uint32_t* will read the high 32 bits instead of the low 32 bits (where the value is stored), causing hostflags to be ignored
+**Issue**: The code casts input to int64_t* for range checking but passes the same pointer to a function expecting uint32_t*. The comparison *(int64_t *)input > UINT32_MAX will never be true for negative values since they're cast as signed. More critically, passing (int64_t *)input to X509_SetHostFlags which expects uint32_t* is incorrect - on little-endian systems this happens to work, but it's fundamentally wrong and could fail on other architectures or with different compiler optimizations.
 **Fix**:
 ```
-case CERT_STORE_CTRL_SET_HOST_FLAG: {
-    if (input == NULL) {
-        return HITLS_CERT_STORE_CTRL_ERR_SET_HOST_FLAG;
+case CERT_STORE_CTRL_SET_HOST_FLAG:
+    {
+        uint64_t flagVal = *(uint64_t *)input;
+        if (flagVal > UINT32_MAX) {
+            return HITLS_CERT_STORE_CTRL_ERR_SET_HOST_FLAG;
+        }
+        uint32_t flagVal32 = (uint32_t)flagVal;
+        return HITLS_X509_StoreCtxCtrl(store, HITLS_X509_STORECTX_SET_HOST_FLAG, &flagVal32,
+            sizeof(uint32_t));
     }
-    uint32_t flags = (uint32_t)(*(int64_t *)input);
-    return HITLS_X509_StoreCtxCtrl(store, HITLS_X509_STORECTX_SET_HOST_FLAG, &flags,
-        sizeof(uint32_t));
-}
 ```
 
 ---
 
-### Integer underflow in IPv6 validation length calculation
-`pki/x509_verify/src/hitls_x509_verify.c:846`
-**Reviewers**: CLAUDE | **置信度**: 较可信
+### DNS/CN matching no longer validates hostnameLen equals strlen(hostname)
+`pki/x509_common/src/hitls_x509_util.c:208-226`
+**Reviewers**: CODEX | **置信度**: 可信
 ```
-int ipv6Len = hasIpv4 ? ipv4Start - 1 : (int)strlen(ipstr);
-if (!ParseIPv6Segments(ipstr, ipv6Len, &stats)) {
+int32_t HITLS_X509_VerifyHostname(HITLS_X509_Cert *cert, uint32_t flags, const char *hostname, uint32_t hostnameLen)
+{
+    if (cert == NULL || hostname == NULL) {
+        BSL_ERR_PUSH_ERROR(HITLS_X509_ERR_INVALID_PARAM);
+        return HITLS_X509_ERR_INVALID_PARAM;
+    }
+    // hostnameLen validation removed - was here before
+    int32_t (*MatchCb)(const char *pattern, const char *hostname);
+    if ((flags & HITLS_X509_FLAG_VFY_WITH_PARTIAL_WILDCARD) != 0) {
+        MatchCb = MatchWithPartialWildcard;
+    } else {
+        MatchCb = MatchWithSingleWildcard;
+    }
+
+    int32_t ret = X509_VerifyHostnameWithSan(cert, hostname, hostnameLen, MatchCb);
+    if (ret == HITLS_X509_ERR_EXT_NOT_FOUND) {
+        return X509_VerifyHostnameWithCn(cert, hostname, MatchCb);  // Uses strlen(hostname) internally
+    }
 ```
-**Issue**: When ipv4Start is 0, the calculation `ipv4Start - 1` becomes -1 (or SIZE_MAX when cast to unsigned). This negative length is then passed to ParseIPv6Segments, which could cause incorrect behavior or buffer issues
+**Issue**: The validation `if (hostnameLen != (uint32_t)strlen(hostname))` was removed. This means: 1) Hostnames with embedded NUL bytes can bypass validation (e.g., "evil.com\0" with hostnameLen=4 would pass as "evil"), 2) The function still treats hostname as a C string in the CN fallback path via X509_VerifyHostnameWithCn which uses string semantics, 3) Binary IP addresses can fall through to CN matching when SAN is absent, treating binary data as a C string.
 **Fix**:
 ```
-int ipv6Len = hasIpv4 ? ipv4Start - 1 : (int)strlen(ipstr);
-if (ipv6Len <= 0) {
-    return false;  // Invalid IPv6 format
+int32_t HITLS_X509_VerifyHostname(HITLS_X509_Cert *cert, uint32_t flags, const char *hostname, uint32_t hostnameLen)
+{
+    if (cert == NULL || hostname == NULL) {
+        BSL_ERR_PUSH_ERROR(HITLS_X509_ERR_INVALID_PARAM);
+        return HITLS_X509_ERR_INVALID_PARAM;
+    }
+    /* For string-based matching, hostnameLen must match actual string length */
+    if (hostnameLen != (uint32_t)strlen(hostname)) {
+        BSL_ERR_PUSH_ERROR(HITLS_X509_ERR_INVALID_PARAM);
+        return HITLS_X509_ERR_INVALID_PARAM;
+    }
+    int32_t (*MatchCb)(const char *pattern, const char *hostname);
+    if ((flags & HITLS_X509_FLAG_VFY_WITH_PARTIAL_WILDCARD) != 0) {
+        MatchCb = MatchWithPartialWildcard;
+    } else {
+        MatchCb = MatchWithSingleWildcard;
+    }
+
+    int32_t ret = X509_VerifyHostnameWithSan(cert, hostname, hostnameLen, MatchCb);
+    if (ret == HITLS_X509_ERR_EXT_NOT_FOUND) {
+        return X509_VerifyHostnameWithCn(cert, hostname, MatchCb);
+    }
+```
+
+---
+
+### Connection-specific host state stored in shared store context
+`pki/x509_verify/include/hitls_x509_verify.h:45-50`
+**Reviewers**: CODEX | **置信度**: 可信
+```
+typedef struct _HITLS_X509_VerifyParam {
+    int32_t maxDepth;
+    uint32_t securityBits;
+    int64_t time;
+    uint64_t flags;
+    int32_t purpose;
+#ifdef HITLS_CRYPTO_SM2
+    BSL_Buffer sm2UserId;
+#endif
+    BslList *hostnames;         // list of verify hostname
+    unsigned char *ip;          // verify ip
+    int32_t ipLen;
+    uint32_t hostflags;         // verify hostfalg
+
+    char *peername;             // hostname matched after verification
+} HITLS_X509_VerifyParam;
+```
+**Issue**: The fields hostnames, ip, ipLen, hostflags, and peername were added to HITLS_X509_VerifyParam which lives inside HITLS_X509_StoreCtx. Store contexts are refcount-shared when one HITLS_Config is cloned into multiple HITLS_Ctx objects. This means sibling connections created from the same config will overwrite each other's verification targets and peer names. Connection-specific state should be on the per-connection object, not in the shared store.
+**Fix**:
+```
+/* Move connection-specific host verification state to HITLS_Ctx or per-connection object.
+ * Keep HITLS_X509_VerifyParam for store-wide parameters only. */
+typedef struct {
+    BslList *hostnames;
+    unsigned char *ip;
+    int32_t ipLen;
+    uint32_t hostflags;
+    char *peername;
+} HITLS_X509_HostVerifyState;
+```
+
+---
+
+### SetVerifyParam can return success with stale/missing host targets after allocation failure
+`pki/x509_verify/src/hitls_x509_verify.c:710-727`
+**Reviewers**: CODEX | **置信度**: 可信
+```
+HITLS_X509_VerifyParam *verifyParam = (HITLS_X509_VerifyParam *)val;
+storeCtx->verifyParam.hostflags = verifyParam->hostflags;
+if (verifyParam->hostnames != NULL) {
+    BSL_LIST_FREE(storeCtx->verifyParam.hostnames, (BSL_LIST_PFUNC_FREE)BSL_SAL_Free);
+    storeCtx->verifyParam.hostnames = BSL_LIST_Copy(verifyParam->hostnames, (BSL_LIST_PFUNC_DUP)DupString,
+        (BSL_LIST_PFUNC_FREE)BSL_SAL_Free);
+    // No check if copy failed!
 }
-if (!ParseIPv6Segments(ipstr, ipv6Len, &stats)) {
+if (verifyParam->ip != NULL && verifyParam->ipLen > 0) {
+    BSL_SAL_FREE(storeCtx->verifyParam.ip);
+    storeCtx->verifyParam.ip = BSL_SAL_Calloc(verifyParam->ipLen + 1, sizeof(unsigned char));
+    if (storeCtx->verifyParam.ip == NULL) {
+        BSL_ERR_PUSH_ERROR(BSL_MALLOC_FAIL);
+        return BSL_MALLOC_FAIL;  // Returns error but hostnames already freed!
+    }
+```
+**Issue**: X509_SetVerifyParam frees the old hostname list before copying the new one, never checks if BSL_LIST_Copy() failed, and leaves the previous host/IP untouched when the incoming field is NULL. After an allocation failure, the hostnames list is freed but not replaced, silently disabling hostname verification. If verifyParam->hostnames is NULL, the old list remains intact, which may prevent intended clearing or replacement.
+**Fix**:
+```
+BslList *newHostnames = NULL;
+unsigned char *newIp = NULL;
+
+if (verifyParam->hostnames != NULL) {
+    newHostnames = BSL_LIST_Copy(verifyParam->hostnames, (BSL_LIST_PFUNC_DUP)DupString,
+        (BSL_LIST_PFUNC_FREE)BSL_SAL_Free);
+    if (newHostnames == NULL) {
+        BSL_ERR_PUSH_ERROR(BSL_MALLOC_FAIL);
+        return BSL_MALLOC_FAIL;
+    }
+}
+
+if (verifyParam->ip != NULL && verifyParam->ipLen > 0) {
+    newIp = BSL_SAL_Calloc(verifyParam->ipLen, sizeof(unsigned char));
+    if (newIp == NULL) {
+        BSL_LIST_FREE(newHostnames, (BSL_LIST_PFUNC_FREE)BSL_SAL_Free);
+        BSL_ERR_PUSH_ERROR(BSL_MALLOC_FAIL);
+        return BSL_MALLOC_FAIL;
+    }
+    (void)memcpy_s(newIp, verifyParam->ipLen, verifyParam->ip, verifyParam->ipLen);
+}
+
+/* Atomic swap - only modify storeCtx after all allocations succeed */
+storeCtx->verifyParam.hostflags = verifyParam->hostflags;
+BSL_LIST_FREE(storeCtx->verifyParam.hostnames, (BSL_LIST_PFUNC_FREE)BSL_SAL_Free);
+storeCtx->verifyParam.hostnames = newHostnames;
+BSL_SAL_FREE(storeCtx->verifyParam.ip);
+storeCtx->verifyParam.ip = newIp;
+storeCtx->verifyParam.ipLen = verifyParam->ipLen;
+```
+
+---
+
+### Peername field not cleared on verification failure or IP-only match
+`pki/x509_verify/src/hitls_x509_verify.c:1718-1760`
+**Reviewers**: CODEX | **置信度**: 可信
+```
+static int32_t CheckHostnames(HITLS_X509_StoreCtx *storeCtx, HITLS_X509_List *chain)
+{
+    int32_t ret = HITLS_X509_ERR_VFY_HOSTNAME_FAIL;
+    HITLS_X509_Cert *certee = BSL_LIST_GET_FIRST(chain);
+    for (char *hostname = BSL_LIST_GET_FIRST(storeCtx->verifyParam.hostnames); hostname != NULL;) {
+        ret = HITLS_X509_VerifyHostname(certee, storeCtx->verifyParam.hostflags, hostname, strlen(hostname));
+        if (ret == HITLS_PKI_SUCCESS) {
+            BSL_SAL_FREE(storeCtx->verifyParam.peername);  // Only freed on success
+            storeCtx->verifyParam.peername = BSL_SAL_Calloc(strlen(hostname) + 1, sizeof(char));
+            // ... set peername ...
+            break;
+        }
+        hostname = BSL_LIST_GET_NEXT(storeCtx->verifyParam.hostnames);
+    }
+    return ret;
+}
+
+static int32_t X509_CheckHost(HITLS_X509_StoreCtx *storeCtx, HITLS_X509_List *chain)
+{
+    int32_t ret = HITLS_X509_ERR_VFY_HOSTNAME_FAIL;
+    if (storeCtx->verifyParam.hostnames != NULL && BSL_LIST_COUNT(storeCtx->verifyParam.hostnames) > 0) {
+        ret = CheckHostnames(storeCtx, chain);  // peername only set here on success
+        if (ret != HITLS_PKI_SUCCESS) {
+            return ret;  // Early return - old peername remains!
+        }
+    }
+
+    if (storeCtx->verifyParam.ip != NULL) {  // IP match doesn't update peername
+        HITLS_X509_Cert *certee = BSL_LIST_GET_FIRST(chain);
+        ret = HITLS_X509_VerifyHostname(certee, storeCtx->verifyParam.hostflags, (char *)storeCtx->verifyParam.ip,
+            storeCtx->verifyParam.ipLen);
+```
+**Issue**: The peername field is only updated inside the successful DNS hostname verification branch in CheckHostnames. If a previous verification matched a hostname and the next verification: 1) fails completely, or 2) only matches via IP SAN (not DNS hostname), the peername retains the old value from the previous connection. HITLS_GetPeerName() would return stale connection data.
+**Fix**:
+```
+static int32_t X509_CheckHost(HITLS_X509_StoreCtx *storeCtx, HITLS_X509_List *chain)
+{
+    /* Clear stale peername at the start of each verification */
+    BSL_SAL_FREE(storeCtx->verifyParam.peername);
+    storeCtx->verifyParam.peername = NULL;
+
+    int32_t ret = HITLS_X509_ERR_VFY_HOSTNAME_FAIL;
+    if (storeCtx->verifyParam.hostnames != NULL && BSL_LIST_COUNT(storeCtx->verifyParam.hostnames) > 0) {
+        ret = CheckHostnames(storeCtx, chain);
+        if (ret != HITLS_PKI_SUCCESS) {
+            return ret;
+        }
+    }
+
+    if (storeCtx->verifyParam.ip != NULL) {
+        HITLS_X509_Cert *certee = BSL_LIST_GET_FIRST(chain);
+        ret = HITLS_X509_VerifyHostname(certee, storeCtx->verifyParam.hostflags, (char *)storeCtx->verifyParam.ip,
+            storeCtx->verifyParam.ipLen);
 ```
 
 ---
@@ -97,67 +251,27 @@ if (!ParseIPv6Segments(ipstr, ipv6Len, &stats)) {
 
 ## Medium
 
-### Missing error check for BSL_LIST_Copy allocation failure
-`pki/x509_verify/src/hitls_x509_verify.c:969-973`
-**Reviewers**: CLAUDE, CODEX | **置信度**: 可信
-```
-if (verifyParam->hostnames != NULL) {
-    BSL_LIST_FREE(storeCtx->verifyParam.hostnames, (BSL_LIST_PFUNC_FREE)BSL_SAL_Free);
-    storeCtx->verifyParam.hostnames = BSL_LIST_Copy(verifyParam->hostnames, (BSL_LIST_PFUNC_DUP)DupString,
-        (BSL_LIST_PFUNC_FREE)BSL_SAL_Free);
-}
-```
-**Issue**: BSL_LIST_Copy can return NULL on memory allocation failure, but the code doesn't check for this. If allocation fails, storeCtx->verifyParam.hostnames becomes NULL but the function continues, silently dropping all hostname verification
-**Fix**:
-```
-if (verifyParam->hostnames != NULL) {
-    BSL_LIST_FREE(storeCtx->verifyParam.hostnames, (BSL_LIST_PFUNC_FREE)BSL_SAL_Free);
-    storeCtx->verifyParam.hostnames = BSL_LIST_Copy(verifyParam->hostnames, (BSL_LIST_PFUNC_DUP)DupString,
-        (BSL_LIST_PFUNC_FREE)BSL_SAL_Free);
-    if (storeCtx->verifyParam.hostnames == NULL) {
-        BSL_ERR_PUSH_ERROR(BSL_MALLOC_FAIL);
-        return BSL_MALLOC_FAIL;
-    }
-}
-```
-
----
-
-### Insufficient buffer overflow protection in ValidateIPv4Section
-`pki/x509_verify/src/hitls_x509_verify.c:723-726`
+### Incorrect memcpy_s size parameter in X509_SetVerifyHost
+`pki/x509_verify/src/hitls_x509_verify.c:625-626`
 **Reviewers**: CLAUDE | **置信度**: 较可信
 ```
-for (int i = ipv4Start; i < (int)strlen(ipstr) && j < 15; i++) {
-    ipv4Part[j++] = ipstr[i];
+char *tmp = BSL_SAL_Calloc(hostnameLen + 1, sizeof(char));
+if (tmp == NULL) {
+    BSL_ERR_PUSH_ERROR(BSL_MALLOC_FAIL);
+    return BSL_MALLOC_FAIL;
 }
-ipv4Part[j] = '\0';
+(void)memcpy_s(tmp, hostnameLen, hostname, hostnameLen);
+tmp[hostnameLen] = '\0';
 ```
-**Issue**: The loop condition `j < 15` doesn't prevent writing to ipv4Part[15] when j reaches 15. The subsequent null terminator write `ipv4Part[j] = '\0'` at index 15 is valid (buffer is size 16), but the loop logic is fragile. If source input has exactly 15 chars before null, j becomes 15 after loop, which is at the boundary
+**Issue**: The memcpy_s call uses hostnameLen as the size parameter, but the buffer was allocated with hostnameLen + 1 bytes. While the code then sets tmp[hostnameLen] = '\0' separately, using hostnameLen as the memcpy_s size means it won't copy the null terminator even if the source has one. This is technically correct but inconsistent with the allocation pattern.
 **Fix**:
 ```
-for (int i = ipv4Start; i < (int)strlen(ipstr) && j < 15; i++) {
-    ipv4Part[j++] = ipstr[i];
+char *tmp = BSL_SAL_Calloc(hostnameLen + 1, sizeof(char));
+if (tmp == NULL) {
+    BSL_ERR_PUSH_ERROR(BSL_MALLOC_FAIL);
+    return BSL_MALLOC_FAIL;
 }
-if (j >= 15) {
-    return false;  // IPv4 part too long
-}
-ipv4Part[j] = '\0';
-```
-
----
-
-### Hostname verification ignores configured hostflags
-`pki/x509_verify/src/hitls_x509_verify.c:1977-1978`
-**Reviewers**: CODEX | **置信度**: 可信
-```
-for (char *hostname = BSL_LIST_GET_FIRST(storeCtx->verifyParam.hostnames); hostname != NULL;) {
-    ret = HITLS_X509_VerifyHostname(certee, 0, hostname, strlen(hostname));
-```
-**Issue**: DNS hostname verification passes `0` as flags instead of `storeCtx->verifyParam.hostflags`, so the newly added host flag API is ineffective for DNS hostname validation
-**Fix**:
-```
-for (char *hostname = BSL_LIST_GET_FIRST(storeCtx->verifyParam.hostnames); hostname != NULL;) {
-    ret = HITLS_X509_VerifyHostname(certee, storeCtx->verifyParam.hostflags, hostname, strlen(hostname));
+(void)memcpy_s(tmp, hostnameLen + 1, hostname, hostnameLen + 1);
 ```
 
 ---
@@ -165,52 +279,121 @@ for (char *hostname = BSL_LIST_GET_FIRST(storeCtx->verifyParam.hostnames); hostn
 
 ## Low
 
-### Off-by-one loop reads null terminator unnecessarily
-`pki/x509_verify/src/hitls_x509_verify.c:665`
+### Unnecessary null byte appended to binary IP address storage
+`pki/x509_verify/src/hitls_x509_verify.c:643-653`
 **Reviewers**: CLAUDE | **置信度**: 较可信
 ```
-for (int i = 0; i <= len; i++) {
-    if (str[i] == '.' || str[i] == '\0') {
+static int32_t X509_SetVerifyIp(HITLS_X509_StoreCtx *storeCtx, unsigned char *ip, uint32_t ipLen)
+{
+    storeCtx->verifyParam.ip = BSL_SAL_Malloc(ipLen + 1);
+    if (storeCtx->verifyParam.ip == NULL) {
+        BSL_ERR_PUSH_ERROR(BSL_MALLOC_FAIL);
+        return BSL_MALLOC_FAIL;
+    }
+    (void)memcpy_s(storeCtx->verifyParam.ip, ipLen, ip, ipLen);
+    storeCtx->verifyParam.ip[ipLen] = '\0';
+    storeCtx->verifyParam.ipLen = ipLen;
+    return HITLS_PKI_SUCCESS;
+}
 ```
-**Issue**: The loop condition `i <= len` accesses str[len] which is the null terminator. While this works (null terminator fails isdigit() check), it's fragile and unclear
+**Issue**: The function allocates ipLen + 1 bytes and appends a null terminator. IP addresses are binary data, not null-terminated strings, and ipLen is tracked separately. The extra byte is wasteful and the null terminator serves no purpose for binary data.
 **Fix**:
 ```
-for (int i = 0; i < len; i++) {
-    if (str[i] == '.') {
-        if (!CheckIpv4Part(str, partStart, i)) {
-            return false;
-        }
-        partCount++;
-        partStart = i + 1;
+static int32_t X509_SetVerifyIp(HITLS_X509_StoreCtx *storeCtx, unsigned char *ip, uint32_t ipLen)
+{
+    storeCtx->verifyParam.ip = BSL_SAL_Malloc(ipLen);
+    if (storeCtx->verifyParam.ip == NULL) {
+        BSL_ERR_PUSH_ERROR(BSL_MALLOC_FAIL);
+        return BSL_MALLOC_FAIL;
     }
-}
-// Check final part after loop
-if (partCount == 3) {
-    if (!CheckIpv4Part(str, partStart, len)) {
-        return false;
-    }
-    partCount++;
+    (void)memcpy_s(storeCtx->verifyParam.ip, ipLen, ip, ipLen);
+    storeCtx->verifyParam.ipLen = ipLen;
+    return HITLS_PKI_SUCCESS;
 }
 ```
 
 ---
 
-### Potential undefined behavior in ValidateIPv6Format
-`pki/x509_verify/src/hitls_x509_verify.c:798-800`
+### Redundant null terminator assignment in DupString
+`pki/x509_verify/src/hitls_x509_verify.c:693-700`
 **Reviewers**: CLAUDE | **置信度**: 较可信
 ```
-if (ipstr[ipv6Len - 1] == ':' && (ipv6Len == 1 || ipstr[ipv6Len - 2] != ':')) {
-    return false;
+static void *DupString(const char *str)
+{
+    void *dest = BSL_SAL_Dump(str, strlen(str) + 1);
+    if (dest == NULL) {
+        return NULL;
+    }
+    ((char *)dest)[strlen(str)] = '\0';
+    return dest;
 }
 ```
-**Issue**: When ipv6Len is 1, `ipstr[ipv6Len - 2]` accesses `ipstr[-1]` which is undefined behavior. The check order should verify length >= 2 before accessing index - 2
+**Issue**: BSL_SAL_Dump is called with strlen(str) + 1 which should include the null terminator. Then the code explicitly sets the null terminator again at the same position, which is redundant.
 **Fix**:
 ```
-if (ipv6Len >= 1 && ipstr[ipv6Len - 1] == ':') {
-    if (ipv6Len == 1 || ipstr[ipv6Len - 2] != ':') {
-        return false;
-    }
+static void *DupString(const char *str)
+{
+    return BSL_SAL_Dump(str, strlen(str) + 1);
 }
+```
+
+---
+
+### Redundant null terminator for IP address in X509_SetVerifyParam
+`pki/x509_verify/src/hitls_x509_verify.c:717-726`
+**Reviewers**: CLAUDE | **置信度**: 较可信
+```
+if (verifyParam->ip != NULL && verifyParam->ipLen > 0) {
+    BSL_SAL_FREE(storeCtx->verifyParam.ip);
+    storeCtx->verifyParam.ip = BSL_SAL_Calloc(verifyParam->ipLen + 1, sizeof(unsigned char));
+    if (storeCtx->verifyParam.ip == NULL) {
+        BSL_ERR_PUSH_ERROR(BSL_MALLOC_FAIL);
+        return BSL_MALLOC_FAIL;
+    }
+    (void)memcpy_s(storeCtx->verifyParam.ip, verifyParam->ipLen, verifyParam->ip, verifyParam->ipLen);
+    storeCtx->verifyParam.ip[verifyParam->ipLen] = '\0';
+    storeCtx->verifyParam.ipLen = verifyParam->ipLen;
+}
+```
+**Issue**: The IP buffer is allocated with ipLen + 1 bytes and a null terminator is set. IP addresses are binary data and don't need null termination since ipLen tracks the actual length. The extra byte is wasted.
+**Fix**:
+```
+if (verifyParam->ip != NULL && verifyParam->ipLen > 0) {
+    BSL_SAL_FREE(storeCtx->verifyParam.ip);
+    storeCtx->verifyParam.ip = BSL_SAL_Calloc(verifyParam->ipLen, sizeof(unsigned char));
+    if (storeCtx->verifyParam.ip == NULL) {
+        BSL_ERR_PUSH_ERROR(BSL_MALLOC_FAIL);
+        return BSL_MALLOC_FAIL;
+    }
+    (void)memcpy_s(storeCtx->verifyParam.ip, verifyParam->ipLen, verifyParam->ip, verifyParam->ipLen);
+    storeCtx->verifyParam.ipLen = verifyParam->ipLen;
+}
+```
+
+---
+
+### Redundant null terminator assignment in CheckHostnames
+`pki/x509_verify/src/hitls_x509_verify.c:1725-1732`
+**Reviewers**: CLAUDE | **置信度**: 较可信
+```
+storeCtx->verifyParam.peername = BSL_SAL_Calloc(strlen(hostname) + 1, sizeof(char));
+if (storeCtx->verifyParam.peername == NULL) {
+    BSL_ERR_PUSH_ERROR(BSL_MALLOC_FAIL);
+    return BSL_MALLOC_FAIL;
+}
+(void)memcpy_s(storeCtx->verifyParam.peername, strlen(hostname), hostname, strlen(hostname));
+storeCtx->verifyParam.peername[strlen(hostname)] = '\0';
+```
+**Issue**: After allocating with calloc (which zero-initializes) and copying with memcpy_s, the null terminator is set redundantly. The code can be simplified to copy both data and null terminator in a single memcpy_s call.
+**Fix**:
+```
+uint32_t len = strlen(hostname);
+storeCtx->verifyParam.peername = BSL_SAL_Calloc(len + 1, sizeof(char));
+if (storeCtx->verifyParam.peername == NULL) {
+    BSL_ERR_PUSH_ERROR(BSL_MALLOC_FAIL);
+    return BSL_MALLOC_FAIL;
+}
+(void)memcpy_s(storeCtx->verifyParam.peername, len + 1, hostname, len + 1);
 ```
 
 ---

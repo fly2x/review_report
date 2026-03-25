@@ -4,26 +4,71 @@
 
 ## High
 
-### IP SAN compared to hostname string (binary mismatch + OOB read)
-`pki/x509_common/src/hitls_x509_util.c:182-184`
+### DNS/CN matching no longer enforces `hostnameLen`
+`pki/x509_common/src/hitls_x509_util.c:208-225`
 ```
-} else if (gn->type == HITLS_X509_GN_IP) {
-            ret = memcmp(gn->value.data, hostname, gn->value.dataLen);
-            if (ret == HITLS_PKI_SUCCESS) {
+int32_t HITLS_X509_VerifyHostname(HITLS_X509_Cert *cert, uint32_t flags, const char *hostname, uint32_t hostnameLen)
+{
+    if (cert == NULL || hostname == NULL) {
+        BSL_ERR_PUSH_ERROR(HITLS_X509_ERR_INVALID_PARAM);
+        return HITLS_X509_ERR_INVALID_PARAM;
+    }
+    int32_t (*MatchCb)(const char *pattern, const char *hostname);
+    if ((flags & HITLS_X509_FLAG_VFY_WITH_PARTIAL_WILDCARD) != 0) {
+        MatchCb = MatchWithPartialWildcard;
+    } else {
+        MatchCb = MatchWithSingleWildcard;
+    }
+
+    int32_t ret = X509_VerifyHostnameWithSan(cert, hostname, hostnameLen, MatchCb);
+    if (ret == HITLS_X509_ERR_EXT_NOT_FOUND) {
+        return X509_VerifyHostnameWithCn(cert, hostname, MatchCb);
+    }
 ```
-**Issue**: `memcmp` compares raw SAN IP bytes against the ASCII hostname string for `gn->value.dataLen` bytes. This never matches valid IP SANs and can read past the hostname buffer (e.g., IPv6 "::" is 2 bytes but SAN length is 16), causing out-of-bounds reads and false verification failures.
+**Issue**: The removed `hostnameLen == strlen(hostname)` validation means the DNS/CN paths now ignore the supplied length and keep treating `hostname` as a C string. Inputs with embedded NULs or truncated lengths can still match, and the new binary-IP caller can also fall through into CN matching when SAN is absent because `X509_VerifyHostnameWithCn()` still uses string semantics.
 **Fix**:
 ```
-} else if (gn->type == HITLS_X509_GN_IP) {
-            uint8_t ipbuf[16];
-            int af = (gn->value.dataLen == 4) ? AF_INET :
-                     (gn->value.dataLen == 16) ? AF_INET6 : -1;
-            if (af != -1 && inet_pton(af, hostname, ipbuf) == 1 &&
-                memcmp(gn->value.data, ipbuf, gn->value.dataLen) == 0) {
-                ret = HITLS_PKI_SUCCESS;
-                break;
-            }
-        }
+int32_t HITLS_X509_VerifyHostname(HITLS_X509_Cert *cert, uint32_t flags,
+    const char *hostname, uint32_t hostnameLen)
+{
+    if (cert == NULL || hostname == NULL || hostnameLen != (uint32_t)strlen(hostname)) {
+        BSL_ERR_PUSH_ERROR(HITLS_X509_ERR_INVALID_PARAM);
+        return HITLS_X509_ERR_INVALID_PARAM;
+    }
+    ...
+}
+
+/* Add a separate SAN-IP helper for binary IP addresses and call that from
+ * X509_CheckHost() instead of reusing the C-string hostname API. */
+```
+
+---
+
+### Connection-specific host state was added to a shared store object
+`pki/x509_verify/include/hitls_x509_verify.h:45-50`
+```
+BslList *hostnames;         // list of verify hostname
+    unsigned char *ip;          // verify ip
+    int32_t ipLen;
+    uint32_t hostflags;         // verify hostfalg
+
+    char *peername;             // hostname matched after verification
+```
+**Issue**: These fields live inside `HITLS_X509_StoreCtx` via `verifyParam`, but store contexts are refcount-shared when one `HITLS_Config` is cloned into multiple `HITLS_Ctx` objects. `HITLS_SetHost*()` and `HITLS_GetPeerName()` therefore mutate shared state instead of per-connection state, so sibling contexts created from the same config can overwrite each other's verification target and peer name.
+**Fix**:
+```
+typedef struct {
+    BslList *hostnames;
+    unsigned char *ip;
+    int32_t ipLen;
+    uint32_t hostflags;
+    char *peername;
+} HITLS_X509_HostVerifyState;
+
+/* Keep HITLS_X509_VerifyParam store-wide and move HITLS_X509_HostVerifyState
+ * onto a per-HITLS_Ctx / per-connection object. Thread that state through
+ * HITLS_SetHostFlags(), HITLS_SetHost(), HITLS_AddHost(), HITLS_GetPeerName()
+ * and X509_CheckHost() instead of storing it in HITLS_X509_StoreCtx. */
 ```
 
 ---
@@ -31,10 +76,52 @@
 
 ## Medium
 
-### Hostname/IP verification uses AND semantics
-`pki/x509_verify/src/hitls_x509_verify.c:1998-2011`
+### SetVerifyParam can return success with stale or missing host targets
+`pki/x509_verify/src/hitls_x509_verify.c:710-726`
 ```
-if (storeCtx->verifyParam.hostnames != NULL && BSL_LIST_COUNT(storeCtx->verifyParam.hostnames) > 0) {
+storeCtx->verifyParam.hostflags = verifyParam->hostflags;
+    if (verifyParam->hostnames != NULL) {
+        BSL_LIST_FREE(storeCtx->verifyParam.hostnames, (BSL_LIST_PFUNC_FREE)BSL_SAL_Free);
+        storeCtx->verifyParam.hostnames = BSL_LIST_Copy(verifyParam->hostnames, (BSL_LIST_PFUNC_DUP)DupString,
+            (BSL_LIST_PFUNC_FREE)BSL_SAL_Free);
+    }
+    if (verifyParam->ip != NULL && verifyParam->ipLen > 0) {
+        BSL_SAL_FREE(storeCtx->verifyParam.ip);
+        storeCtx->verifyParam.ip = BSL_SAL_Calloc(verifyParam->ipLen + 1, sizeof(unsigned char));
+```
+**Issue**: `X509_SetVerifyParam()` mutates `hostnames` and `ip` in place. It frees the old hostname list before copying the new one, never checks whether `BSL_LIST_Copy()` failed, and leaves the previous host/IP untouched whenever the incoming field is NULL. That can silently disable hostname verification after an allocation failure or keep enforcing a stale identity when the caller intended to replace or clear it.
+**Fix**:
+```
+BslList *newHostnames = NULL;
+    unsigned char *newIp = NULL;
+    int32_t newIpLen = 0;
+
+    if (verifyParam->hostnames != NULL && BSL_LIST_COUNT(verifyParam->hostnames) > 0) {
+        newHostnames = BSL_LIST_Copy(verifyParam->hostnames, (BSL_LIST_PFUNC_DUP)DupString,
+            (BSL_LIST_PFUNC_FREE)BSL_SAL_Free);
+        if (newHostnames == NULL) {
+            BSL_ERR_PUSH_ERROR(BSL_MALLOC_FAIL);
+            return BSL_MALLOC_FAIL;
+        }
+    }
+
+    /* allocate/copy verifyParam->ip into newIp/newIpLen here, then swap */
+    BSL_LIST_FREE(storeCtx->verifyParam.hostnames, (BSL_LIST_PFUNC_FREE)BSL_SAL_Free);
+    storeCtx->verifyParam.hostnames = newHostnames;
+    BSL_SAL_FREE(storeCtx->verifyParam.ip);
+    storeCtx->verifyParam.ip = newIp;
+    storeCtx->verifyParam.ipLen = newIpLen;
+```
+
+---
+
+### Peername survives failed or IP-based revalidation
+`pki/x509_verify/src/hitls_x509_verify.c:1718-1758`
+```
+static int32_t X509_CheckHost(HITLS_X509_StoreCtx *storeCtx, HITLS_X509_List *chain)
+{
+    int32_t ret = HITLS_X509_ERR_VFY_HOSTNAME_FAIL;
+    if (storeCtx->verifyParam.hostnames != NULL && BSL_LIST_COUNT(storeCtx->verifyParam.hostnames) > 0) {
         ret = CheckHostnames(storeCtx, chain);
         if (ret != HITLS_PKI_SUCCESS) {
             return ret;
@@ -43,99 +130,20 @@ if (storeCtx->verifyParam.hostnames != NULL && BSL_LIST_COUNT(storeCtx->verifyPa
 
     if (storeCtx->verifyParam.ip != NULL) {
         HITLS_X509_Cert *certee = BSL_LIST_GET_FIRST(chain);
-        ret = HITLS_X509_VerifyHostname(certee, storeCtx->verifyParam.hostflags, storeCtx->verifyParam.ip, strlen(storeCtx->verifyParam.ip));
-        if (ret != HITLS_PKI_SUCCESS) {
-            return ret;
-        }
-    }
-    return HITLS_PKI_SUCCESS;
+        ret = HITLS_X509_VerifyHostname(certee, storeCtx->verifyParam.hostflags, (char *)storeCtx->verifyParam.ip,
+            storeCtx->verifyParam.ipLen);
 ```
-**Issue**: If both hostnames and IP are configured, the function requires the hostname match to succeed before it even checks the IP. This makes verification fail even when the IP matches, which is surprising for an API that allows multiple hosts/IPs.
+**Issue**: `peername` is only replaced inside the successful DNS hostname branch. If a previous verification matched a hostname and the next verification fails or verifies only an IP SAN, `HITLS_GetPeerName()` still returns the old peer name for the current connection.
 **Fix**:
 ```
-bool matched = false;
+static int32_t X509_CheckHost(HITLS_X509_StoreCtx *storeCtx, HITLS_X509_List *chain)
+{
+    BSL_SAL_FREE(storeCtx->verifyParam.peername);
+    storeCtx->verifyParam.peername = NULL;
 
-    if (storeCtx->verifyParam.hostnames != NULL && BSL_LIST_COUNT(storeCtx->verifyParam.hostnames) > 0) {
-        matched = (CheckHostnames(storeCtx, chain) == HITLS_PKI_SUCCESS);
-    }
-
-    if (!matched && storeCtx->verifyParam.ip != NULL) {
-        HITLS_X509_Cert *certee = BSL_LIST_GET_FIRST(chain);
-        matched = (HITLS_X509_VerifyHostname(certee, storeCtx->verifyParam.hostflags,
-            storeCtx->verifyParam.ip, strlen(storeCtx->verifyParam.ip)) == HITLS_PKI_SUCCESS);
-    }
-
-    return matched ? HITLS_PKI_SUCCESS : HITLS_X509_ERR_VFY_HOSTNAME_FAIL;
-```
-
----
-
-### Host flag value read incorrectly on big-endian targets
-`tls/cert/hitls_x509_adapt/hitls_x509_cert_store.c:105-110`
-```
-case CERT_STORE_CTRL_SET_HOST_FLAG:
-            if (*(int64_t *)input > UINT32_MAX || *(int64_t *)input < 0) {
-                return HITLS_CERT_STORE_CTRL_ERR_SET_HOST_FLAG;
-            }
-            return HITLS_X509_StoreCtxCtrl(store, HITLS_X509_STORECTX_SET_HOST_FLAG, (int64_t *)input,
-                sizeof(uint32_t));
-```
-**Issue**: `CERT_STORE_CTRL_SET_HOST_FLAG` passes an `int64_t*` with a 4-byte length. On big-endian systems, `X509_SetHostFlags` will read the high 32 bits (zero for valid values), so hostflags are effectively ignored.
-**Fix**:
-```
-case CERT_STORE_CTRL_SET_HOST_FLAG: {
-            if (*(int64_t *)input > UINT32_MAX || *(int64_t *)input < 0) {
-                return HITLS_CERT_STORE_CTRL_ERR_SET_HOST_FLAG;
-            }
-            uint32_t hostflag = (uint32_t)*(int64_t *)input;
-            return HITLS_X509_StoreCtxCtrl(store, HITLS_X509_STORECTX_SET_HOST_FLAG, &hostflag,
-                sizeof(hostflag));
-        }
-```
-
----
-
-
-## Low
-
-### Hostname verification ignores configured host flags
-`pki/x509_verify/src/hitls_x509_verify.c:1977-1979`
-```
-for (char *hostname = BSL_LIST_GET_FIRST(storeCtx->verifyParam.hostnames); hostname != NULL;) {
-        ret = HITLS_X509_VerifyHostname(certee, 0, hostname, strlen(hostname));
-        if (ret == HITLS_PKI_SUCCESS) {
-```
-**Issue**: DNS hostname checks always pass `0` as flags, so the newly added `hostflags` setting is never applied to DNS matches (only to IP checks). This makes the host flag API ineffective for DNS validation.
-**Fix**:
-```
-for (char *hostname = BSL_LIST_GET_FIRST(storeCtx->verifyParam.hostnames); hostname != NULL;) {
-        ret = HITLS_X509_VerifyHostname(certee, storeCtx->verifyParam.hostflags, hostname, strlen(hostname));
-        if (ret == HITLS_PKI_SUCCESS) {
-```
-
----
-
-### Missing error handling for hostnames copy failure
-`pki/x509_verify/src/hitls_x509_verify.c:969-973`
-```
-if (verifyParam->hostnames != NULL) {
-        BSL_LIST_FREE(storeCtx->verifyParam.hostnames, (BSL_LIST_PFUNC_FREE)BSL_SAL_Free);
-        storeCtx->verifyParam.hostnames = BSL_LIST_Copy(verifyParam->hostnames, (BSL_LIST_PFUNC_DUP)DupString,
-            (BSL_LIST_PFUNC_FREE)BSL_SAL_Free);
-    }
-```
-**Issue**: `BSL_LIST_Copy` can return NULL on allocation failure, but the code ignores it and returns success, silently dropping hostnames and masking the error.
-**Fix**:
-```
-if (verifyParam->hostnames != NULL) {
-        BSL_LIST_FREE(storeCtx->verifyParam.hostnames, (BSL_LIST_PFUNC_FREE)BSL_SAL_Free);
-        storeCtx->verifyParam.hostnames = BSL_LIST_Copy(verifyParam->hostnames, (BSL_LIST_PFUNC_DUP)DupString,
-            (BSL_LIST_PFUNC_FREE)BSL_SAL_Free);
-        if (storeCtx->verifyParam.hostnames == NULL) {
-            BSL_ERR_PUSH_ERROR(BSL_MALLOC_FAIL);
-            return BSL_MALLOC_FAIL;
-        }
-    }
+    int32_t ret = HITLS_X509_ERR_VFY_HOSTNAME_FAIL;
+    ...
+}
 ```
 
 ---
