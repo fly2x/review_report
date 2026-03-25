@@ -1,0 +1,22 @@
+[
+  {
+    "source": "claude",
+    "file": "src/rsa/rsa_sign.c",
+    "line": "117-119",
+    "severity": "high",
+    "title": "String literal passed as non-const pointer may cause undefined behavior",
+    "problem": "When ctx->pass == NULL, the code passes (unsigned char *)DEFAULT_PASS to SDF_DL_GetPrivateKeyAccessRight. DEFAULT_PASS is a string literal defined in provider.h as \"#define DEFAULT_PASS \"12345678\"\", which is stored in read-only memory. The cast to unsigned char * removes the const qualifier. If the SDF SDK modifies the password buffer, it will cause undefined behavior (segmentation fault or memory corruption).\n\nThis is inconsistent with provider.c which properly allocates a heap buffer and copies the default password (lines 209-220).",
+    "code": "ret = SDF_DL_GetPrivateKeyAccessRight(ctx->hSessionHandle, ctx->keyIndex,\n        ctx->pass != NULL ? ctx->pass : (unsigned char *)DEFAULT_PASS,\n        ctx->pass != NULL ? ctx->passLen : DEFAULT_PASS_LEN);",
+    "fix": "/* Use a static writable buffer for the default password */\nstatic uint8_t g_defaultPassBuffer[] = \"12345678\";\nret = SDF_DL_GetPrivateKeyAccessRight(ctx->hSessionHandle, ctx->keyIndex,\n        ctx->pass != NULL ? ctx->pass : g_defaultPassBuffer,\n        ctx->pass != NULL ? ctx->passLen : sizeof(g_defaultPassBuffer) - 1);"
+  },
+  {
+    "source": "claude",
+    "file": "src/rsa/rsa_pkeycipher.c",
+    "line": "159-160",
+    "severity": "high",
+    "title": "String literal passed as non-const pointer may cause undefined behavior",
+    "problem": "When ctx->pass == NULL, the code passes (unsigned char *)DEFAULT_PASS to SDF_DL_GetPrivateKeyAccessRight. DEFAULT_PASS is a string literal stored in read-only memory. The cast to unsigned char * removes the const qualifier. If the SDF SDK modifies the password buffer, it will cause undefined behavior.",
+    "code": "ret = SDF_DL_GetPrivateKeyAccessRight(ctx->hSessionHandle, ctx->keyIndex,\n        ctx->pass != NULL ? ctx->pass : (unsigned char *)DEFAULT_PASS,\n        ctx->pass != NULL ? ctx->passLen : DEFAULT_PASS_LEN);",
+    "fix": "/* Use a static writable buffer for the default password */\nstatic uint8_t g_defaultPassBuffer[] = \"12345678\";\nret = SDF_DL_GetPrivateKeyAccessRight(ctx->hSessionHandle, ctx->keyIndex,\n        ctx->pass != NULL ? ctx->pass : g_defaultPassBuffer,\n        ctx->pass != NULL ? ctx->passLen : sizeof(g_defaultPassBuffer) - 1);"
+  }
+]

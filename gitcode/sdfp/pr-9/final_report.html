@@ -1,0 +1,276 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Final Report: openHiTLS/sdfp#9</title>
+    <style>
+        :root { --critical: #dc2626; --high: #ea580c; --medium: #ca8a04; --low: #65a30d;
+                 --trusted: #059669; --likely: #0284c7; --evaluate: #7c3aed; }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: system-ui, sans-serif; background: #f8fafc; color: #1e293b; padding: 2rem; line-height: 1.6; }
+        .container { max-width: 900px; margin: 0 auto; }
+        h1 { font-size: 1.75rem; margin-bottom: 0.5rem; }
+        .subtitle { color: #64748b; margin-bottom: 1rem; }
+        .stats { display: flex; gap: 1rem; margin-bottom: 2rem; flex-wrap: wrap; }
+        .stat { background: white; border: 1px solid #e2e8f0; border-radius: 0.5rem; padding: 1rem; min-width: 100px; text-align: center; }
+        .stat-value { font-size: 1.5rem; font-weight: 700; }
+        .stat-label { font-size: 0.875rem; color: #64748b; }
+        .stat.critical .stat-value { color: var(--critical); }
+        .stat.high .stat-value { color: var(--high); }
+        .stat.medium .stat-value { color: var(--medium); }
+        .stat.low .stat-value { color: var(--low); }
+        .reviewers { background: #e0e7ff; color: #3730a3; padding: 0.5rem 1rem; border-radius: 0.5rem; margin-bottom: 2rem; }
+        .section { margin-bottom: 2rem; }
+        .section-title { font-size: 1.1rem; font-weight: 600; padding: 0.5rem 1rem; border-radius: 0.5rem 0.5rem 0 0; color: white; }
+        .section-title.critical { background: var(--critical); }
+        .section-title.high { background: var(--high); }
+        .section-title.medium { background: var(--medium); }
+        .section-title.low { background: var(--low); }
+        .issue { background: white; border: 1px solid #e2e8f0; border-top: none; padding: 1rem; }
+        .issue:last-child { border-radius: 0 0 0.5rem 0.5rem; }
+        .issue-title { font-weight: 600; margin-bottom: 0.25rem; }
+        .issue-location { font-family: monospace; font-size: 0.875rem; color: #64748b; margin-bottom: 0.5rem; }
+        .issue-meta { font-size: 0.75rem; margin-bottom: 0.75rem; display: flex; gap: 0.75rem; align-items: center; }
+        .issue-meta .reviewers { background: #f1f5f9; color: #475569; padding: 0.25rem 0.5rem; border-radius: 0.25rem; margin: 0; }
+        .confidence-badge { padding: 0.25rem 0.5rem; border-radius: 0.25rem; font-weight: 500; }
+        .confidence-badge.trusted { background: #d1fae5; color: #065f46; }
+        .confidence-badge.likely { background: #dbeafe; color: #1e40af; }
+        .confidence-badge.evaluate { background: #ede9fe; color: #5b21b6; }
+        pre { background: #1e293b; color: #e2e8f0; padding: 0.75rem; border-radius: 0.375rem; overflow-x: auto; font-size: 0.875rem; margin: 0.5rem 0; }
+        .problem { margin: 0.75rem 0; }
+        .fix-label { font-weight: 600; margin-top: 0.75rem; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Final Code Review Report</h1>
+        <div class="subtitle">openHiTLS/sdfp - PR #9</div>
+        <p style="margin-bottom: 1rem;"></p>
+
+        <div class="stats">
+            <div class="stat"><div class="stat-value">7</div><div class="stat-label">Total</div></div>
+            <div class="stat critical"><div class="stat-value">1</div><div class="stat-label">Critical</div></div>
+            <div class="stat high"><div class="stat-value">5</div><div class="stat-label">High</div></div>
+            <div class="stat medium"><div class="stat-value">1</div><div class="stat-label">Medium</div></div>
+            <div class="stat low"><div class="stat-value">0</div><div class="stat-label">Low</div></div>
+        </div>
+
+        <div class="reviewers">Reviewers: claude, gemini, codex</div>
+<div class="section"><div class="section-title critical">Critical</div>
+<div class="issue">
+                <div class="issue-title">Buffer overflow in SM4-GCM encryption finalization</div>
+                <div class="issue-location">src/sm4/sm4_gcm.c:213-228</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: GEMINI</span>
+                    <span class="confidence-badge trusted">置信度: 可信</span>
+                </div>
+                <pre>unsigned int tmpLen = *outLen;
+int ret;
+if (ctx-&gt;enc) {
+    unsigned int tagOutLen = SM4_GCM_TAG_MAX;
+    /* Pre-check: ensure the output buffer can hold both ciphertext tail and tag
+     * before calling AuthEncFinal, which would write partial data irreversibly. */
+    if (*outLen &lt; tagOutLen) {
+        return CRYPT_INVALID_ARG;
+    }
+    /* AuthEncFinal outputs remaining ciphertext bytes into [out, tmpLen) */
+    ret = SDF_DL_AuthEncFinal(ctx-&gt;hSessionHandle, out, &amp;tmpLen, ctx-&gt;tag, &amp;tagOutLen);
+    if (ret == SDR_OK) {
+        ctx-&gt;tagLen = tagOutLen;
+        memcpy(out + tmpLen, ctx-&gt;tag, tagOutLen);
+        tmpLen += tagOutLen;
+    }</pre>
+                <div class="problem"><strong>Issue:</strong> When calling SDF_DL_AuthEncFinal, tmpLen is initialized to the full buffer capacity (*outLen). The hardware might write up to tmpLen bytes into the out buffer. The code then appends tagOutLen bytes (the GCM authentication tag) starting at out + tmpLen. If the total written length plus the tag length exceeds *outLen, a buffer overflow occurs. The available capacity for AuthEncFinal must be reduced by tagOutLen.</div>
+                <div class="fix-label">Fix:</div><pre>unsigned int tmpLen;
+int ret;
+if (ctx-&gt;enc) {
+    unsigned int tagOutLen = SM4_GCM_TAG_MAX;
+    /* Pre-check: ensure the output buffer can hold both ciphertext tail and tag
+     * before calling AuthEncFinal, which would write partial data irreversibly. */
+    if (*outLen &lt; tagOutLen) {
+        return CRYPT_INVALID_ARG;
+    }
+    tmpLen = *outLen - tagOutLen;  /* Reserve space for the tag */
+    /* AuthEncFinal outputs remaining ciphertext bytes into [out, tmpLen) */
+    ret = SDF_DL_AuthEncFinal(ctx-&gt;hSessionHandle, out, &amp;tmpLen, ctx-&gt;tag, &amp;tagOutLen);
+    if (ret == SDR_OK) {
+        ctx-&gt;tagLen = tagOutLen;
+        memcpy(out + tmpLen, ctx-&gt;tag, tagOutLen);
+        tmpLen += tagOutLen;
+    }</pre>
+            </div>
+</div>
+<div class="section"><div class="section-title high">High</div>
+<div class="issue">
+                <div class="issue-title">String literal passed as non-const pointer may cause undefined behavior</div>
+                <div class="issue-location">src/rsa/rsa_sign.c:117-119</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CLAUDE</span>
+                    <span class="confidence-badge trusted">置信度: 可信</span>
+                </div>
+                <pre>ret = SDF_DL_GetPrivateKeyAccessRight(ctx-&gt;hSessionHandle, ctx-&gt;keyIndex,
+        ctx-&gt;pass != NULL ? ctx-&gt;pass : (unsigned char *)DEFAULT_PASS,
+        ctx-&gt;pass != NULL ? ctx-&gt;passLen : DEFAULT_PASS_LEN);</pre>
+                <div class="problem"><strong>Issue:</strong> When ctx->pass == NULL, the code passes (unsigned char *)DEFAULT_PASS to SDF_DL_GetPrivateKeyAccessRight. DEFAULT_PASS is a string literal defined in provider.h as "#define DEFAULT_PASS \"12345678\"", which is stored in read-only memory. The cast to unsigned char * removes the const qualifier. If the SDF SDK modifies the password buffer, it will cause undefined behavior (segmentation fault or memory corruption).
+
+This is inconsistent with provider.c which properly allocates a heap buffer and copies the default password (lines 209-220).</div>
+                <div class="fix-label">Fix:</div><pre>/* Use a static writable buffer for the default password */
+static uint8_t g_defaultPassBuffer[] = "12345678";
+ret = SDF_DL_GetPrivateKeyAccessRight(ctx-&gt;hSessionHandle, ctx-&gt;keyIndex,
+        ctx-&gt;pass != NULL ? ctx-&gt;pass : g_defaultPassBuffer,
+        ctx-&gt;pass != NULL ? ctx-&gt;passLen : sizeof(g_defaultPassBuffer) - 1);</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">String literal passed as non-const pointer may cause undefined behavior</div>
+                <div class="issue-location">src/rsa/rsa_pkeycipher.c:158-160</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CLAUDE</span>
+                    <span class="confidence-badge trusted">置信度: 可信</span>
+                </div>
+                <pre>ret = SDF_DL_GetPrivateKeyAccessRight(ctx-&gt;hSessionHandle, ctx-&gt;keyIndex,
+        ctx-&gt;pass != NULL ? ctx-&gt;pass : (unsigned char *)DEFAULT_PASS,
+        ctx-&gt;pass != NULL ? ctx-&gt;passLen : DEFAULT_PASS_LEN);</pre>
+                <div class="problem"><strong>Issue:</strong> When ctx->pass == NULL, the code passes (unsigned char *)DEFAULT_PASS to SDF_DL_GetPrivateKeyAccessRight. DEFAULT_PASS is a string literal stored in read-only memory. The cast to unsigned char * removes the const qualifier. If the SDF SDK modifies the password buffer, it will cause undefined behavior.</div>
+                <div class="fix-label">Fix:</div><pre>/* Use a static writable buffer for the default password */
+static uint8_t g_defaultPassBuffer[] = "12345678";
+ret = SDF_DL_GetPrivateKeyAccessRight(ctx-&gt;hSessionHandle, ctx-&gt;keyIndex,
+        ctx-&gt;pass != NULL ? ctx-&gt;pass : g_defaultPassBuffer,
+        ctx-&gt;pass != NULL ? ctx-&gt;passLen : sizeof(g_defaultPassBuffer) - 1);</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">RSA support is silently disabled while RSA callbacks remain exposed</div>
+                <div class="issue-location">src/common/sdf_dl.c:183-193</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CODEX</span>
+                    <span class="confidence-badge trusted">置信度: 可信</span>
+                </div>
+                <pre>/*
+ * RSA internal key operations are loaded on demand when an internal RSA
+ * key index is configured (not all SDF devices support them).
+ */
+/* LOAD_SYM(genKeyPairRsa,           SDF_GenerateKeyPair_RSA); */
+/* LOAD_SYM(exportSignPubKeyRsa,     SDF_ExportSignPublicKey_RSA); */
+/* LOAD_SYM(exportEncPubKeyRsa,      SDF_ExportEncPublicKey_RSA); */
+/* LOAD_SYM(intPubKeyOpRsa,          SDF_InternalPublicKeyOperation_RSA); */
+/* LOAD_SYM(intPrivKeyOpRsa,         SDF_InternalPrivateKeyOperation_RSA); */
+/* LOAD_SYM(extPubKeyOpRsa,          SDF_ExternalPublicKeyOperation_RSA); */
+/* LOAD_SYM(extPrivKeyOpRsa,         SDF_ExternalPrivateKeyOperation_RSA); */</pre>
+                <div class="problem"><strong>Issue:</strong> The loader no longer resolves any RSA symbols (all commented out), but the provider still registers RSA keymgmt/sign/asymcipher callbacks. Every RSA path now reaches wrappers whose function pointers are still NULL and fails with SDFP_ERR_NOT_LOADED at runtime. This creates silent runtime failures for users attempting to use RSA functionality.</div>
+                <div class="fix-label">Fix:</div><pre>LOAD_SYM(genKeyPairRsa,           SDF_GenerateKeyPair_RSA);
+LOAD_SYM(exportSignPubKeyRsa,     SDF_ExportSignPublicKey_RSA);
+LOAD_SYM(exportEncPubKeyRsa,      SDF_ExportEncPublicKey_RSA);
+LOAD_SYM(intPubKeyOpRsa,          SDF_InternalPublicKeyOperation_RSA);
+LOAD_SYM(intPrivKeyOpRsa,         SDF_InternalPrivateKeyOperation_RSA);
+LOAD_SYM(extPubKeyOpRsa,          SDF_ExternalPublicKeyOperation_RSA);
+LOAD_SYM(extPrivKeyOpRsa,         SDF_ExternalPrivateKeyOperation_RSA);</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">Provider unload tears down the process-global RNG even when it did not create it</div>
+                <div class="issue-location">src/common/provider.c:95</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CODEX</span>
+                    <span class="confidence-badge trusted">置信度: 可信</span>
+                </div>
+                <pre>ret = CRYPT_EAL_RandInit(CRYPT_RAND_AES256_CTR, NULL, NULL, NULL, 0);
+if (ret != CRYPT_SUCCESS) {
+    /* RNG may already be initialized by the application probe it */
+    uint8_t probe[4];
+    if (CRYPT_EAL_Randbytes(probe, sizeof(probe)) != CRYPT_SUCCESS) {
+        BSL_SAL_Free(temp-&gt;sdfLibPath);
+        BSL_SAL_Free(temp);
+        SDF_DL_Unload();
+        return SDFP_ERR_OPEN_DEVICE;
+    }
+}
+
+...
+
+static void CRYPT_EAL_ProvFree(void *provCtx)
+{
+    ...
+    CRYPT_EAL_RandDeinit();
+    ...
+}</pre>
+                <div class="problem"><strong>Issue:</strong> ProviderInit explicitly tolerates CRYPT_EAL_RandInit() failing because some other component already initialized the global RNG (lines 170-180), but CRYPT_EAL_ProvFree() always calls CRYPT_EAL_RandDeinit() anyway at line 95. Unloading the provider can therefore deinitialize RNG state that belongs to the application or another provider instance, causing undefined behavior in components that still expect the RNG to be initialized.</div>
+                <div class="fix-label">Fix:</div><pre>/* Add a bool ownsRand to CRYPT_EAL_ProvCtx and only deinit when we created it */
+ret = CRYPT_EAL_RandInit(CRYPT_RAND_AES256_CTR, NULL, NULL, NULL, 0);
+if (ret == CRYPT_SUCCESS) {
+    temp-&gt;ownsRand = true;
+} else {
+    uint8_t probe[4];
+    if (CRYPT_EAL_Randbytes(probe, sizeof(probe)) != CRYPT_SUCCESS) {
+        BSL_SAL_Free(temp-&gt;sdfLibPath);
+        BSL_SAL_Free(temp);
+        SDF_DL_Unload();
+        return SDFP_ERR_OPEN_DEVICE;
+    }
+}
+
+/* In CRYPT_EAL_ProvFree: */
+if (ctx-&gt;ownsRand) {
+    CRYPT_EAL_RandDeinit();
+}</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">Private-key-only signing produces non-standard SM2 hash</div>
+                <div class="issue-location">src/sm2/sm2_sign.c:235-253</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CODEX</span>
+                    <span class="confidence-badge trusted">置信度: 可信</span>
+                </div>
+                <pre>} else {
+    /* For external keys without public key, we can't compute Z = SM3(ID || PubKey).
+     * Use simple SM3 hash of message instead. This is compatible with the SDF
+     * library's ExternalSign_ECC which expects a pre-computed 32-byte hash. */
+    ret = SDF_DL_HashInit(ctx-&gt;hSessionHandle, SGD_SM3, NULL, ctx-&gt;userId, ctx-&gt;userIdLen);
+    if (ret != SDR_OK) {
+        SDFP_LOG(ret);
+        return SDFP_ERR_HASH;
+    }
+    ret = SDF_DL_HashUpdate(ctx-&gt;hSessionHandle, (unsigned char *)data, dataLen);
+    if (ret != SDR_OK) {
+        SDFP_LOG(ret);
+        return SDFP_ERR_HASH;
+    }
+    ret = SDF_DL_HashFinal(ctx-&gt;hSessionHandle, tbs, &amp;tbsLen);
+    if (ret != SDR_OK) {
+        SDFP_LOG(ret);
+        return SDFP_ERR_HASH;
+    }
+}</pre>
+                <div class="problem"><strong>Issue:</strong> When no public key is present, the fallback signs SM3(msg) instead of the SM2-required SM3(Z || msg) where Z = SM3(ID || PubKey). This silently produces signatures that a compliant SM2 verifier will reject, as the SM2 standard specifically requires computing Z from the public key. The code should either return CRYPT_SM2_NO_PUBKEY error or derive the public key from the private key first.</div>
+                <div class="fix-label">Fix:</div><pre>if (ctx-&gt;publicKey == NULL) {
+    return CRYPT_SM2_NO_PUBKEY;
+}
+
+ret = Sm2ComputeMsgHash(ctx, ctx-&gt;publicKey, data, dataLen, tbs, &amp;tbsLen);
+if (ret != CRYPT_SUCCESS) {
+    SDFP_LOG(ret);
+    return ret;
+}</pre>
+            </div>
+</div>
+<div class="section"><div class="section-title medium">Medium</div>
+<div class="issue">
+                <div class="issue-title">Resource leak of temporary key handle during DEK generation</div>
+                <div class="issue-location">src/sm4/sm4_cipher.c:285-292</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: GEMINI</span>
+                    <span class="confidence-badge trusted">置信度: 可信</span>
+                </div>
+                <pre>void *hTmpKey = NULL;
+ret = SDF_DL_GenerateKeyWithKEK(hTmpSession, 128, SGD_SM4_ECB,
+    ctx-&gt;kekIndex, wrapBuf, &amp;wrapLen, &amp;hTmpKey);
+(void)SDF_DL_CloseSession(hTmpSession);</pre>
+                <div class="problem"><strong>Issue:</strong> The code calls SDF_DL_GenerateKeyWithKEK to create a new session key, which yields a hardware key handle (hTmpKey). It then immediately closes hTmpSession without explicitly destroying the generated key handle via SDF_DL_DestroyKey. Although closing the session might implicitly drop session resources in some implementations, it can cause memory or resource leaks inside the HSM or driver on strict SDF device implementations. The key handle must be destroyed properly.</div>
+                <div class="fix-label">Fix:</div><pre>void *hTmpKey = NULL;
+ret = SDF_DL_GenerateKeyWithKEK(hTmpSession, 128, SGD_SM4_ECB,
+    ctx-&gt;kekIndex, wrapBuf, &amp;wrapLen, &amp;hTmpKey);
+if (ret == SDR_OK &amp;&amp; hTmpKey != NULL) {
+    (void)SDF_DL_DestroyKey(hTmpSession, hTmpKey);
+}
+(void)SDF_DL_CloseSession(hTmpSession);</pre>
+            </div>
+</div>
+</div></body></html>

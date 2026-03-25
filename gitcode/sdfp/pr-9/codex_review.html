@@ -1,0 +1,259 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Code Review: openHiTLS/sdfp#9 - CODEX</title>
+    <style>
+        :root { --critical: #dc2626; --high: #ea580c; --medium: #ca8a04; --low: #65a30d; }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: system-ui, sans-serif; background: #f8fafc; color: #1e293b; padding: 2rem; line-height: 1.6; }
+        .container { max-width: 900px; margin: 0 auto; }
+        h1 { font-size: 1.5rem; margin-bottom: 0.5rem; }
+        .subtitle { color: #64748b; margin-bottom: 2rem; }
+        .section { margin-bottom: 2rem; }
+        .section-title { font-size: 1.1rem; font-weight: 600; padding: 0.5rem 1rem; border-radius: 0.5rem 0.5rem 0 0; color: white; }
+        .section-title.critical { background: var(--critical); }
+        .section-title.high { background: var(--high); }
+        .section-title.medium { background: var(--medium); }
+        .section-title.low { background: var(--low); }
+        .issue { background: white; border: 1px solid #e2e8f0; border-top: none; padding: 1rem; }
+        .issue:last-child { border-radius: 0 0 0.5rem 0.5rem; }
+        .issue-title { font-weight: 600; margin-bottom: 0.25rem; }
+        .issue-location { font-family: monospace; font-size: 0.875rem; color: #64748b; margin-bottom: 0.75rem; }
+        .issue-source { font-size: 0.75rem; color: #94a3b8; margin-top: 0.5rem; }
+        pre { background: #1e293b; color: #e2e8f0; padding: 0.75rem; border-radius: 0.375rem; overflow-x: auto; font-size: 0.875rem; margin: 0.5rem 0; }
+        .problem { margin: 0.75rem 0; }
+        .fix-label { font-weight: 600; margin-top: 0.75rem; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Code Review: openHiTLS/sdfp#9 - CODEX</h1>
+        <div class="subtitle"></div>
+<div class="section"><div class="section-title high">High</div>
+<div class="issue">
+                <div class="issue-title">RSA support is silently disabled while RSA callbacks remain exposed</div>
+                <div class="issue-location">src/common/sdf_dl.c:183-193</div>
+                <pre>/*
+     * RSA internal key operations are loaded on demand when an internal RSA
+     * key index is configured (not all SDF devices support them).
+     */
+    /* LOAD_SYM(genKeyPairRsa,           SDF_GenerateKeyPair_RSA); */
+    /* LOAD_SYM(exportSignPubKeyRsa,     SDF_ExportSignPublicKey_RSA); */
+    /* LOAD_SYM(exportEncPubKeyRsa,      SDF_ExportEncPublicKey_RSA); */
+    /* LOAD_SYM(intPubKeyOpRsa,          SDF_InternalPublicKeyOperation_RSA); */
+    /* LOAD_SYM(intPrivKeyOpRsa,         SDF_InternalPrivateKeyOperation_RSA); */
+    /* LOAD_SYM(extPubKeyOpRsa,          SDF_ExternalPublicKeyOperation_RSA); */
+    /* LOAD_SYM(extPrivKeyOpRsa,         SDF_ExternalPrivateKeyOperation_RSA); */</pre>
+                <div class="problem"><strong>Issue:</strong> The loader no longer resolves any RSA symbols, but the provider still registers RSA keymgmt/sign/asymcipher callbacks. Every RSA path now reaches wrappers whose function pointers are still NULL and fails with `SDFP_ERR_NOT_LOADED` at runtime.</div>
+                <div class="fix-label">Fix:</div><pre>LOAD_SYM(genKeyPairRsa,           SDF_GenerateKeyPair_RSA);
+    LOAD_SYM(exportSignPubKeyRsa,     SDF_ExportSignPublicKey_RSA);
+    LOAD_SYM(exportEncPubKeyRsa,      SDF_ExportEncPublicKey_RSA);
+    LOAD_SYM(intPubKeyOpRsa,          SDF_InternalPublicKeyOperation_RSA);
+    LOAD_SYM(intPrivKeyOpRsa,         SDF_InternalPrivateKeyOperation_RSA);
+    LOAD_SYM(extPubKeyOpRsa,          SDF_ExternalPublicKeyOperation_RSA);
+    LOAD_SYM(extPrivKeyOpRsa,         SDF_ExternalPrivateKeyOperation_RSA);</pre>
+                <div class="issue-source">Reviewer: codex</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">SM4-GCM tag handling no longer matches the AEAD provider contract</div>
+                <div class="issue-location">src/sm4/sm4_gcm.c:200-307</div>
+                <pre>if (ctx-&gt;enc) {
+        unsigned int tagOutLen = SM4_GCM_TAG_MAX;
+        ret = SDF_DL_AuthEncFinal(ctx-&gt;hSessionHandle, out, &amp;tmpLen, ctx-&gt;tag, &amp;tagOutLen);
+        if (ret == SDR_OK) {
+            ctx-&gt;tagLen = tagOutLen;
+            memcpy(out + tmpLen, ctx-&gt;tag, tagOutLen);
+            tmpLen += tagOutLen;
+        }
+    } else {
+        ret = SDF_DL_AuthDecFinal(ctx-&gt;hSessionHandle, out, &amp;tmpLen);
+    }
+
+    ...
+
+        case CRYPT_CTRL_GET_TAG:
+            if (val == NULL || valLen == 0 || valLen &gt; SM4_GCM_TAG_MAX || !ctx-&gt;enc) {
+                return CRYPT_INVALID_ARG;
+            }
+            uint32_t copyLen = (valLen &lt; ctx-&gt;tagLen) ? valLen : ctx-&gt;tagLen;
+            memcpy(val, ctx-&gt;tag, copyLen);
+            return CRYPT_SUCCESS;
+
+        case 112:
+            if (val == NULL || valLen == 0 || valLen &gt; SM4_GCM_TAG_MAX) {
+                return CRYPT_INVALID_ARG;
+            }
+            memcpy(ctx-&gt;tag, val, valLen);
+            ctx-&gt;tagLen = valLen;
+            return CRYPT_SUCCESS;</pre>
+                <div class="problem"><strong>Issue:</strong> The implementation only computes/stores the authentication tag in `SDFP_SM4_GCM_Final()` and appends it to the ciphertext buffer there, while `CRYPT_CTRL_GET_TAG` merely copies `ctx->tag`. Any caller that uses the normal AEAD flow of `Update` followed by `GET_TAG` gets a zero/stale tag. Decryption is also tied to a provider-private `112` control instead of the public tag flow, so the provider is no longer drop-in compatible with generic AEAD callers.</div>
+                <div class="fix-label">Fix:</div><pre>/* Add a finalized flag in SDFP_SM4_GCM_Ctx and finalize AEAD from GET_TAG. */
+static int32_t SDFP_SM4_GCM_Final(void *c, uint8_t *out, uint32_t *outLen)
+{
+    (void)c;
+    if (out == NULL || outLen == NULL) {
+        return CRYPT_NULL_INPUT;
+    }
+    *outLen = 0; /* AEAD tag is returned via GET_TAG, not appended here */
+    return CRYPT_SUCCESS;
+}
+
+case CRYPT_CTRL_SET_TAG:
+    if (val == NULL || valLen == 0 || valLen &gt; SM4_GCM_TAG_MAX) {
+        return CRYPT_INVALID_ARG;
+    }
+    memcpy(ctx-&gt;tag, val, valLen);
+    ctx-&gt;tagLen = valLen;
+    return CRYPT_SUCCESS;
+
+case CRYPT_CTRL_GET_TAG: {
+    if (val == NULL || valLen == 0 || valLen &gt; SM4_GCM_TAG_MAX) {
+        return CRYPT_INVALID_ARG;
+    }
+    if (!ctx-&gt;started) {
+        int32_t initRet = SDFP_SM4_GCM_SdfInit(ctx);
+        if (initRet != CRYPT_SUCCESS) {
+            return initRet;
+        }
+    }
+    if (!ctx-&gt;finalized) {
+        unsigned int lastLen = 0;
+        unsigned int tagOutLen = ctx-&gt;tagLen;
+        int ret = SDF_DL_AuthEncFinal(ctx-&gt;hSessionHandle, NULL, &amp;lastLen, ctx-&gt;tag, &amp;tagOutLen);
+        if (ret != SDR_OK || lastLen != 0) {
+            return SDFP_ERR_ENCRYPT;
+        }
+        ctx-&gt;tagLen = tagOutLen;
+        ctx-&gt;finalized = true;
+    }
+    memcpy(val, ctx-&gt;tag, ctx-&gt;tagLen);
+    return CRYPT_SUCCESS;
+}</pre>
+                <div class="issue-source">Reviewer: codex</div>
+            </div>
+</div>
+<div class="section"><div class="section-title medium">Medium</div>
+<div class="issue">
+                <div class="issue-title">Provider unload tears down the process-global RNG even when it did not create it</div>
+                <div class="issue-location">src/common/provider.c:95</div>
+                <pre>CRYPT_EAL_RandDeinit();
+
+    ...
+
+    ret = CRYPT_EAL_RandInit(CRYPT_RAND_AES256_CTR, NULL, NULL, NULL, 0);
+    if (ret != CRYPT_SUCCESS) {
+        /* RNG may already be initialized by the application probe it */
+        uint8_t probe[4];
+        if (CRYPT_EAL_Randbytes(probe, sizeof(probe)) != CRYPT_SUCCESS) {
+            BSL_SAL_Free(temp-&gt;sdfLibPath);
+            BSL_SAL_Free(temp);
+            SDF_DL_Unload();
+            return SDFP_ERR_OPEN_DEVICE;
+        }
+    }</pre>
+                <div class="problem"><strong>Issue:</strong> `ProviderInit` now explicitly tolerates `CRYPT_EAL_RandInit()` failing because some other component already initialized the global RNG, but `CRYPT_EAL_ProvFree()` always calls `CRYPT_EAL_RandDeinit()` anyway. Unloading the provider can therefore deinitialize RNG state that belongs to the application or another provider instance.</div>
+                <div class="fix-label">Fix:</div><pre>/* Add a bool ownsRand to CRYPT_EAL_ProvCtx and only deinit when we created it. */
+ret = CRYPT_EAL_RandInit(CRYPT_RAND_AES256_CTR, NULL, NULL, NULL, 0);
+if (ret == CRYPT_SUCCESS) {
+    temp-&gt;ownsRand = true;
+} else {
+    uint8_t probe[4];
+    if (CRYPT_EAL_Randbytes(probe, sizeof(probe)) != CRYPT_SUCCESS) {
+        BSL_SAL_Free(temp-&gt;sdfLibPath);
+        BSL_SAL_Free(temp);
+        SDF_DL_Unload();
+        return SDFP_ERR_OPEN_DEVICE;
+    }
+}
+
+...
+
+if (ctx-&gt;ownsRand) {
+    CRYPT_EAL_RandDeinit();
+}</pre>
+                <div class="issue-source">Reviewer: codex</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">SM2 signing no longer works for imported internal key indices</div>
+                <div class="issue-location">src/sm2/sm2_sign.c:151-157</div>
+                <pre>if (ctx-&gt;privateKey == NULL) {
+        return CRYPT_SM2_NO_PRVKEY;
+    }
+    ECCrefPrivateKey sdfPrv = {0};
+    EccPrvKeyToSdf(ctx-&gt;privateKey, &amp;sdfPrv);
+    ret = SDF_DL_ExternalSign_ECC(ctx-&gt;hSessionHandle, SGD_SM2_1, &amp;sdfPrv,
+            (unsigned char *)data, dataLen, &amp;pucSignature);
+
+    ...
+
+    if (ctx-&gt;privateKey == NULL) {
+        return CRYPT_SM2_NO_PRVKEY;
+    }</pre>
+                <div class="problem"><strong>Issue:</strong> The refactor removed the `keyIndex` path from signing and now hard-requires an external private key object. That breaks contexts imported through `CRYPT_CTRL_KEY_INDEX`, even though `sm2_keymgmt.c` still accepts and exports those internal-key parameters.</div>
+                <div class="fix-label">Fix:</div><pre>if (ctx-&gt;keyIndex &gt;= 0) {
+        ret = SDF_DL_GetPrivateKeyAccessRight(ctx-&gt;hSessionHandle, ctx-&gt;keyIndex,
+            ctx-&gt;pass != NULL ? ctx-&gt;pass : (unsigned char *)DEFAULT_PASS,
+            ctx-&gt;pass != NULL ? ctx-&gt;passLen : DEFAULT_PASS_LEN);
+        if (ret != SDR_OK) {
+            return SDFP_ERR_GET_PRIV_ACCESS;
+        }
+        ret = SDF_DL_InternalSign_ECC(ctx-&gt;hSessionHandle, ctx-&gt;keyIndex,
+            (unsigned char *)data, dataLen, &amp;pucSignature);
+        (void)SDF_DL_ReleasePrivateKeyAccessRight(ctx-&gt;hSessionHandle, ctx-&gt;keyIndex);
+        if (ret != SDR_OK) {
+            return SDFP_ERR_SIGN;
+        }
+    } else {
+        if (ctx-&gt;privateKey == NULL) {
+            return CRYPT_SM2_NO_PRVKEY;
+        }
+        ECCrefPrivateKey sdfPrv = {0};
+        EccPrvKeyToSdf(ctx-&gt;privateKey, &amp;sdfPrv);
+        ret = SDF_DL_ExternalSign_ECC(ctx-&gt;hSessionHandle, SGD_SM2_1, &amp;sdfPrv,
+            (unsigned char *)data, dataLen, &amp;pucSignature);
+        (void)memset(&amp;sdfPrv, 0, sizeof(sdfPrv));
+        if (ret != SDR_OK) {
+            return SDFP_ERR_SIGN;
+        }
+    }</pre>
+                <div class="issue-source">Reviewer: codex</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">Private-key-only signing now produces a non-standard SM2 hash</div>
+                <div class="issue-location">src/sm2/sm2_sign.c:235-253</div>
+                <pre>} else {
+        /* For external keys without public key, we can't compute Z = SM3(ID || PubKey).
+         * Use simple SM3 hash of message instead. This is compatible with the SDF
+         * library's ExternalSign_ECC which expects a pre-computed 32-byte hash. */
+        ret = SDF_DL_HashInit(ctx-&gt;hSessionHandle, SGD_SM3, NULL, ctx-&gt;userId, ctx-&gt;userIdLen);
+        if (ret != SDR_OK) {
+            SDFP_LOG(ret);
+            return SDFP_ERR_HASH;
+        }
+        ret = SDF_DL_HashUpdate(ctx-&gt;hSessionHandle, (unsigned char *)data, dataLen);
+        if (ret != SDR_OK) {
+            SDFP_LOG(ret);
+            return SDFP_ERR_HASH;
+        }
+        ret = SDF_DL_HashFinal(ctx-&gt;hSessionHandle, tbs, &amp;tbsLen);
+        if (ret != SDR_OK) {
+            SDFP_LOG(ret);
+            return SDFP_ERR_HASH;
+        }
+    }</pre>
+                <div class="problem"><strong>Issue:</strong> When no public key is present, the new fallback signs `SM3(msg)` instead of the SM2-required `SM3(Z || msg)`. That silently produces signatures that a compliant SM2 verifier will reject, instead of returning the previous `CRYPT_SM2_NO_PUBKEY` error or deriving the public key first.</div>
+                <div class="fix-label">Fix:</div><pre>if (ctx-&gt;publicKey == NULL) {
+        return CRYPT_SM2_NO_PUBKEY;
+    }
+
+    ret = Sm2ComputeMsgHash(ctx, ctx-&gt;publicKey, data, dataLen, tbs, &amp;tbsLen);
+    if (ret != CRYPT_SUCCESS) {
+        SDFP_LOG(ret);
+        return ret;
+    }</pre>
+                <div class="issue-source">Reviewer: codex</div>
+            </div>
+</div>
+</div></body></html>

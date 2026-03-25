@@ -1,0 +1,49 @@
+===ISSUE===
+FILE: src/sm4/sm4_gcm.c
+LINE: 221-225
+SEVERITY: critical
+TITLE: Buffer overflow in SM4-GCM encryption finalization
+PROBLEM: When calling `SDF_DL_AuthEncFinal`, `tmpLen` is initialized to the full buffer capacity (`*outLen`). The hardware might write up to `tmpLen` bytes into the `out` buffer. The code then appends `tagOutLen` bytes (the GCM authentication tag) starting at `out + tmpLen`. If the total written length plus the tag length exceeds `*outLen`, a buffer overflow occurs. The available capacity for `AuthEncFinal` must be reduced by `tagOutLen`.
+CODE:
+```c
+        if (*outLen < tagOutLen) {
+            return CRYPT_INVALID_ARG;
+        }
+        /* AuthEncFinal outputs remaining ciphertext bytes into [out, tmpLen) */
+        ret = SDF_DL_AuthEncFinal(ctx->hSessionHandle, out, &tmpLen, ctx->tag, &tagOutLen);
+```
+FIX:
+```c
+        if (*outLen < tagOutLen) {
+            return CRYPT_INVALID_ARG;
+        }
+        tmpLen = *outLen - tagOutLen;
+        /* AuthEncFinal outputs remaining ciphertext bytes into [out, tmpLen) */
+        ret = SDF_DL_AuthEncFinal(ctx->hSessionHandle, out, &tmpLen, ctx->tag, &tagOutLen);
+```
+===END===
+
+===ISSUE===
+FILE: src/sm4/sm4_cipher.c
+LINE: 266-269
+SEVERITY: medium
+TITLE: Resource leak of temporary key handle during DEK generation
+PROBLEM: The code calls `SDF_DL_GenerateKeyWithKEK` to create a new session key, which yields a hardware key handle (`hTmpKey`). It then immediately closes `hTmpSession` without explicitly destroying the generated key handle via `SDF_DL_DestroyKey`. Although closing the session might implicitly drop session resources in some implementations, it can cause memory or resource leaks inside the HSM or driver on strict SDF device implementations. The key handle must be destroyed properly.
+CODE:
+```c
+            void *hTmpKey = NULL;
+            ret = SDF_DL_GenerateKeyWithKEK(hTmpSession, 128, SGD_SM4_ECB,
+                ctx->kekIndex, wrapBuf, &wrapLen, &hTmpKey);
+            (void)SDF_DL_CloseSession(hTmpSession);
+```
+FIX:
+```c
+            void *hTmpKey = NULL;
+            ret = SDF_DL_GenerateKeyWithKEK(hTmpSession, 128, SGD_SM4_ECB,
+                ctx->kekIndex, wrapBuf, &wrapLen, &hTmpKey);
+            if (ret == SDR_OK && hTmpKey != NULL) {
+                (void)SDF_DL_DestroyKey(hTmpSession, hTmpKey);
+            }
+            (void)SDF_DL_CloseSession(hTmpSession);
+```
+===END===
