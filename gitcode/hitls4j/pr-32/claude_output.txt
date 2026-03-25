@@ -1,0 +1,365 @@
+Now I have completed my review. Let me output the issues found:===ISSUE===
+FILE: src/main/java/org/openhitls/crypto/jce/key/FrodoKEMPrivateKeyImpl.java
+LINE: 13-14
+SEVERITY: high
+TITLE: Key constructor stores direct reference to encoded array without cloning
+PROBLEM: The constructor `FrodoKEMPrivateKeyImpl(byte[] encoded)` stores a direct reference to the input array instead of cloning it. This allows external code to modify the key material after the key object is created, which is a security vulnerability. The Spec classes (FrodoKEMPrivateKeySpec) do clone the array, creating an inconsistent security model.
+CODE:
+```
+public FrodoKEMPrivateKeyImpl(byte[] encoded) {
+    this.encoded = encoded;  // Direct reference - not cloned
+    this.params = null;
+}
+```
+FIX:
+```
+public FrodoKEMPrivateKeyImpl(byte[] encoded) {
+    this.encoded = encoded != null ? encoded.clone() : null;
+    this.params = null;
+}
+```
+===END===
+
+===ISSUE===
+FILE: src/main/java/org/openhitls/crypto/jce/key/FrodoKEMPublicKeyImpl.java
+LINE: 13-14
+SEVERITY: high
+TITLE: Key constructor stores direct reference to encoded array without cloning
+PROBLEM: The constructor `FrodoKEMPublicKeyImpl(byte[] encoded)` stores a direct reference to the input array instead of cloning it. This allows external code to modify the key material after the key object is created, which is a security vulnerability.
+CODE:
+```
+public FrodoKEMPublicKeyImpl(byte[] encoded) {
+    this.encoded = encoded;  // Direct reference - not cloned
+    this.params = null;
+}
+```
+FIX:
+```
+public FrodoKEMPublicKeyImpl(byte[] encoded) {
+    this.encoded = encoded != null ? encoded.clone() : null;
+    this.params = null;
+}
+```
+===END===
+
+===ISSUE===
+FILE: src/main/java/org/openhitls/crypto/jce/key/McEliecePrivateKeyImpl.java
+LINE: 13-14
+SEVERITY: high
+TITLE: Key constructor stores direct reference to encoded array without cloning
+PROBLEM: The constructor `McEliecePrivateKeyImpl(byte[] encoded)` stores a direct reference to the input array instead of cloning it. This allows external code to modify the key material after the key object is created, which is a security vulnerability.
+CODE:
+```
+public McEliecePrivateKeyImpl(byte[] encoded) {
+    this.encoded = encoded;  // Direct reference - not cloned
+    this.params = null;
+}
+```
+FIX:
+```
+public McEliecePrivateKeyImpl(byte[] encoded) {
+    this.encoded = encoded != null ? encoded.clone() : null;
+    this.params = null;
+}
+```
+===END===
+
+===ISSUE===
+FILE: src/main/java/org/openhitls/crypto/jce/key/McEliecePublicKeyImpl.java
+LINE: 13-14
+SEVERITY: high
+TITLE: Key constructor stores direct reference to encoded array without cloning
+PROBLEM: The constructor `McEliecePublicKeyImpl(byte[] encoded)` stores a direct reference to the input array instead of cloning it. This allows external code to modify the key material after the key object is created, which is a security vulnerability.
+CODE:
+```
+public McEliecePublicKeyImpl(byte[] encoded) {
+    this.encoded = encoded;  // Direct reference - not cloned
+    this.params = null;
+}
+```
+FIX:
+```
+public McEliecePublicKeyImpl(byte[] encoded) {
+    this.encoded = encoded != null ? encoded.clone() : null;
+    this.params = null;
+}
+```
+===END===
+
+===ISSUE===
+FILE: src/main/java/org/openhitls/crypto/jce/keyagreement/FrodoKEMKeyAgreement.java
+LINE: 113-114
+SEVERITY: high
+TITLE: Bounds check vulnerable to integer underflow
+PROBLEM: The bounds check `sharedSecret.length - offset < secret.length` can underflow if `offset` is negative or very large (close to Integer.MAX_VALUE), potentially allowing a buffer overflow or negative indexing in System.arraycopy.
+CODE:
+```
+if (sharedSecret.length - offset < secret.length) {
+    throw new IllegalStateException("Insufficient space in sharedSecret array");
+}
+System.arraycopy(secret, 0, sharedSecret, offset, secret.length);
+```
+FIX:
+```
+if (offset < 0 || sharedSecret.length - offset < secret.length) {
+    throw new InvalidParameterException("Invalid offset or insufficient space");
+}
+System.arraycopy(secret, 0, sharedSecret, offset, secret.length);
+```
+===END===
+
+===ISSUE===
+FILE: src/main/java/org/openhitls/crypto/jce/keyagreement/McElieceKeyAgreement.java
+LINE: 113-114
+SEVERITY: high
+TITLE: Bounds check vulnerable to integer underflow
+PROBLEM: The bounds check `sharedSecret.length - offset < secret.length` can underflow if `offset` is negative or very large, potentially allowing a buffer overflow or negative indexing.
+CODE:
+```
+if (sharedSecret.length - offset < secret.length) {
+    throw new IllegalStateException("Insufficient space in sharedSecret array");
+}
+System.arraycopy(secret, 0, sharedSecret, offset, secret.length);
+```
+FIX:
+```
+if (offset < 0 || sharedSecret.length - offset < secret.length) {
+    throw new InvalidParameterException("Invalid offset or insufficient space");
+}
+System.arraycopy(secret, 0, sharedSecret, offset, secret.length);
+```
+===END===
+
+===ISSUE===
+FILE: src/main/java/org/openhitls/crypto/jce/keyagreement/FrodoKEMKeyAgreement.java
+LINE: 97-100
+SEVERITY: medium
+TITLE: Ciphertext not cleared after use, potential key material leak
+PROBLEM: In `engineGenerateSecret()`, the shared key is cleared after use (`sharedKey = null`), but the ciphertext field is not cleared. The ciphertext contains cryptographic material that should be cleared from memory after use to prevent potential leakage.
+CODE:
+```
+if (sharedKey != null) {
+    byte[] result = sharedKey;
+    sharedKey = null;  // Cleared after use
+    return result;
+}
+```
+FIX:
+```
+if (sharedKey != null) {
+    byte[] result = sharedKey;
+    sharedKey = null;
+    // Also clear ciphertext after encapsulation
+    if (ciphertext != null) {
+        Arrays.fill(ciphertext, (byte) 0);
+        ciphertext = null;
+    }
+    return result;
+}
+```
+===END===
+
+===ISSUE===
+FILE: src/main/java/org/openhitls/crypto/jce/keyagreement/McElieceKeyAgreement.java
+LINE: 97-100
+SEVERITY: medium
+TITLE: Ciphertext not cleared after use, potential key material leak
+PROBLEM: In `engineGenerateSecret()`, the shared key is cleared after use but the ciphertext field is not. The ciphertext contains cryptographic material that should be cleared from memory after use.
+CODE:
+```
+if (sharedKey != null) {
+    byte[] result = sharedKey;
+    sharedKey = null;  // Cleared after use
+    return result;
+}
+```
+FIX:
+```
+if (sharedKey != null) {
+    byte[] result = sharedKey;
+    sharedKey = null;
+    // Also clear ciphertext after encapsulation
+    if (ciphertext != null) {
+        Arrays.fill(ciphertext, (byte) 0);
+        ciphertext = null;
+    }
+    return result;
+}
+```
+===END===
+
+===ISSUE===
+FILE: src/main/java/org/openhitls/crypto/core/pqc/FrodoKEMImpl.java
+LINE: 24-27
+SEVERITY: medium
+TITLE: setKeys method does not validate key parameters
+PROBLEM: The `setKeys` method does not validate that the encapKey and decapKey parameters are non-null before using them. This could lead to unexpected behavior or NullPointerException when the native methods are called.
+CODE:
+```
+void setKeys(byte[] encapKey, byte[] decapKey) {
+    this.encapKey = encapKey;
+    this.decapKey = decapKey;
+    CryptoNative.frodoKemSetKeys(nativeContext, encapKey, decapKey);
+}
+```
+FIX:
+```
+void setKeys(byte[] encapKey, byte[] decapKey) {
+    this.encapKey = encapKey;
+    this.decapKey = decapKey;
+    // Native methods handle null keys appropriately - setting only non-null keys
+    CryptoNative.frodoKemSetKeys(nativeContext, 
+        encapKey != null ? encapKey : new byte[0], 
+        decapKey != null ? decapKey : new byte[0]);
+}
+```
+===END===
+
+===ISSUE===
+FILE: src/main/java/org/openhitls/crypto/core/pqc/McElieceImpl.java
+LINE: 24-27
+SEVERITY: medium
+TITLE: setKeys method does not validate key parameters
+PROBLEM: The `setKeys` method does not validate that the encapKey and decapKey parameters are non-null before using them. While the native code may handle null parameters, this should be explicitly validated.
+CODE:
+```
+void setKeys(byte[] encapKey, byte[] decapKey) {
+    this.encapKey = encapKey;
+    this.decapKey = decapKey;
+    CryptoNative.mcelieceSetKeys(nativeContext, encapKey, decapKey);
+}
+```
+FIX:
+```
+void setKeys(byte[] encapKey, byte[] decapKey) {
+    this.encapKey = encapKey;
+    this.decapKey = decapKey;
+    // Native methods handle null keys appropriately
+    CryptoNative.mcelieceSetKeys(nativeContext, 
+        encapKey != null ? encapKey : new byte[0], 
+        decapKey != null ? decapKey : new byte[0]);
+}
+```
+===END===
+
+===ISSUE===
+FILE: src/main/java/org/openhitls/crypto/jce/key/FrodoKEMCiphertextKey.java
+LINE: 11-13
+SEVERITY: low
+TITLE: Missing null check in constructor could allow null ciphertext
+PROBLEM: The constructor accepts null ciphertext and stores it without validation. While `getEncoded()` handles null by returning null, allowing null ciphertext in the constructor could lead to unexpected behavior in cryptographic operations.
+CODE:
+```
+public FrodoKEMCiphertextKey(byte[] ciphertext) {
+    this.ciphertext = ciphertext != null ? ciphertext.clone() : null;
+}
+```
+FIX:
+```
+public FrodoKEMCiphertextKey(byte[] ciphertext) {
+    if (ciphertext == null) {
+        throw new IllegalArgumentException("Ciphertext cannot be null");
+    }
+    this.ciphertext = ciphertext.clone();
+}
+```
+===END===
+
+===ISSUE===
+FILE: src/main/java/org/openhitls/crypto/jce/key/McElieceCiphertextKey.java
+LINE: 11-13
+SEVERITY: low
+TITLE: Missing null check in constructor could allow null ciphertext
+PROBLEM: The constructor accepts null ciphertext and stores it without validation. Allowing null ciphertext could lead to unexpected behavior in cryptographic operations.
+CODE:
+```
+public McElieceCiphertextKey(byte[] ciphertext) {
+    this.ciphertext = ciphertext != null ? ciphertext.clone() : null;
+}
+```
+FIX:
+```
+public McElieceCiphertextKey(byte[] ciphertext) {
+    if (ciphertext == null) {
+        throw new IllegalArgumentException("Ciphertext cannot be null");
+    }
+    this.ciphertext = ciphertext.clone();
+}
+```
+===END===
+
+===ISSUE===
+FILE: src/main/native/crypto_native_jni.c
+LINE: 3362-3366
+SEVERITY: low
+TITLE: malloc without size validation could cause integer overflow
+PROBLEM: In `frodoKemGenerateKeyPair`, the code allocates memory using `malloc(publicKeySize)` and `malloc(privateKeySize)` without validating these sizes. While the sizes come from constants in this code path, defensive programming suggests checking for unreasonable sizes.
+CODE:
+```
+pubKey.key.kemEk.data = malloc(publicKeySize);
+pubKey.key.kemEk.len = publicKeySize;
+if (pubKey.key.kemEk.data == NULL) {
+```
+FIX:
+```
+if (publicKeySize == 0 || publicKeySize > 10485760) {  // 10MB sanity limit
+    throwException(env, ILLEGAL_STATE_EXCEPTION, "Invalid public key size");
+    return NULL;
+}
+pubKey.key.kemEk.data = malloc(publicKeySize);
+pubKey.key.kemEk.len = publicKeySize;
+if (pubKey.key.kemEk.data == NULL) {
+```
+===END===
+
+===ISSUE===
+FILE: src/main/java/org/openhitls/crypto/jce/spec/FrodoKEMGenParameterSpec.java
+LINE: 10-12
+SEVERITY: low
+TITLE: Missing validation of parameter name in constructor
+PROBLEM: The `FrodoKEMGenParameterSpec` constructor accepts any string without validating it's a valid FrodoKEM parameter set name. This allows creation of invalid parameter specs that will fail later.
+CODE:
+```
+public FrodoKEMGenParameterSpec(String name) {
+    this.name = name;
+}
+```
+FIX:
+```
+public FrodoKEMGenParameterSpec(String name) {
+    if (name == null) {
+        throw new NullPointerException("name cannot be null");
+    }
+    if (!name.matches("^FrodoKEM-(640|976|1344)-(SHAKE|AES)$")) {
+        throw new IllegalArgumentException("Invalid FrodoKEM parameter set: " + name);
+    }
+    this.name = name;
+}
+```
+===END===
+
+===ISSUE===
+FILE: src/main/java/org/openhitls/crypto/jce/spec/McElieceGenParameterSpec.java
+LINE: 10-12
+SEVERITY: low
+TITLE: Missing validation of parameter name in constructor
+PROBLEM: The `McElieceGenParameterSpec` constructor accepts any string without validating it's a valid McEliece parameter set name.
+CODE:
+```
+public McElieceGenParameterSpec(String name) {
+    this.name = name;
+}
+```
+FIX:
+```
+public McElieceGenParameterSpec(String name) {
+    if (name == null) {
+        throw new NullPointerException("name cannot be null");
+    }
+    if (!name.matches("^McEliece-(6688128|6688128f|6688128pc|6688128pcf|6960119|6960119f|6960119pc|6960119pcf|8192128|8192128f|8192128pc|8192128pcf)$")) {
+        throw new IllegalArgumentException("Invalid McEliece parameter set: " + name);
+    }
+    this.name = name;
+}
+```
+===END===

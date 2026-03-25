@@ -1,0 +1,286 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Code Review: openHiTLS/hitls4j#32 - CLAUDE</title>
+    <style>
+        :root { --critical: #dc2626; --high: #ea580c; --medium: #ca8a04; --low: #65a30d; }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: system-ui, sans-serif; background: #f8fafc; color: #1e293b; padding: 2rem; line-height: 1.6; }
+        .container { max-width: 900px; margin: 0 auto; }
+        h1 { font-size: 1.5rem; margin-bottom: 0.5rem; }
+        .subtitle { color: #64748b; margin-bottom: 2rem; }
+        .section { margin-bottom: 2rem; }
+        .section-title { font-size: 1.1rem; font-weight: 600; padding: 0.5rem 1rem; border-radius: 0.5rem 0.5rem 0 0; color: white; }
+        .section-title.critical { background: var(--critical); }
+        .section-title.high { background: var(--high); }
+        .section-title.medium { background: var(--medium); }
+        .section-title.low { background: var(--low); }
+        .issue { background: white; border: 1px solid #e2e8f0; border-top: none; padding: 1rem; }
+        .issue:last-child { border-radius: 0 0 0.5rem 0.5rem; }
+        .issue-title { font-weight: 600; margin-bottom: 0.25rem; }
+        .issue-location { font-family: monospace; font-size: 0.875rem; color: #64748b; margin-bottom: 0.75rem; }
+        .issue-source { font-size: 0.75rem; color: #94a3b8; margin-top: 0.5rem; }
+        pre { background: #1e293b; color: #e2e8f0; padding: 0.75rem; border-radius: 0.375rem; overflow-x: auto; font-size: 0.875rem; margin: 0.5rem 0; }
+        .problem { margin: 0.75rem 0; }
+        .fix-label { font-weight: 600; margin-top: 0.75rem; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Code Review: openHiTLS/hitls4j#32 - CLAUDE</h1>
+        <div class="subtitle"></div>
+<div class="section"><div class="section-title high">High</div>
+<div class="issue">
+                <div class="issue-title">Key constructor stores direct reference to encoded array without cloning</div>
+                <div class="issue-location">src/main/java/org/openhitls/crypto/jce/key/FrodoKEMPrivateKeyImpl.java:13-14</div>
+                <pre>public FrodoKEMPrivateKeyImpl(byte[] encoded) {
+    this.encoded = encoded;  // Direct reference - not cloned
+    this.params = null;
+}</pre>
+                <div class="problem"><strong>Issue:</strong> The constructor `FrodoKEMPrivateKeyImpl(byte[] encoded)` stores a direct reference to the input array instead of cloning it. This allows external code to modify the key material after the key object is created, which is a security vulnerability. The Spec classes (FrodoKEMPrivateKeySpec) do clone the array, creating an inconsistent security model.</div>
+                <div class="fix-label">Fix:</div><pre>public FrodoKEMPrivateKeyImpl(byte[] encoded) {
+    this.encoded = encoded != null ? encoded.clone() : null;
+    this.params = null;
+}</pre>
+                <div class="issue-source">Reviewer: claude</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">Key constructor stores direct reference to encoded array without cloning</div>
+                <div class="issue-location">src/main/java/org/openhitls/crypto/jce/key/FrodoKEMPublicKeyImpl.java:13-14</div>
+                <pre>public FrodoKEMPublicKeyImpl(byte[] encoded) {
+    this.encoded = encoded;  // Direct reference - not cloned
+    this.params = null;
+}</pre>
+                <div class="problem"><strong>Issue:</strong> The constructor `FrodoKEMPublicKeyImpl(byte[] encoded)` stores a direct reference to the input array instead of cloning it. This allows external code to modify the key material after the key object is created, which is a security vulnerability.</div>
+                <div class="fix-label">Fix:</div><pre>public FrodoKEMPublicKeyImpl(byte[] encoded) {
+    this.encoded = encoded != null ? encoded.clone() : null;
+    this.params = null;
+}</pre>
+                <div class="issue-source">Reviewer: claude</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">Key constructor stores direct reference to encoded array without cloning</div>
+                <div class="issue-location">src/main/java/org/openhitls/crypto/jce/key/McEliecePrivateKeyImpl.java:13-14</div>
+                <pre>public McEliecePrivateKeyImpl(byte[] encoded) {
+    this.encoded = encoded;  // Direct reference - not cloned
+    this.params = null;
+}</pre>
+                <div class="problem"><strong>Issue:</strong> The constructor `McEliecePrivateKeyImpl(byte[] encoded)` stores a direct reference to the input array instead of cloning it. This allows external code to modify the key material after the key object is created, which is a security vulnerability.</div>
+                <div class="fix-label">Fix:</div><pre>public McEliecePrivateKeyImpl(byte[] encoded) {
+    this.encoded = encoded != null ? encoded.clone() : null;
+    this.params = null;
+}</pre>
+                <div class="issue-source">Reviewer: claude</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">Key constructor stores direct reference to encoded array without cloning</div>
+                <div class="issue-location">src/main/java/org/openhitls/crypto/jce/key/McEliecePublicKeyImpl.java:13-14</div>
+                <pre>public McEliecePublicKeyImpl(byte[] encoded) {
+    this.encoded = encoded;  // Direct reference - not cloned
+    this.params = null;
+}</pre>
+                <div class="problem"><strong>Issue:</strong> The constructor `McEliecePublicKeyImpl(byte[] encoded)` stores a direct reference to the input array instead of cloning it. This allows external code to modify the key material after the key object is created, which is a security vulnerability.</div>
+                <div class="fix-label">Fix:</div><pre>public McEliecePublicKeyImpl(byte[] encoded) {
+    this.encoded = encoded != null ? encoded.clone() : null;
+    this.params = null;
+}</pre>
+                <div class="issue-source">Reviewer: claude</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">Bounds check vulnerable to integer underflow</div>
+                <div class="issue-location">src/main/java/org/openhitls/crypto/jce/keyagreement/FrodoKEMKeyAgreement.java:113-114</div>
+                <pre>if (sharedSecret.length - offset &lt; secret.length) {
+    throw new IllegalStateException("Insufficient space in sharedSecret array");
+}
+System.arraycopy(secret, 0, sharedSecret, offset, secret.length);</pre>
+                <div class="problem"><strong>Issue:</strong> The bounds check `sharedSecret.length - offset < secret.length` can underflow if `offset` is negative or very large (close to Integer.MAX_VALUE), potentially allowing a buffer overflow or negative indexing in System.arraycopy.</div>
+                <div class="fix-label">Fix:</div><pre>if (offset &lt; 0 || sharedSecret.length - offset &lt; secret.length) {
+    throw new InvalidParameterException("Invalid offset or insufficient space");
+}
+System.arraycopy(secret, 0, sharedSecret, offset, secret.length);</pre>
+                <div class="issue-source">Reviewer: claude</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">Bounds check vulnerable to integer underflow</div>
+                <div class="issue-location">src/main/java/org/openhitls/crypto/jce/keyagreement/McElieceKeyAgreement.java:113-114</div>
+                <pre>if (sharedSecret.length - offset &lt; secret.length) {
+    throw new IllegalStateException("Insufficient space in sharedSecret array");
+}
+System.arraycopy(secret, 0, sharedSecret, offset, secret.length);</pre>
+                <div class="problem"><strong>Issue:</strong> The bounds check `sharedSecret.length - offset < secret.length` can underflow if `offset` is negative or very large, potentially allowing a buffer overflow or negative indexing.</div>
+                <div class="fix-label">Fix:</div><pre>if (offset &lt; 0 || sharedSecret.length - offset &lt; secret.length) {
+    throw new InvalidParameterException("Invalid offset or insufficient space");
+}
+System.arraycopy(secret, 0, sharedSecret, offset, secret.length);</pre>
+                <div class="issue-source">Reviewer: claude</div>
+            </div>
+</div>
+<div class="section"><div class="section-title medium">Medium</div>
+<div class="issue">
+                <div class="issue-title">Ciphertext not cleared after use, potential key material leak</div>
+                <div class="issue-location">src/main/java/org/openhitls/crypto/jce/keyagreement/FrodoKEMKeyAgreement.java:97-100</div>
+                <pre>if (sharedKey != null) {
+    byte[] result = sharedKey;
+    sharedKey = null;  // Cleared after use
+    return result;
+}</pre>
+                <div class="problem"><strong>Issue:</strong> In `engineGenerateSecret()`, the shared key is cleared after use (`sharedKey = null`), but the ciphertext field is not cleared. The ciphertext contains cryptographic material that should be cleared from memory after use to prevent potential leakage.</div>
+                <div class="fix-label">Fix:</div><pre>if (sharedKey != null) {
+    byte[] result = sharedKey;
+    sharedKey = null;
+    // Also clear ciphertext after encapsulation
+    if (ciphertext != null) {
+        Arrays.fill(ciphertext, (byte) 0);
+        ciphertext = null;
+    }
+    return result;
+}</pre>
+                <div class="issue-source">Reviewer: claude</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">Ciphertext not cleared after use, potential key material leak</div>
+                <div class="issue-location">src/main/java/org/openhitls/crypto/jce/keyagreement/McElieceKeyAgreement.java:97-100</div>
+                <pre>if (sharedKey != null) {
+    byte[] result = sharedKey;
+    sharedKey = null;  // Cleared after use
+    return result;
+}</pre>
+                <div class="problem"><strong>Issue:</strong> In `engineGenerateSecret()`, the shared key is cleared after use but the ciphertext field is not. The ciphertext contains cryptographic material that should be cleared from memory after use.</div>
+                <div class="fix-label">Fix:</div><pre>if (sharedKey != null) {
+    byte[] result = sharedKey;
+    sharedKey = null;
+    // Also clear ciphertext after encapsulation
+    if (ciphertext != null) {
+        Arrays.fill(ciphertext, (byte) 0);
+        ciphertext = null;
+    }
+    return result;
+}</pre>
+                <div class="issue-source">Reviewer: claude</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">setKeys method does not validate key parameters</div>
+                <div class="issue-location">src/main/java/org/openhitls/crypto/core/pqc/FrodoKEMImpl.java:24-27</div>
+                <pre>void setKeys(byte[] encapKey, byte[] decapKey) {
+    this.encapKey = encapKey;
+    this.decapKey = decapKey;
+    CryptoNative.frodoKemSetKeys(nativeContext, encapKey, decapKey);
+}</pre>
+                <div class="problem"><strong>Issue:</strong> The `setKeys` method does not validate that the encapKey and decapKey parameters are non-null before using them. This could lead to unexpected behavior or NullPointerException when the native methods are called.</div>
+                <div class="fix-label">Fix:</div><pre>void setKeys(byte[] encapKey, byte[] decapKey) {
+    this.encapKey = encapKey;
+    this.decapKey = decapKey;
+    // Native methods handle null keys appropriately - setting only non-null keys
+    CryptoNative.frodoKemSetKeys(nativeContext, 
+        encapKey != null ? encapKey : new byte[0], 
+        decapKey != null ? decapKey : new byte[0]);
+}</pre>
+                <div class="issue-source">Reviewer: claude</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">setKeys method does not validate key parameters</div>
+                <div class="issue-location">src/main/java/org/openhitls/crypto/core/pqc/McElieceImpl.java:24-27</div>
+                <pre>void setKeys(byte[] encapKey, byte[] decapKey) {
+    this.encapKey = encapKey;
+    this.decapKey = decapKey;
+    CryptoNative.mcelieceSetKeys(nativeContext, encapKey, decapKey);
+}</pre>
+                <div class="problem"><strong>Issue:</strong> The `setKeys` method does not validate that the encapKey and decapKey parameters are non-null before using them. While the native code may handle null parameters, this should be explicitly validated.</div>
+                <div class="fix-label">Fix:</div><pre>void setKeys(byte[] encapKey, byte[] decapKey) {
+    this.encapKey = encapKey;
+    this.decapKey = decapKey;
+    // Native methods handle null keys appropriately
+    CryptoNative.mcelieceSetKeys(nativeContext, 
+        encapKey != null ? encapKey : new byte[0], 
+        decapKey != null ? decapKey : new byte[0]);
+}</pre>
+                <div class="issue-source">Reviewer: claude</div>
+            </div>
+</div>
+<div class="section"><div class="section-title low">Low</div>
+<div class="issue">
+                <div class="issue-title">Missing null check in constructor could allow null ciphertext</div>
+                <div class="issue-location">src/main/java/org/openhitls/crypto/jce/key/FrodoKEMCiphertextKey.java:11-13</div>
+                <pre>public FrodoKEMCiphertextKey(byte[] ciphertext) {
+    this.ciphertext = ciphertext != null ? ciphertext.clone() : null;
+}</pre>
+                <div class="problem"><strong>Issue:</strong> The constructor accepts null ciphertext and stores it without validation. While `getEncoded()` handles null by returning null, allowing null ciphertext in the constructor could lead to unexpected behavior in cryptographic operations.</div>
+                <div class="fix-label">Fix:</div><pre>public FrodoKEMCiphertextKey(byte[] ciphertext) {
+    if (ciphertext == null) {
+        throw new IllegalArgumentException("Ciphertext cannot be null");
+    }
+    this.ciphertext = ciphertext.clone();
+}</pre>
+                <div class="issue-source">Reviewer: claude</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">Missing null check in constructor could allow null ciphertext</div>
+                <div class="issue-location">src/main/java/org/openhitls/crypto/jce/key/McElieceCiphertextKey.java:11-13</div>
+                <pre>public McElieceCiphertextKey(byte[] ciphertext) {
+    this.ciphertext = ciphertext != null ? ciphertext.clone() : null;
+}</pre>
+                <div class="problem"><strong>Issue:</strong> The constructor accepts null ciphertext and stores it without validation. Allowing null ciphertext could lead to unexpected behavior in cryptographic operations.</div>
+                <div class="fix-label">Fix:</div><pre>public McElieceCiphertextKey(byte[] ciphertext) {
+    if (ciphertext == null) {
+        throw new IllegalArgumentException("Ciphertext cannot be null");
+    }
+    this.ciphertext = ciphertext.clone();
+}</pre>
+                <div class="issue-source">Reviewer: claude</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">malloc without size validation could cause integer overflow</div>
+                <div class="issue-location">src/main/native/crypto_native_jni.c:3362-3366</div>
+                <pre>pubKey.key.kemEk.data = malloc(publicKeySize);
+pubKey.key.kemEk.len = publicKeySize;
+if (pubKey.key.kemEk.data == NULL) {</pre>
+                <div class="problem"><strong>Issue:</strong> In `frodoKemGenerateKeyPair`, the code allocates memory using `malloc(publicKeySize)` and `malloc(privateKeySize)` without validating these sizes. While the sizes come from constants in this code path, defensive programming suggests checking for unreasonable sizes.</div>
+                <div class="fix-label">Fix:</div><pre>if (publicKeySize == 0 || publicKeySize &gt; 10485760) {  // 10MB sanity limit
+    throwException(env, ILLEGAL_STATE_EXCEPTION, "Invalid public key size");
+    return NULL;
+}
+pubKey.key.kemEk.data = malloc(publicKeySize);
+pubKey.key.kemEk.len = publicKeySize;
+if (pubKey.key.kemEk.data == NULL) {</pre>
+                <div class="issue-source">Reviewer: claude</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">Missing validation of parameter name in constructor</div>
+                <div class="issue-location">src/main/java/org/openhitls/crypto/jce/spec/FrodoKEMGenParameterSpec.java:10-12</div>
+                <pre>public FrodoKEMGenParameterSpec(String name) {
+    this.name = name;
+}</pre>
+                <div class="problem"><strong>Issue:</strong> The `FrodoKEMGenParameterSpec` constructor accepts any string without validating it's a valid FrodoKEM parameter set name. This allows creation of invalid parameter specs that will fail later.</div>
+                <div class="fix-label">Fix:</div><pre>public FrodoKEMGenParameterSpec(String name) {
+    if (name == null) {
+        throw new NullPointerException("name cannot be null");
+    }
+    if (!name.matches("^FrodoKEM-(640|976|1344)-(SHAKE|AES)$")) {
+        throw new IllegalArgumentException("Invalid FrodoKEM parameter set: " + name);
+    }
+    this.name = name;
+}</pre>
+                <div class="issue-source">Reviewer: claude</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">Missing validation of parameter name in constructor</div>
+                <div class="issue-location">src/main/java/org/openhitls/crypto/jce/spec/McElieceGenParameterSpec.java:10-12</div>
+                <pre>public McElieceGenParameterSpec(String name) {
+    this.name = name;
+}</pre>
+                <div class="problem"><strong>Issue:</strong> The `McElieceGenParameterSpec` constructor accepts any string without validating it's a valid McEliece parameter set name.</div>
+                <div class="fix-label">Fix:</div><pre>public McElieceGenParameterSpec(String name) {
+    if (name == null) {
+        throw new NullPointerException("name cannot be null");
+    }
+    if (!name.matches("^McEliece-(6688128|6688128f|6688128pc|6688128pcf|6960119|6960119f|6960119pc|6960119pcf|8192128|8192128f|8192128pc|8192128pcf)$")) {
+        throw new IllegalArgumentException("Invalid McEliece parameter set: " + name);
+    }
+    this.name = name;
+}</pre>
+                <div class="issue-source">Reviewer: claude</div>
+            </div>
+</div>
+</div></body></html>

@@ -1,0 +1,305 @@
+===ISSUE===
+FILE: src/main/native/crypto_native_jni.c
+LINE: 3329-3333
+SEVERITY: high
+TITLE: Missing NULL check after GetStringUTFChars in frodoKemCreateContext
+PROBLEM: The JNI function `GetStringUTFChars` can return NULL if the JVM runs out of memory. If it returns NULL, passing it to `strcmp` in `getFrodoKemParamId` will cause a segmentation fault and crash the JVM.
+CODE:
+```c
+  (JNIEnv *env, jclass cls, jstring jparameterSet) {
+    const char *parameterSet = (*env)->GetStringUTFChars(env, jparameterSet, NULL);
+    int paramId = getFrodoKemParamId(parameterSet);
+    (*env)->ReleaseStringUTFChars(env, jparameterSet, parameterSet);
+    if (paramId == -1) {
+```
+FIX:
+```c
+  (JNIEnv *env, jclass cls, jstring jparameterSet) {
+    const char *parameterSet = (*env)->GetStringUTFChars(env, jparameterSet, NULL);
+    if (parameterSet == NULL) {
+        return 0;
+    }
+    int paramId = getFrodoKemParamId(parameterSet);
+    (*env)->ReleaseStringUTFChars(env, jparameterSet, parameterSet);
+    if (paramId == -1) {
+```
+===END===
+
+===ISSUE===
+FILE: src/main/native/crypto_native_jni.c
+LINE: 3359-3363
+SEVERITY: high
+TITLE: Missing NULL check after GetStringUTFChars in frodoKemGenerateKeyPair
+PROBLEM: `GetStringUTFChars` can return NULL. Passing NULL to `getFrodoKemParamId` will result in a segmentation fault.
+CODE:
+```c
+    int publicKeySize;
+    int privateKeySize;
+    const char *parameterSet = (*env)->GetStringUTFChars(env, jparameterSet, NULL);
+    int paramId = getFrodoKemParamId(parameterSet);
+    (*env)->ReleaseStringUTFChars(env, jparameterSet, parameterSet);
+
+    getFrodoKemKeySizes(paramId, &publicKeySize, &privateKeySize);
+```
+FIX:
+```c
+    int publicKeySize;
+    int privateKeySize;
+    const char *parameterSet = (*env)->GetStringUTFChars(env, jparameterSet, NULL);
+    if (parameterSet == NULL) {
+        return NULL;
+    }
+    int paramId = getFrodoKemParamId(parameterSet);
+    (*env)->ReleaseStringUTFChars(env, jparameterSet, parameterSet);
+
+    getFrodoKemKeySizes(paramId, &publicKeySize, &privateKeySize);
+```
+===END===
+
+===ISSUE===
+FILE: src/main/native/crypto_native_jni.c
+LINE: 3449-3453
+SEVERITY: high
+TITLE: Missing NULL check after GetByteArrayElements for encapsulate key in frodoKemSetKeys
+PROBLEM: `GetByteArrayElements` can return NULL on out-of-memory. Using this NULL pointer or passing it to `ReleaseByteArrayElements` will cause undefined behavior or crash the JVM.
+CODE:
+```c
+        CRYPT_EAL_PkeyPub pubKey;
+        memset(&pubKey, 0, sizeof(CRYPT_EAL_PkeyPub));
+        pubKey.id = CRYPT_PKEY_FRODOKEM;
+        pubKey.key.kemEk.data = (uint8_t *)(*env)->GetByteArrayElements(env, jencapKey, NULL);
+        pubKey.key.kemEk.len = (*env)->GetArrayLength(env, jencapKey);
+
+        ret = CRYPT_EAL_PkeySetPub(pkey, &pubKey);
+```
+FIX:
+```c
+        CRYPT_EAL_PkeyPub pubKey;
+        memset(&pubKey, 0, sizeof(CRYPT_EAL_PkeyPub));
+        pubKey.id = CRYPT_PKEY_FRODOKEM;
+        pubKey.key.kemEk.data = (uint8_t *)(*env)->GetByteArrayElements(env, jencapKey, NULL);
+        if (pubKey.key.kemEk.data == NULL) {
+            return;
+        }
+        pubKey.key.kemEk.len = (*env)->GetArrayLength(env, jencapKey);
+
+        ret = CRYPT_EAL_PkeySetPub(pkey, &pubKey);
+```
+===END===
+
+===ISSUE===
+FILE: src/main/native/crypto_native_jni.c
+LINE: 3464-3468
+SEVERITY: high
+TITLE: Missing NULL check after GetByteArrayElements for decapsulate key in frodoKemSetKeys
+PROBLEM: `GetByteArrayElements` can return NULL on out-of-memory. Using this NULL pointer or passing it to `ReleaseByteArrayElements` will cause undefined behavior or crash the JVM.
+CODE:
+```c
+        CRYPT_EAL_PkeyPrv privKey;
+        memset(&privKey, 0, sizeof(CRYPT_EAL_PkeyPrv));
+        privKey.id = CRYPT_PKEY_FRODOKEM;
+        privKey.key.kemDk.data = (uint8_t *)(*env)->GetByteArrayElements(env, jdecapKey, NULL);
+        privKey.key.kemDk.len = (*env)->GetArrayLength(env, jdecapKey);
+
+        ret = CRYPT_EAL_PkeySetPrv(pkey, &privKey);
+```
+FIX:
+```c
+        CRYPT_EAL_PkeyPrv privKey;
+        memset(&privKey, 0, sizeof(CRYPT_EAL_PkeyPrv));
+        privKey.id = CRYPT_PKEY_FRODOKEM;
+        privKey.key.kemDk.data = (uint8_t *)(*env)->GetByteArrayElements(env, jdecapKey, NULL);
+        if (privKey.key.kemDk.data == NULL) {
+            return;
+        }
+        privKey.key.kemDk.len = (*env)->GetArrayLength(env, jdecapKey);
+
+        ret = CRYPT_EAL_PkeySetPrv(pkey, &privKey);
+```
+===END===
+
+===ISSUE===
+FILE: src/main/native/crypto_native_jni.c
+LINE: 3662-3667
+SEVERITY: high
+TITLE: Missing NULL check after GetStringUTFChars in mcelieceCreateContext
+PROBLEM: `GetStringUTFChars` can return NULL. Passing NULL to `getMcElieceParamId` will result in a segmentation fault.
+CODE:
+```c
+JNIEXPORT jlong JNICALL Java_org_openhitls_crypto_core_CryptoNative_mcelieceCreateContext
+  (JNIEnv *env, jclass cls, jstring jparameterSet) {
+    const char *parameterSet = (*env)->GetStringUTFChars(env, jparameterSet, NULL);
+    int paramId = getMcElieceParamId(parameterSet);
+    (*env)->ReleaseStringUTFChars(env, jparameterSet, parameterSet);
+    if (paramId == -1) {
+```
+FIX:
+```c
+JNIEXPORT jlong JNICALL Java_org_openhitls_crypto_core_CryptoNative_mcelieceCreateContext
+  (JNIEnv *env, jclass cls, jstring jparameterSet) {
+    const char *parameterSet = (*env)->GetStringUTFChars(env, jparameterSet, NULL);
+    if (parameterSet == NULL) {
+        return 0;
+    }
+    int paramId = getMcElieceParamId(parameterSet);
+    (*env)->ReleaseStringUTFChars(env, jparameterSet, parameterSet);
+    if (paramId == -1) {
+```
+===END===
+
+===ISSUE===
+FILE: src/main/native/crypto_native_jni.c
+LINE: 3693-3697
+SEVERITY: high
+TITLE: Missing NULL check after GetStringUTFChars in mcelieceGenerateKeyPair
+PROBLEM: `GetStringUTFChars` can return NULL. Passing NULL to `getMcElieceParamId` will result in a segmentation fault.
+CODE:
+```c
+    int publicKeySize;
+    int privateKeySize;
+    const char *parameterSet = (*env)->GetStringUTFChars(env, jparameterSet, NULL);
+    int paramId = getMcElieceParamId(parameterSet);
+    (*env)->ReleaseStringUTFChars(env, jparameterSet, parameterSet);
+
+    getMcElieceKeySizes(paramId, &publicKeySize, &privateKeySize);
+```
+FIX:
+```c
+    int publicKeySize;
+    int privateKeySize;
+    const char *parameterSet = (*env)->GetStringUTFChars(env, jparameterSet, NULL);
+    if (parameterSet == NULL) {
+        return NULL;
+    }
+    int paramId = getMcElieceParamId(parameterSet);
+    (*env)->ReleaseStringUTFChars(env, jparameterSet, parameterSet);
+
+    getMcElieceKeySizes(paramId, &publicKeySize, &privateKeySize);
+```
+===END===
+
+===ISSUE===
+FILE: src/main/native/crypto_native_jni.c
+LINE: 3783-3787
+SEVERITY: high
+TITLE: Missing NULL check after GetByteArrayElements for encapsulate key in mcelieceSetKeys
+PROBLEM: `GetByteArrayElements` can return NULL on out-of-memory. Using this NULL pointer or passing it to `ReleaseByteArrayElements` will cause undefined behavior or crash the JVM.
+CODE:
+```c
+        CRYPT_EAL_PkeyPub pubKey;
+        memset(&pubKey, 0, sizeof(CRYPT_EAL_PkeyPub));
+        pubKey.id = CRYPT_PKEY_MCELIECE;
+        pubKey.key.kemEk.data = (uint8_t *)(*env)->GetByteArrayElements(env, jencapKey, NULL);
+        pubKey.key.kemEk.len = (*env)->GetArrayLength(env, jencapKey);
+
+        ret = CRYPT_EAL_PkeySetPub(pkey, &pubKey);
+```
+FIX:
+```c
+        CRYPT_EAL_PkeyPub pubKey;
+        memset(&pubKey, 0, sizeof(CRYPT_EAL_PkeyPub));
+        pubKey.id = CRYPT_PKEY_MCELIECE;
+        pubKey.key.kemEk.data = (uint8_t *)(*env)->GetByteArrayElements(env, jencapKey, NULL);
+        if (pubKey.key.kemEk.data == NULL) {
+            return;
+        }
+        pubKey.key.kemEk.len = (*env)->GetArrayLength(env, jencapKey);
+
+        ret = CRYPT_EAL_PkeySetPub(pkey, &pubKey);
+```
+===END===
+
+===ISSUE===
+FILE: src/main/native/crypto_native_jni.c
+LINE: 3798-3802
+SEVERITY: high
+TITLE: Missing NULL check after GetByteArrayElements for decapsulate key in mcelieceSetKeys
+PROBLEM: `GetByteArrayElements` can return NULL on out-of-memory. Using this NULL pointer or passing it to `ReleaseByteArrayElements` will cause undefined behavior or crash the JVM.
+CODE:
+```c
+        CRYPT_EAL_PkeyPrv privKey;
+        memset(&privKey, 0, sizeof(CRYPT_EAL_PkeyPrv));
+        privKey.id = CRYPT_PKEY_MCELIECE;
+        privKey.key.kemDk.data = (uint8_t *)(*env)->GetByteArrayElements(env, jdecapKey, NULL);
+        privKey.key.kemDk.len = (*env)->GetArrayLength(env, jdecapKey);
+
+        ret = CRYPT_EAL_PkeySetPrv(pkey, &privKey);
+```
+FIX:
+```c
+        CRYPT_EAL_PkeyPrv privKey;
+        memset(&privKey, 0, sizeof(CRYPT_EAL_PkeyPrv));
+        privKey.id = CRYPT_PKEY_MCELIECE;
+        privKey.key.kemDk.data = (uint8_t *)(*env)->GetByteArrayElements(env, jdecapKey, NULL);
+        if (privKey.key.kemDk.data == NULL) {
+            return;
+        }
+        privKey.key.kemDk.len = (*env)->GetArrayLength(env, jdecapKey);
+
+        ret = CRYPT_EAL_PkeySetPrv(pkey, &privKey);
+```
+===END===
+
+===ISSUE===
+FILE: src/main/java/org/openhitls/crypto/jce/keyagreement/FrodoKEMKeyAgreement.java
+LINE: 80-87
+SEVERITY: medium
+TITLE: Incorrect exception type thrown for short buffers
+PROBLEM: When generating a secret into an existing array that is too small, the implementation throws `IllegalStateException`. According to the JCE contract for `KeyAgreementSpi.engineGenerateSecret(byte[], int)`, a `javax.crypto.ShortBufferException` must be thrown in this case to allow calling applications to handle the size dynamically.
+CODE:
+```java
+    @Override
+    protected int engineGenerateSecret(byte[] sharedSecret, int offset) throws InvalidParameterException {
+        byte[] secret = engineGenerateSecret();
+        if (sharedSecret.length - offset < secret.length) {
+            throw new IllegalStateException("Insufficient space in sharedSecret array");
+        }
+        System.arraycopy(secret, 0, sharedSecret, offset, secret.length);
+        return secret.length;
+    }
+```
+FIX:
+```java
+    @Override
+    protected int engineGenerateSecret(byte[] sharedSecret, int offset) throws IllegalStateException, javax.crypto.ShortBufferException {
+        byte[] secret = engineGenerateSecret();
+        if (sharedSecret.length - offset < secret.length) {
+            throw new javax.crypto.ShortBufferException("Insufficient space in sharedSecret array");
+        }
+        System.arraycopy(secret, 0, sharedSecret, offset, secret.length);
+        return secret.length;
+    }
+```
+===END===
+
+===ISSUE===
+FILE: src/main/java/org/openhitls/crypto/jce/keyagreement/McElieceKeyAgreement.java
+LINE: 116-123
+SEVERITY: medium
+TITLE: Incorrect exception type thrown for short buffers
+PROBLEM: When generating a secret into an existing array that is too small, the implementation throws `IllegalStateException`. According to the JCE contract for `KeyAgreementSpi.engineGenerateSecret(byte[], int)`, a `javax.crypto.ShortBufferException` must be thrown in this case to allow calling applications to handle the size dynamically.
+CODE:
+```java
+    @Override
+    protected int engineGenerateSecret(byte[] sharedSecret, int offset) throws InvalidParameterException {
+        byte[] secret = engineGenerateSecret();
+        if (sharedSecret.length - offset < secret.length) {
+            throw new IllegalStateException("Insufficient space in sharedSecret array");
+        }
+        System.arraycopy(secret, 0, sharedSecret, offset, secret.length);
+        return secret.length;
+    }
+```
+FIX:
+```java
+    @Override
+    protected int engineGenerateSecret(byte[] sharedSecret, int offset) throws IllegalStateException, javax.crypto.ShortBufferException {
+        byte[] secret = engineGenerateSecret();
+        if (sharedSecret.length - offset < secret.length) {
+            throw new javax.crypto.ShortBufferException("Insufficient space in sharedSecret array");
+        }
+        System.arraycopy(secret, 0, sharedSecret, offset, secret.length);
+        return secret.length;
+    }
+```
+===END===

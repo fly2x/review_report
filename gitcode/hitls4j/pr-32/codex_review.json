@@ -1,0 +1,62 @@
+[
+  {
+    "source": "codex",
+    "file": "src/main/java/org/openhitls/crypto/jce/key/factory/FrodoKEMKeyFactory.java",
+    "line": "22-31",
+    "severity": "high",
+    "title": "KeyFactory treats raw FrodoKEM bytes as PKCS#8/X.509 without parsing",
+    "problem": "The new key factory accepts `PKCS8EncodedKeySpec` and `X509EncodedKeySpec`, but it never parses or validates any ASN.1 wrapper. It just copies the byte array into a provider key object and later re-exports the same bytes as if they were standard encodings. That makes `KeyFactory` accept malformed input as a key and breaks interoperability with any code that expects real PKCS#8 or SubjectPublicKeyInfo data.",
+    "code": "} else if (keySpec instanceof PKCS8EncodedKeySpec) {\n    try {\n        return new FrodoKEMPrivateKeyImpl(((PKCS8EncodedKeySpec) keySpec).getEncoded());\n    } catch (Exception e) {\n        throw new InvalidKeySpecException(\"Invalid PKCS8EncodedKeySpec for FrodoKEM private key\", e);\n    }\n}\n...\n} else if (keySpec instanceof X509EncodedKeySpec) {\n    try {\n        return new FrodoKEMPublicKeyImpl(((X509EncodedKeySpec) keySpec).getEncoded());\n    } catch (Exception e) {\n        throw new InvalidKeySpecException(\"Invalid X509EncodedKeySpec for FrodoKEM public key\", e);\n    }\n}\n...\nif (keySpec.isAssignableFrom(X509EncodedKeySpec.class)) {\n    return keySpec.cast(new X509EncodedKeySpec(key.getEncoded()));\n}\n...\nif (keySpec.isAssignableFrom(PKCS8EncodedKeySpec.class)) {\n    return keySpec.cast(new PKCS8EncodedKeySpec(key.getEncoded()));\n}",
+    "fix": "@Override\nprotected PrivateKey engineGeneratePrivate(KeySpec keySpec) throws InvalidKeySpecException {\n    if (keySpec instanceof FrodoKEMPrivateKeySpec) {\n        FrodoKEMPrivateKeySpec spec = (FrodoKEMPrivateKeySpec) keySpec;\n        return new FrodoKEMPrivateKeyImpl(spec.getParams(), spec.getEncoded());\n    }\n    if (keySpec instanceof PKCS8EncodedKeySpec) {\n        throw new InvalidKeySpecException(\n                \"PKCS#8 encoding is not implemented for FrodoKEM keys; use FrodoKEMPrivateKeySpec\");\n    }\n    throw new InvalidKeySpecException(\"Unsupported key specification: \" + keySpec.getClass().getName());\n}\n\n@Override\nprotected PublicKey engineGeneratePublic(KeySpec keySpec) throws InvalidKeySpecException {\n    if (keySpec instanceof FrodoKEMPublicKeySpec) {\n        FrodoKEMPublicKeySpec spec = (FrodoKEMPublicKeySpec) keySpec;\n        return new FrodoKEMPublicKeyImpl(spec.getParams(), spec.getEncoded());\n    }\n    if (keySpec instanceof X509EncodedKeySpec) {\n        throw new InvalidKeySpecException(\n                \"X.509 encoding is not implemented for FrodoKEM keys; use FrodoKEMPublicKeySpec\");\n    }\n    throw new InvalidKeySpecException(\"Unsupported key specification: \" + keySpec.getClass().getName());\n}\n\n@Override\nprotected <T extends KeySpec> T engineGetKeySpec(Key key, Class<T> keySpec) throws InvalidKeySpecException {\n    if (keySpec.isAssignableFrom(X509EncodedKeySpec.class)\n            || keySpec.isAssignableFrom(PKCS8EncodedKeySpec.class)) {\n        throw new InvalidKeySpecException(\n                \"Standard X.509/PKCS#8 encodings are not implemented for FrodoKEM keys\");\n    }\n    // existing FrodoKEMPublicKeySpec / FrodoKEMPrivateKeySpec handling stays here\n}"
+  },
+  {
+    "source": "codex",
+    "file": "src/main/java/org/openhitls/crypto/jce/key/factory/McElieceKeyFactory.java",
+    "line": "22-31",
+    "severity": "high",
+    "title": "KeyFactory treats raw McEliece bytes as PKCS#8/X.509 without parsing",
+    "problem": "The McEliece key factory has the same problem as the FrodoKEM one: `PKCS8EncodedKeySpec` and `X509EncodedKeySpec` are accepted and returned without parsing any standard wrapper. The provider is therefore advertising standard encodings that it does not actually implement, and malformed encoded input is turned into a key object without validation.",
+    "code": "} else if (keySpec instanceof PKCS8EncodedKeySpec) {\n    try {\n        return new McEliecePrivateKeyImpl(((PKCS8EncodedKeySpec) keySpec).getEncoded());\n    } catch (Exception e) {\n        throw new InvalidKeySpecException(\"Invalid PKCS8EncodedKeySpec for Classic McEliece private key\", e);\n    }\n}\n...\n} else if (keySpec instanceof X509EncodedKeySpec) {\n    try {\n        return new McEliecePublicKeyImpl(((X509EncodedKeySpec) keySpec).getEncoded());\n    } catch (Exception e) {\n        throw new InvalidKeySpecException(\"Invalid X509EncodedKeySpec for Classic McEliece public key\", e);\n    }\n}\n...\nif (keySpec.isAssignableFrom(X509EncodedKeySpec.class)) {\n    return keySpec.cast(new X509EncodedKeySpec(key.getEncoded()));\n}\n...\nif (keySpec.isAssignableFrom(PKCS8EncodedKeySpec.class)) {\n    return keySpec.cast(new PKCS8EncodedKeySpec(key.getEncoded()));\n}",
+    "fix": "@Override\nprotected PrivateKey engineGeneratePrivate(KeySpec keySpec) throws InvalidKeySpecException {\n    if (keySpec instanceof McEliecePrivateKeySpec) {\n        McEliecePrivateKeySpec spec = (McEliecePrivateKeySpec) keySpec;\n        return new McEliecePrivateKeyImpl(spec.getParams(), spec.getEncoded());\n    }\n    if (keySpec instanceof PKCS8EncodedKeySpec) {\n        throw new InvalidKeySpecException(\n                \"PKCS#8 encoding is not implemented for Classic McEliece keys; use McEliecePrivateKeySpec\");\n    }\n    throw new InvalidKeySpecException(\"Unsupported key specification: \" + keySpec.getClass().getName());\n}\n\n@Override\nprotected PublicKey engineGeneratePublic(KeySpec keySpec) throws InvalidKeySpecException {\n    if (keySpec instanceof McEliecePublicKeySpec) {\n        McEliecePublicKeySpec spec = (McEliecePublicKeySpec) keySpec;\n        return new McEliecePublicKeyImpl(spec.getParams(), spec.getEncoded());\n    }\n    if (keySpec instanceof X509EncodedKeySpec) {\n        throw new InvalidKeySpecException(\n                \"X.509 encoding is not implemented for Classic McEliece keys; use McEliecePublicKeySpec\");\n    }\n    throw new InvalidKeySpecException(\"Unsupported key specification: \" + keySpec.getClass().getName());\n}\n\n@Override\nprotected <T extends KeySpec> T engineGetKeySpec(Key key, Class<T> keySpec) throws InvalidKeySpecException {\n    if (keySpec.isAssignableFrom(X509EncodedKeySpec.class)\n            || keySpec.isAssignableFrom(PKCS8EncodedKeySpec.class)) {\n        throw new InvalidKeySpecException(\n                \"Standard X.509/PKCS#8 encodings are not implemented for Classic McEliece keys\");\n    }\n    // existing McEliecePublicKeySpec / McEliecePrivateKeySpec handling stays here\n}"
+  },
+  {
+    "source": "codex",
+    "file": "src/main/java/org/openhitls/crypto/jce/keyagreement/FrodoKEMKeyAgreement.java",
+    "line": "52-55",
+    "severity": "medium",
+    "title": "Missing key parameters cause a NullPointerException during init",
+    "problem": "`engineInit` assumes every FrodoKEM key carries a non-null `FrodoKEMParameterSpec`. That is false for keys created from the new `PKCS8EncodedKeySpec`/`X509EncodedKeySpec` paths, because those constructors leave `params` null. Initializing `KeyAgreement` with such a key will crash with `NullPointerException` instead of failing deterministically with `InvalidKeyException` or deriving the parameter set from the encoding.",
+    "code": "} else if (frodoKemPrivateKey != null) {\n    parameterSet = frodoKemPrivateKey.getParams().getName();\n} else if (frodoKemPublicKey != null) {\n    parameterSet = frodoKemPublicKey.getParams().getName();\n}",
+    "fix": "FrodoKEMParameterSpec keyParams = null;\nif (frodoKemPrivateKey != null) {\n    keyParams = frodoKemPrivateKey.getParams();\n} else if (frodoKemPublicKey != null) {\n    keyParams = frodoKemPublicKey.getParams();\n}\n\nif (params != null) {\n    parameterSet = params.getName();\n    if (keyParams != null && !parameterSet.equals(keyParams.getName())) {\n        throw new InvalidKeyException(\"Key parameter set does not match the supplied FrodoKEM parameters\");\n    }\n} else if (keyParams != null) {\n    parameterSet = keyParams.getName();\n} else {\n    throw new InvalidKeyException(\"FrodoKEM key is missing parameter metadata\");\n}"
+  },
+  {
+    "source": "codex",
+    "file": "src/main/java/org/openhitls/crypto/jce/keyagreement/McElieceKeyAgreement.java",
+    "line": "55-58",
+    "severity": "medium",
+    "title": "Missing key parameters cause a NullPointerException during init",
+    "problem": "`engineInit` dereferences `getParams()` without checking for null. Keys constructed from the new encoded-key paths have `params == null`, so initializing `KeyAgreement` with a deserialized McEliece key throws `NullPointerException` instead of a checked key error.",
+    "code": "} else if (mcEliecePrivateKey != null) {\n    parameterSet = mcEliecePrivateKey.getParams().getName();\n} else if (mcEliecePublicKey != null) {\n    parameterSet = mcEliecePublicKey.getParams().getName();\n}",
+    "fix": "McElieceParameterSpec keyParams = null;\nif (mcEliecePrivateKey != null) {\n    keyParams = mcEliecePrivateKey.getParams();\n} else if (mcEliecePublicKey != null) {\n    keyParams = mcEliecePublicKey.getParams();\n}\n\nif (params != null) {\n    parameterSet = params.getName();\n    if (keyParams != null && !parameterSet.equals(keyParams.getName())) {\n        throw new InvalidKeyException(\"Key parameter set does not match the supplied Classic McEliece parameters\");\n    }\n} else if (keyParams != null) {\n    parameterSet = keyParams.getName();\n} else {\n    throw new InvalidKeyException(\"Classic McEliece key is missing parameter metadata\");\n}"
+  },
+  {
+    "source": "codex",
+    "file": "src/test/java/org/openhitls/crypto/jce/pqc/FrodoKEMTest.java",
+    "line": "44-45",
+    "severity": "medium",
+    "title": "Test suite uses a provider name that does not exist",
+    "problem": "These calls request provider `\"HiTls4j\"`, but the provider is registered as `\"HITLS4J\"`. Java provider lookup is case-sensitive, so every `getInstance(..., \"HiTls4j\")` call throws `NoSuchProviderException` and the new FrodoKEM tests fail before exercising the feature.",
+    "code": "KeyPairGenerator kpg = KeyPairGenerator.getInstance(\"FrodoKEM\", \"HiTls4j\");\n...\nKeyAgreement senderAgreement = KeyAgreement.getInstance(\"FrodoKEM\", \"HiTls4j\");\n...\nKeyAgreement receiverAgreement = KeyAgreement.getInstance(\"FrodoKEM\", \"HiTls4j\");",
+    "fix": "KeyPairGenerator kpg = KeyPairGenerator.getInstance(\"FrodoKEM\", HiTls4jProvider.PROVIDER_NAME);\n...\nKeyAgreement senderAgreement = KeyAgreement.getInstance(\"FrodoKEM\", HiTls4jProvider.PROVIDER_NAME);\n...\nKeyAgreement receiverAgreement = KeyAgreement.getInstance(\"FrodoKEM\", HiTls4jProvider.PROVIDER_NAME);"
+  },
+  {
+    "source": "codex",
+    "file": "src/test/java/org/openhitls/crypto/jce/pqc/McElieceTest.java",
+    "line": "40-41",
+    "severity": "medium",
+    "title": "Test suite uses a provider name that does not exist",
+    "problem": "The new McEliece tests also request provider `\"HiTls4j\"` instead of the registered `\"HITLS4J\"`. Because provider lookup is case-sensitive, the test class fails with `NoSuchProviderException` instead of validating the implementation.",
+    "code": "KeyPairGenerator kpg = KeyPairGenerator.getInstance(\"Classic-McEliece\", \"HiTls4j\");\n...\nKeyAgreement senderAgreement = KeyAgreement.getInstance(\"Classic-McEliece\", \"HiTls4j\");\n...\nKeyAgreement receiverAgreement = KeyAgreement.getInstance(\"Classic-McEliece\", \"HiTls4j\");",
+    "fix": "KeyPairGenerator kpg = KeyPairGenerator.getInstance(\"Classic-McEliece\", HiTls4jProvider.PROVIDER_NAME);\n...\nKeyAgreement senderAgreement = KeyAgreement.getInstance(\"Classic-McEliece\", HiTls4jProvider.PROVIDER_NAME);\n...\nKeyAgreement receiverAgreement = KeyAgreement.getInstance(\"Classic-McEliece\", HiTls4jProvider.PROVIDER_NAME);"
+  }
+]

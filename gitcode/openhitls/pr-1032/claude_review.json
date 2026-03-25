@@ -2,111 +2,80 @@
   {
     "source": "claude",
     "file": "tls/cert/hitls_x509_adapt/hitls_x509_cert_store.c",
-    "line": "105-107",
+    "line": "106",
     "severity": "high",
-    "title": "NULL pointer dereference risk in CERT_STORE_CTRL_SET_HOST_FLAG",
-    "problem": "The code dereferences `input` pointer without checking if it's NULL first. If input is NULL, this will cause a crash.",
-    "code": "case CERT_STORE_CTRL_SET_HOST_FLAG:\n    if (*(int64_t *)input > UINT32_MAX || *(int64_t *)input < 0) {\n        return HITLS_CERT_STORE_CTRL_ERR_SET_HOST_FLAG;\n    }",
-    "fix": "case CERT_STORE_CTRL_SET_HOST_FLAG:\n    if (input == NULL) {\n        return HITLS_CERT_STORE_CTRL_ERR_SET_HOST_FLAG;\n    }\n    if (*(int64_t *)input > UINT32_MAX || *(int64_t *)input < 0) {\n        return HITLS_CERT_STORE_CTRL_ERR_SET_HOST_FLAG;\n    }"
+    "title": "Type mismatch in hostflag range check",
+    "problem": "The code casts input to int64_t* and compares against UINT32_MAX, but input comes from a uint32_t value passed through int64_t. The cast is incorrect - input should be treated as a pointer to the original value type, not int64_t*. This works on little-endian systems due to how values are passed, but is fundamentally incorrect and could fail on different architectures or compilers.",
+    "code": "case CERT_STORE_CTRL_SET_HOST_FLAG:\n    if (*(int64_t *)input > UINT32_MAX || *(int64_t *)input < 0) {\n        return HITLS_CERT_STORE_CTRL_ERR_SET_HOST_FLAG;\n    }\n    return HITLS_X509_StoreCtxCtrl(store, HITLS_X509_STORECTX_SET_HOST_FLAG, (int64_t *)input,\n        sizeof(uint32_t));",
+    "fix": "case CERT_STORE_CTRL_SET_HOST_FLAG:\n    {\n        uint64_t flagVal = *(uint64_t *)input;\n        if (flagVal > UINT32_MAX) {\n            return HITLS_CERT_STORE_CTRL_ERR_SET_HOST_FLAG;\n        }\n        uint32_t flagVal32 = (uint32_t)flagVal;\n        return HITLS_X509_StoreCtxCtrl(store, HITLS_X509_STORECTX_SET_HOST_FLAG, &flagVal32,\n            sizeof(uint32_t));\n    }"
   },
   {
     "source": "claude",
     "file": "pki/x509_verify/src/hitls_x509_verify.c",
-    "line": "846",
-    "severity": "high",
-    "title": "Integer underflow vulnerability in IPv6 validation",
-    "problem": "When ipv4Start is 0, `ipv4Start - 1` becomes -1, which causes signed-to-unsigned conversion issues. If hasIpv4 is true but ipv4Start is 0, ipv6Len becomes -1 which then converts to a large unsigned value when passed to ParseIPv6Segments.",
-    "code": "int ipv6Len = hasIpv4 ? ipv4Start - 1 : (int)strlen(ipstr);",
-    "fix": "int ipv6Len = hasIpv4 ? ipv4Start - 1 : (int)strlen(ipstr);\nif (ipv6Len <= 0) {\n    return false;  // Invalid IPv6 format\n}"
-  },
-  {
-    "source": "claude",
-    "file": "pki/x509_verify/src/hitls_x509_verify.c",
-    "line": "993",
-    "severity": "high",
-    "title": "Memory leak on error path in X509_SetVerifyParam",
-    "problem": "If sm2UserId.data allocation fails, the function returns error but has already modified storeCtx->verifyParam with other fields. The partially modified state leaves hostnames and ip allocated but inconsistent, and memory allocated for ip may be leaked.",
-    "code": "if (verifyParam->ip != NULL) {\n    BSL_SAL_FREE(storeCtx->verifyParam.ip);\n    storeCtx->verifyParam.ip = BSL_SAL_Calloc(strlen(verifyParam->ip) + 1, sizeof(char));\n    if (storeCtx->verifyParam.ip == NULL) {\n        BSL_ERR_PUSH_ERROR(BSL_MALLOC_FAIL);\n        return BSL_MALLOC_FAIL;\n    }\n    ...\n}\nstoreCtx->verifyParam.flags = verifyParam->flags;\nstoreCtx->verifyParam.maxDepth = verifyParam->maxDepth;\nstoreCtx->verifyParam.purpose = verifyParam->purpose;\nstoreCtx->verifyParam.securityBits = verifyParam->securityBits;\n#ifdef HITLS_CRYPTO_SM2\n    if (verifyParam->sm2UserId.data != NULL && verifyParam->sm2UserId.dataLen > 0) {\n        BSL_SAL_FREE(storeCtx->verifyParam.sm2UserId.data);\n        storeCtx->verifyParam.sm2UserId.data = BSL_SAL_Calloc(verifyParam->sm2UserId.dataLen, sizeof(uint8_t));\n        if (storeCtx->verifyParam.sm2UserId.data == NULL) {\n            BSL_ERR_PUSH_ERROR(BSL_MALLOC_FAIL);\n            return BSL_MALLOC_FAIL;  // LEAK: storeCtx->verifyParam.ip was allocated but not freed\n        }",
-    "fix": "if (verifyParam->sm2UserId.data != NULL && verifyParam->sm2UserId.dataLen > 0) {\n        BSL_SAL_FREE(storeCtx->verifyParam.sm2UserId.data);\n        storeCtx->verifyParam.sm2UserId.data = BSL_SAL_Calloc(verifyParam->sm2UserId.dataLen, sizeof(uint8_t));\n        if (storeCtx->verifyParam.sm2UserId.data == NULL) {\n            BSL_ERR_PUSH_ERROR(BSL_MALLOC_FAIL);\n            // Clean up previously allocated memory\n            BSL_SAL_FREE(storeCtx->verifyParam.ip);\n            storeCtx->verifyParam.ip = NULL;\n            return BSL_MALLOC_FAIL;\n        }"
-  },
-  {
-    "source": "claude",
-    "file": "pki/x509_common/src/hitls_x509_util.c",
-    "line": "182-184",
-    "severity": "high",
-    "title": "Integer comparison instead of memcmp in IP verification",
-    "problem": "The code uses `memcmp` return value as `ret` but checks if `ret == HITLS_PKI_SUCCESS` (which is 0). While memcmp returns 0 on match, this is semantically incorrect - it should explicitly check for 0. Also, there's no length validation - if gn->value.dataLen differs from hostname length, this could read beyond hostname buffer.",
-    "code": "} else if (gn->type == HITLS_X509_GN_IP) {\n    ret = memcmp(gn->value.data, hostname, gn->value.dataLen);\n    if (ret == HITLS_PKI_SUCCESS) {\n        break;\n    }",
-    "fix": "} else if (gn->type == HITLS_X509_GN_IP) {\n    // IP addresses must have exact length match (IPv4=4 bytes, IPv6=16 bytes)\n    if (gn->value.dataLen == strlen(hostname)) {\n        ret = memcmp(gn->value.data, hostname, gn->value.dataLen);\n        if (ret == 0) {\n            ret = HITLS_PKI_SUCCESS;\n            break;\n        }\n    }"
-  },
-  {
-    "source": "claude",
-    "file": "pki/x509_verify/src/hitls_x509_verify.c",
-    "line": "980",
+    "line": "605",
     "severity": "medium",
-    "title": "Missing NULL check in X509_SetVerifyParam",
-    "problem": "The code calls BSL_LIST_Copy with verifyParam->hostnames but doesn't check if the copy failed. If BSL_LIST_Copy returns NULL due to memory allocation failure, storeCtx->verifyParam.hostnames becomes NULL but the function continues.",
-    "code": "if (verifyParam->hostnames != NULL) {\n    BSL_LIST_FREE(storeCtx->verifyParam.hostnames, (BSL_LIST_PFUNC_FREE)BSL_SAL_Free);\n    storeCtx->verifyParam.hostnames = BSL_LIST_Copy(verifyParam->hostnames, (BSL_LIST_PFUNC_DUP)DupString,\n        (BSL_LIST_PFUNC_FREE)BSL_SAL_Free);\n}",
-    "fix": "if (verifyParam->hostnames != NULL) {\n    BSL_LIST_FREE(storeCtx->verifyParam.hostnames, (BSL_LIST_PFUNC_FREE)BSL_SAL_Free);\n    storeCtx->verifyParam.hostnames = BSL_LIST_Copy(verifyParam->hostnames, (BSL_LIST_PFUNC_DUP)DupString,\n        (BSL_LIST_PFUNC_FREE)BSL_SAL_Free);\n    if (storeCtx->verifyParam.hostnames == NULL) {\n        BSL_ERR_PUSH_ERROR(BSL_MALLOC_FAIL);\n        return BSL_MALLOC_FAIL;\n    }\n}"
+    "title": "No validation for negative hostflags value",
+    "problem": "The X509_SetHostFlags function performs an OR operation without checking if the input value is negative. Negative values passed via the macro will pass through the range check in hitls_x509_cert_store.c (which only checks for > UINT32_MAX), potentially setting invalid flag bits.",
+    "code": "static int32_t X509_SetHostFlags(HITLS_X509_StoreCtx *storeCtx, uint32_t *val, uint32_t valLen)\n{\n    if (valLen != sizeof(uint32_t)) {\n        BSL_ERR_PUSH_ERROR(HITLS_X509_ERR_INVALID_PARAM);\n        return HITLS_X509_ERR_INVALID_PARAM;\n    }\n\n    storeCtx->verifyParam.hostflags |= *val;\n    return HITLS_PKI_SUCCESS;\n}",
+    "fix": "static int32_t X509_SetHostFlags(HITLS_X509_StoreCtx *storeCtx, uint32_t *val, uint32_t valLen)\n{\n    if (valLen != sizeof(uint32_t)) {\n        BSL_ERR_PUSH_ERROR(HITLS_X509_ERR_INVALID_PARAM);\n        return HITLS_X509_ERR_INVALID_PARAM;\n    }\n\n    storeCtx->verifyParam.hostflags |= *val;\n    storeCtx->verifyParam.hostflags &= HITLS_X509_FLAG_VFY_MASK; /* Ensure only valid flag bits are set */\n    return HITLS_PKI_SUCCESS;\n}"
   },
   {
     "source": "claude",
-    "file": "pki/x509_verify/src/hitls_x509_verify.c",
-    "line": "2000-2001",
+    "file": "bsl/sal/src/sal_ip_util.c",
+    "line": "29",
     "severity": "medium",
-    "title": "Missing error check on allocation in CheckHostnames",
-    "problem": "If BSL_SAL_Calloc fails for peername, the error is returned but the hostname verification already succeeded (ret == HITLS_PKI_SUCCESS). This creates an inconsistent state.",
-    "code": "if (ret == HITLS_PKI_SUCCESS) {\n    BSL_SAL_FREE(storeCtx->verifyParam.peername);\n    storeCtx->verifyParam.peername = BSL_SAL_Calloc(strlen(hostname) + 1, sizeof(char));\n    if (storeCtx->verifyParam.peername == NULL) {\n        BSL_ERR_PUSH_ERROR(BSL_MALLOC_FAIL);\n        return BSL_MALLOC_FAIL;\n    }",
-    "fix": "if (ret == HITLS_PKI_SUCCESS) {\n    BSL_SAL_FREE(storeCtx->verifyParam.peername);\n    storeCtx->verifyParam.peername = BSL_SAL_Calloc(strlen(hostname) + 1, sizeof(char));\n    if (storeCtx->verifyParam.peername == NULL) {\n        // Log the error but continue - hostname verification succeeded\n        // The peername is optional metadata\n        BSL_ERR_PUSH_ERROR(BSL_MALLOC_FAIL);\n        // Don't fail the entire verification for this\n        break;\n    }"
+    "title": "Missing NULL input validation in SAL_ParseIpv4",
+    "problem": "The function does not check if str is NULL before entering the loop. If str is NULL, the first iteration will read str[0] which is NULL and hit the '.' branch, but the code assumes str is valid.",
+    "code": "static bool SAL_ParseIpv4(const char *str, unsigned char *out)\n{\n    int32_t num = 0;\n    int32_t digitCount = 0;\n    int32_t segIndex = 0;\n\n    for (int32_t i = 0; ; i++) {\n        char c = str[i];",
+    "fix": "static bool SAL_ParseIpv4(const char *str, unsigned char *out)\n{\n    if (str == NULL) {\n        return false;\n    }\n    int32_t num = 0;\n    int32_t digitCount = 0;\n    int32_t segIndex = 0;\n\n    for (int32_t i = 0; ; i++) {\n        char c = str[i];"
   },
   {
     "source": "claude",
     "file": "pki/x509_verify/src/hitls_x509_verify.c",
-    "line": "723",
+    "line": "625",
     "severity": "medium",
-    "title": "Buffer overflow risk in ValidateIPv4Section",
-    "problem": "The loop condition `i < (int)strlen(ipstr)` recalculates strlen on each iteration and the condition `j < 15` doesn't prevent writing beyond ipv4Part[16] if the source string is exactly at the boundary. If ipv4Start is valid and the IPv4 portion is exactly 15 chars, j reaches 15 and writes to ipv4Part[15], then ipv4Part[15] = '\\0' writes to index 15 which is valid, but if input is longer, it could write beyond.",
-    "code": "for (int i = ipv4Start; i < (int)strlen(ipstr) && j < 15; i++) {\n    ipv4Part[j++] = ipstr[i];\n}\nipv4Part[j] = '\\0';",
-    "fix": "for (int i = ipv4Start; i < (int)strlen(ipstr) && j < 15; i++) {\n    ipv4Part[j++] = ipstr[i];\n}\nif (j >= 15) {\n    return false;  // IPv4 part too long\n}\nipv4Part[j] = '\\0';"
+    "title": "Redundant memcpy_s size parameter",
+    "problem": "The memcpy_s call uses hostnameLen as both the source and size parameters, but the buffer was allocated with hostnameLen + 1 bytes. The correct size parameter should be hostnameLen (not hostnameLen + 1) which is correct, but the code then sets the null terminator separately. This is correct but inconsistent with the allocation pattern.",
+    "code": "(void)memcpy_s(tmp, hostnameLen, hostname, hostnameLen);\ntmp[hostnameLen] = '\\0';",
+    "fix": "(void)memcpy_s(tmp, hostnameLen + 1, hostname, hostnameLen + 1);"
   },
   {
     "source": "claude",
     "file": "pki/x509_verify/src/hitls_x509_verify.c",
-    "line": "665",
-    "severity": "low",
-    "title": "Off-by-one buffer read risk in X509_CheckIpv4",
-    "problem": "The loop accesses `str[i]` where `i` can be equal to `len`, which reads the null terminator. When `i == len`, `str[i]` is '\\0', which passes the `str[i] == '.'` check but then fails `isdigit()`, returning false. This works but is fragile.",
-    "code": "for (int i = 0; i <= len; i++) {\n    if (str[i] == '.' || str[i] == '\\0') {",
-    "fix": "for (int i = 0; i < len; i++) {\n    if (str[i] == '.') {\n        if (!CheckIpv4Part(str, partStart, i)) {\n            return false;\n        }\n        partCount++;\n        partStart = i + 1;\n    }\n}\n// Check final part after loop\nif (partCount == 3) {\n    if (!CheckIpv4Part(str, partStart, len)) {\n        return false;\n    }\n    partCount++;\n}"
-  },
-  {
-    "source": "claude",
-    "file": "include/tls/hitls_cert.h",
-    "line": "1210-1214",
-    "severity": "low",
-    "title": "Missing parameter validation documentation",
-    "problem": "The HITLS_AddHost macro doesn't document what happens when NULL hostname is passed. Looking at the implementation, X509_SetVerifyDns handles NULL by returning HITLS_PKI_SUCCESS, but this behavior is not documented.",
-    "code": "#define HITLS_AddHost(ctx, hostname) HITLS_CtrlSetVerifyParams(ctx, \\\n    NULL, CERT_STORE_CTRL_ADD_HOST, 0, hostname)",
-    "fix": "/**\n * @ingroup hitls_cert\n * @brief   Add the hostname. If hostname is NULL, the function returns HITLS_SUCCESS without adding.\n * @param   ctx [IN] TLS link object\n * @param   hostname [IN] hostname, type : const char *. Can be NULL.\n * @retval  HITLS_SUCCESS, if successful.\n * @retval  HITLS_X509_ERR_VFY_SET_VERIFY_IP, if an IP address is already set.\n * @retval  For other error codes, see hitls_error.h.\n */"
+    "line": "1731",
+    "title": "Redundant null terminator assignment in CheckHostnames",
+    "problem": "After allocating with calloc and copying with memcpy_s, the null terminator is set redundantly. The memcpy_s already copied hostnameLen bytes, and calloc zero-initialized the buffer. The explicit null terminator set is correct but the code could be simplified.",
+    "code": "(void)memcpy_s(storeCtx->verifyParam.peername, strlen(hostname), hostname, strlen(hostname));\nstoreCtx->verifyParam.peername[strlen(hostname)] = '\\0';",
+    "fix": "uint32_t len = strlen(hostname);\n(void)memcpy_s(storeCtx->verifyParam.peername, len + 1, hostname, len + 1);"
   },
   {
     "source": "claude",
     "file": "pki/x509_verify/src/hitls_x509_verify.c",
-    "line": "795-799",
+    "line": "651",
     "severity": "low",
-    "title": "Redundant condition in ValidateIPv6Format",
-    "problem": "The check `ipv6Len == 1` is redundant because `ipstr[ipv6Len - 1]` when ipv6Len == 1 accesses ipstr[0], and the condition `ipstr[ipv6Len - 2] != ':'` accesses ipstr[-1] which is undefined behavior. The code should check for length >= 2 first.",
-    "code": "if (ipstr[ipv6Len - 1] == ':' && (ipv6Len == 1 || ipstr[ipv6Len - 2] != ':')) {\n    return false;\n}",
-    "fix": "if (ipv6Len >= 1 && ipstr[ipv6Len - 1] == ':') {\n    if (ipv6Len == 1 || ipstr[ipv6Len - 2] != ':') {\n        return false;\n    }\n}"
+    "title": "Unnecessary null byte appended to IP address storage",
+    "problem": "The function allocates ipLen + 1 bytes and appends a null terminator. IP addresses are binary data, not null-terminated strings. The extra byte is wasteful and the null terminator is unnecessary since ipLen is tracked separately.",
+    "code": "static int32_t X509_SetVerifyIp(HITLS_X509_StoreCtx *storeCtx, unsigned char *ip, uint32_t ipLen)\n{\n    storeCtx->verifyParam.ip = BSL_SAL_Malloc(ipLen + 1);\n    if (storeCtx->verifyParam.ip == NULL) {\n        BSL_ERR_PUSH_ERROR(BSL_MALLOC_FAIL);\n        return BSL_MALLOC_FAIL;\n    }\n    (void)memcpy_s(storeCtx->verifyParam.ip, ipLen, ip, ipLen);\n    storeCtx->verifyParam.ip[ipLen] = '\\0';\n    storeCtx->verifyParam.ipLen = ipLen;\n    return HITLS_PKI_SUCCESS;\n}",
+    "fix": "static int32_t X509_SetVerifyIp(HITLS_X509_StoreCtx *storeCtx, unsigned char *ip, uint32_t ipLen)\n{\n    storeCtx->verifyParam.ip = BSL_SAL_Malloc(ipLen);\n    if (storeCtx->verifyParam.ip == NULL) {\n        BSL_ERR_PUSH_ERROR(BSL_MALLOC_FAIL);\n        return BSL_MALLOC_FAIL;\n    }\n    (void)memcpy_s(storeCtx->verifyParam.ip, ipLen, ip, ipLen);\n    storeCtx->verifyParam.ipLen = ipLen;\n    return HITLS_PKI_SUCCESS;\n}"
   },
   {
     "source": "claude",
-    "file": "tls/config/src/config_cert.c",
-    "line": "1069",
+    "file": "pki/x509_verify/src/hitls_x509_verify.c",
+    "line": "699",
     "severity": "low",
-    "title": "Inconsistent NULL check for new commands",
-    "problem": "The NULL check was updated to allow NULL for CERT_STORE_CTRL_SET_HOST and CERT_STORE_CTRL_SET_VERIFY_PARAM, but CERT_STORE_CTRL_SET_HOST_FLAG and CERT_STORE_CTRL_ADD_HOST are not included. These should also allow NULL based on their usage.",
-    "code": "if (inArg == NULL && cmd != CERT_STORE_CTRL_SET_HOST && cmd != CERT_STORE_CTRL_SET_VERIFY_PARAM) {",
-    "fix": "if (inArg == NULL && cmd != CERT_STORE_CTRL_SET_HOST && cmd != CERT_STORE_CTRL_SET_VERIFY_PARAM && \n    cmd != CERT_STORE_CTRL_ADD_HOST) {"
+    "title": "Redundant null terminator in DupString",
+    "problem": "BSL_SAL_Dump is called with strlen(str) + 1 which should include the null terminator. Then the code explicitly sets the null terminator again, which is redundant.",
+    "code": "static void *DupString(const char *str)\n{\n    void *dest = BSL_SAL_Dump(str, strlen(str) + 1);\n    if (dest == NULL) {\n        return NULL;\n    }\n    ((char *)dest)[strlen(str)] = '\\0';\n    return dest;\n}",
+    "fix": "static void *DupString(const char *str)\n{\n    return BSL_SAL_Dump(str, strlen(str) + 1);\n}"
+  },
+  {
+    "source": "claude",
+    "file": "pki/x509_verify/src/hitls_x509_verify.c",
+    "line": "725",
+    "severity": "low",
+    "title": "Redundant null terminator in X509_SetVerifyParam",
+    "problem": "The IP buffer is allocated with ipLen + 1 bytes and a null terminator is set. IP addresses are binary data and don't need null termination.",
+    "code": "storeCtx->verifyParam.ip = BSL_SAL_Calloc(verifyParam->ipLen + 1, sizeof(unsigned char));\nif (storeCtx->verifyParam.ip == NULL) {\n    BSL_ERR_PUSH_ERROR(BSL_MALLOC_FAIL);\n    return BSL_MALLOC_FAIL;\n}\n(void)memcpy_s(storeCtx->verifyParam.ip, verifyParam->ipLen, verifyParam->ip, verifyParam->ipLen);\nstoreCtx->verifyParam.ip[verifyParam->ipLen] = '\\0';\nstoreCtx->verifyParam.ipLen = verifyParam->ipLen;",
+    "fix": "storeCtx->verifyParam.ip = BSL_SAL_Calloc(verifyParam->ipLen, sizeof(unsigned char));\nif (storeCtx->verifyParam.ip == NULL) {\n    BSL_ERR_PUSH_ERROR(BSL_MALLOC_FAIL);\n    return BSL_MALLOC_FAIL;\n}\n(void)memcpy_s(storeCtx->verifyParam.ip, verifyParam->ipLen, verifyParam->ip, verifyParam->ipLen);\nstoreCtx->verifyParam.ipLen = verifyParam->ipLen;"
   }
 ]

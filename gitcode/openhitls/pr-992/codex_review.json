@@ -1,52 +1,52 @@
 [
   {
     "source": "codex",
-    "file": "crypto/lms/src/hss_utils.c",
-    "line": "355-362",
+    "file": "crypto/hbs/hss/src/hss_api.c",
+    "line": "27-53",
     "severity": "high",
-    "title": "Wrong Height Used For HSS Tree Index Calculation",
-    "problem": "I can see why you computed `sigsPerTree` this way, but using the child height here miscomputes `treeIndex`/`leafIndex` for non-uniform hierarchies, which can cause LM-OTS key reuse and incorrect capacity tracking; it also lacks overflow checks.",
-    "code": "for (int32_t i = (int32_t)para->levels - 2; i >= 0; i--) {\n    uint32_t childHeight = para->levelPara[i + 1].height;\n    sigsPerTree[i] = sigsPerTree[i + 1] * (1ULL << childHeight);\n}",
-    "fix": "uint32_t bottomHeight = para->levelPara[para->levels - 1].height;\nif (bottomHeight > LMS_MAX_SAFE_HEIGHT_FOR_UINT64) {\n    return CRYPT_HSS_INVALID_PARAM;\n}\nsigsPerTree[para->levels - 1] = 1ULL << bottomHeight;\n\nfor (int32_t i = (int32_t)para->levels - 2; i >= 0; i--) {\n    uint32_t height = para->levelPara[i].height;\n    if (height > LMS_MAX_SAFE_HEIGHT_FOR_UINT64 || sigsPerTree[i + 1] > (UINT64_MAX >> height)) {\n        return CRYPT_HSS_INVALID_PARAM;\n    }\n    sigsPerTree[i] = sigsPerTree[i + 1] * (1ULL << height);\n}"
+    "title": "HSS key export returns uninitialized buffers and writable aliases to internal key state",
+    "problem": "`CRYPT_HSS_NewCtx()` allocates zero-filled key buffers before any key is generated or imported, and the export APIs only check for `NULL`. A fresh context can therefore \"export\" an all-zero key. Worse, `CRYPT_HSS_GetPrvKey()` and `CRYPT_HSS_GetPubKey()` use `BSL_PARAM_InitValue()` to point the caller at `ctx->privateKey`/`ctx->publicKey` instead of copying into caller-owned memory, so the caller can mutate the live key material in place.",
+    "code": "// Allocate key buffers\nctx->publicKey = (uint8_t *)BSL_SAL_Calloc(1, HSS_PUBKEY_LEN);\nctx->privateKey = (uint8_t *)BSL_SAL_Calloc(1, HSS_PRVKEY_LEN);\n\n...\n\nif (ctx->privateKey == NULL) {\n    return CRYPT_HSS_NO_KEY;\n}\n\n// Set private key parameter\nBSL_PARAM_InitValue(param, CRYPT_PARAM_HSS_PRVKEY, BSL_PARAM_TYPE_OCTETS, ctx->privateKey, HSS_PRVKEY_LEN);\n\n...\n\nif (ctx->publicKey == NULL) {\n    return CRYPT_HSS_NO_KEY;\n}\n\n// Set public key parameter\nBSL_PARAM_InitValue(param, CRYPT_PARAM_HSS_PUBKEY, BSL_PARAM_TYPE_OCTETS, ctx->publicKey, HSS_PUBKEY_LEN);",
+    "fix": "/* NewCtx: do not preallocate key buffers. */\nctx->publicKey = NULL;\nctx->privateKey = NULL;\n\nint32_t CRYPT_HSS_GetPrvKey(CRYPT_HSS_Ctx *ctx, BSL_Param *param)\n{\n    if (ctx == NULL || param == NULL || ctx->privateKey == NULL) {\n        return (ctx == NULL || param == NULL) ? CRYPT_NULL_INPUT : CRYPT_HSS_NO_KEY;\n    }\n\n    BSL_Param *prv = BSL_PARAM_FindParam(param, CRYPT_PARAM_HSS_PRVKEY);\n    if (prv == NULL || prv->value == NULL || prv->valueLen < HSS_PRVKEY_LEN) {\n        return CRYPT_HSS_INVALID_KEY_LEN;\n    }\n\n    (void)memcpy_s(prv->value, prv->valueLen, ctx->privateKey, HSS_PRVKEY_LEN);\n    prv->useLen = HSS_PRVKEY_LEN;\n    return CRYPT_SUCCESS;\n}\n\nint32_t CRYPT_HSS_GetPubKey(CRYPT_HSS_Ctx *ctx, BSL_Param *param)\n{\n    if (ctx == NULL || param == NULL || ctx->publicKey == NULL) {\n        return (ctx == NULL || param == NULL) ? CRYPT_NULL_INPUT : CRYPT_HSS_NO_KEY;\n    }\n\n    BSL_Param *pub = BSL_PARAM_FindParam(param, CRYPT_PARAM_HSS_PUBKEY);\n    if (pub == NULL || pub->value == NULL || pub->valueLen < HSS_PUBKEY_LEN) {\n        return CRYPT_HSS_INVALID_KEY_LEN;\n    }\n\n    (void)memcpy_s(pub->value, pub->valueLen, ctx->publicKey, HSS_PUBKEY_LEN);\n    pub->useLen = HSS_PUBKEY_LEN;\n    return CRYPT_SUCCESS;\n}"
   },
   {
     "source": "codex",
-    "file": "crypto/lms/src/hss_api.c",
-    "line": "363-377",
-    "severity": "medium",
-    "title": "HSS Private-Key Load Leaves Stale Tree Cache",
-    "problem": "After loading a new private key, cached Merkle trees from the previous key remain marked valid, so signing can reuse stale trees and produce invalid signatures or key reuse.",
-    "code": "int32_t ret = HssDecompressParamSet(ctx->para, compressed);\nif (ret != CRYPT_SUCCESS) {\n    return ret;\n}\n\nreturn CRYPT_SUCCESS;",
-    "fix": "int32_t ret = HssDecompressParamSet(ctx->para, compressed);\nif (ret != CRYPT_SUCCESS) {\n    return ret;\n}\n\nfor (uint32_t i = 0; i < HSS_MAX_LEVELS; i++) {\n    if (ctx->cachedTrees[i] != NULL) {\n        LmsZeroize(ctx->cachedTrees[i], ctx->cachedTreeSizes[i]);\n        BSL_SAL_Free(ctx->cachedTrees[i]);\n        ctx->cachedTrees[i] = NULL;\n        ctx->cachedTreeSizes[i] = 0;\n    }\n    ctx->treeCacheValid[i] = false;\n}\n\nreturn CRYPT_SUCCESS;"
+    "file": "crypto/hbs/hss/src/hss_tree.c",
+    "line": "266-299",
+    "severity": "high",
+    "title": "Multi-level HSS verification depends on hidden caller-supplied parameters",
+    "problem": "Verification parses each LMS sub-signature using `para->levelPara[i].sigLen` and `para->levelPara[bottomLevel].sigLen`. But `CRYPT_HSS_SetPubKey()` only records level 0 from the public key, so a verifier that imports a public key alone cannot validate a multi-level signature unless the caller separately replays every lower-level LMS/LMOTS parameter out of band. The signature already contains the type words needed to derive each LMS signature length dynamically.",
+    "code": "int32_t ret = HssParseSignature(&parsed, para, signature, signatureLen);\nif (ret != CRYPT_SUCCESS) {\n    return ret;\n}\n\n...\n\nsize_t lmsSigLen = para->levelPara[i].sigLen;\nconst uint8_t *lmsSig = signedPubKey;\nconst uint8_t *childPubKey = signedPubKey + lmsSigLen;\n\n...\n\nret = LmsValidateSignature(currentPubKey, message, messageLen, parsed.bottomSig, parsed.bottomSigLen);",
+    "fix": "static int32_t HssGetLmsSigLenFromSig(const uint8_t *sig, size_t remaining, size_t *lmsSigLen)\n{\n    LmOtsParams ots;\n    uint32_t h, n, height;\n\n    if (remaining < LMS_Q_LEN + LMS_TYPE_LEN) {\n        return CRYPT_HSS_SIGNATURE_PARSE_FAIL;\n    }\n\n    uint32_t otsType = (uint32_t)LmsGetBigendian(sig + LMS_Q_LEN, LMS_TYPE_LEN);\n    if (LmOtsLookupParamSet(otsType, &ots) != CRYPT_SUCCESS) {\n        return CRYPT_HSS_SIGNATURE_PARSE_FAIL;\n    }\n\n    size_t otsSigLen = LMS_TYPE_LEN + ots.n + ots.p * ots.n;\n    if (remaining < LMS_Q_LEN + otsSigLen + LMS_TYPE_LEN) {\n        return CRYPT_HSS_SIGNATURE_PARSE_FAIL;\n    }\n\n    uint32_t lmsType = (uint32_t)LmsGetBigendian(sig + LMS_Q_LEN + otsSigLen, LMS_TYPE_LEN);\n    if (LmsLookupParamSet(lmsType, &h, &n, &height) != CRYPT_SUCCESS) {\n        return CRYPT_HSS_SIGNATURE_PARSE_FAIL;\n    }\n\n    *lmsSigLen = LMS_Q_LEN + otsSigLen + LMS_TYPE_LEN + height * n;\n    return (*lmsSigLen <= remaining) ? CRYPT_SUCCESS : CRYPT_HSS_SIGNATURE_PARSE_FAIL;\n}\n\n/* In HssTree_Verify(): walk the signature with HssGetLmsSigLenFromSig()\n * instead of para->levelPara[i].sigLen / para->levelPara[bottomLevel].sigLen. */"
   },
   {
     "source": "codex",
-    "file": "crypto/lms/src/hss_api.c",
-    "line": "185-195",
-    "severity": "medium",
-    "title": "Levels Accepted That Key Format Cannot Encode",
-    "problem": "The control API allows up to 8 levels, but the compressed parameter set in the private key only supports 3 levels, so valid configuration can still fail later in keygen or SetPrvKey.",
-    "code": "if (levels < HSS_MIN_LEVELS || levels > HSS_MAX_LEVELS) {\n    return CRYPT_HSS_INVALID_LEVEL;\n}\nctx->para->levels = levels;",
-    "fix": "if (levels < HSS_MIN_LEVELS || levels > HSS_MAX_LEVELS || levels > HSS_MAX_COMPRESSED_LEVELS) {\n    return CRYPT_HSS_INVALID_LEVEL;\n}\nctx->para->levels = levels;"
-  },
-  {
-    "source": "codex",
-    "file": "crypto/lms/src/hss_utils.c",
-    "line": "283-296",
-    "severity": "low",
-    "title": "Master Seed Not Cleared On Root-Seed Hash Failure",
-    "problem": "On hash failure, the stack buffer containing `masterSeed` is returned without zeroization, leaving sensitive material in memory.",
-    "code": "int32_t ret = LmsHash(hash, buffer, HSS_ROOT_SEED_DERIVE_BUF_LEN);\nif (ret != CRYPT_SUCCESS) {\n    return CRYPT_HSS_SEED_DERIVE_FAIL;\n}\n...\nret = LmsHash(rootSeed, buffer, HSS_ROOT_SEED_DERIVE_BUF_LEN);\nif (ret != CRYPT_SUCCESS) {\n    return CRYPT_HSS_SEED_DERIVE_FAIL;\n}",
-    "fix": "int32_t ret = LmsHash(hash, buffer, HSS_ROOT_SEED_DERIVE_BUF_LEN);\nif (ret != CRYPT_SUCCESS) {\n    LmsZeroize(buffer, sizeof(buffer));\n    LmsZeroize(hash, sizeof(hash));\n    return CRYPT_HSS_SEED_DERIVE_FAIL;\n}\n...\nret = LmsHash(rootSeed, buffer, HSS_ROOT_SEED_DERIVE_BUF_LEN);\nif (ret != CRYPT_SUCCESS) {\n    LmsZeroize(buffer, sizeof(buffer));\n    LmsZeroize(hash, sizeof(hash));\n    return CRYPT_HSS_SEED_DERIVE_FAIL;\n}"
-  },
-  {
-    "source": "codex",
-    "file": "crypto/lms/src/hss_api.c",
+    "file": "crypto/hbs/hss/src/hss_api.c",
     "line": "172-176",
-    "severity": "low",
-    "title": "HSS Compare Ignores Private Seed",
-    "problem": "Two different private keys with different master seeds can compare equal if public keys are not set, which can lead to incorrect key matching/caching.",
-    "code": "if (ctx1->privateKey != NULL && ctx2->privateKey != NULL) {\n    // Only compare the counter and parameters, not the secret seed\n    if (memcmp(ctx1->privateKey, ctx2->privateKey, HSS_PRVKEY_SEED_OFFSET) != 0) {\n        return CRYPT_HSS_CMP_FALSE;\n    }\n}",
-    "fix": "if (ctx1->privateKey != NULL && ctx2->privateKey != NULL) {\n    if (memcmp(ctx1->privateKey, ctx2->privateKey, HSS_PRVKEY_LEN) != 0) {\n        return CRYPT_HSS_CMP_FALSE;\n    }\n}"
+    "severity": "medium",
+    "title": "HSS context comparison ignores the master seed",
+    "problem": "`CRYPT_HSS_Cmp()` compares only the counter and compressed-parameter prefix of the private key and explicitly skips the 32-byte master seed. Two distinct HSS private keys with the same counter therefore compare equal, which makes `CRYPT_EAL_PkeyCmp()` report false positives.",
+    "code": "// Compare private keys if both present (compare signature counter only, not seed)\nif (ctx1->privateKey != NULL && ctx2->privateKey != NULL) {\n    // Only compare the counter and parameters, not the secret seed\n    if (memcmp(ctx1->privateKey, ctx2->privateKey, HSS_PRVKEY_SEED_OFFSET) != 0) {\n        return CRYPT_HSS_CMP_FALSE;\n    }\n}",
+    "fix": "/* Compare the full serialized private key. */\nif (ctx1->privateKey != NULL && ctx2->privateKey != NULL) {\n    if (memcmp(ctx1->privateKey, ctx2->privateKey, HSS_PRVKEY_LEN) != 0) {\n        return CRYPT_HSS_CMP_FALSE;\n    }\n}"
+  },
+  {
+    "source": "codex",
+    "file": "crypto/hbs/hss/src/hss_params.h",
+    "line": "31-65",
+    "severity": "medium",
+    "title": "Public HSS level limit exceeds what the private-key format can encode",
+    "problem": "The new API advertises `HSS_MAX_LEVELS` as 8, but the serialized private key stores the whole hierarchy in an 8-byte compressed parameter block and `HSS_MAX_COMPRESSED_LEVELS` is only 3. Levels 4-8 are accepted by control setup and then fail later during key generation/import, which is a broken contract.",
+    "code": "#define HSS_MAX_LEVELS 8  // Maximum hierarchy levels (RFC 8554)\n#define HSS_MIN_LEVELS 1  // Minimum hierarchy levels (1 = equivalent to LMS)\n\n...\n\n#define HSS_COMPRESSED_PARAMS_LEN    8     // Compressed parameter set length (8 bytes)\n#define HSS_MAX_COMPRESSED_LEVELS    3     // Maximum levels that fit in compressed format",
+    "fix": "/* Until the private-key encoding is widened, keep the public limit aligned\n * with what the serialized key can actually carry. */\n#define HSS_MAX_LEVELS 3\n#define HSS_MIN_LEVELS 1\n\n#define HSS_COMPRESSED_PARAMS_LEN    8\n#define HSS_MAX_COMPRESSED_LEVELS    HSS_MAX_LEVELS"
+  },
+  {
+    "source": "codex",
+    "file": "include/crypto/crypt_algid.h",
+    "line": "364-378",
+    "severity": "medium",
+    "title": "Newly published LMS/HSS parameter IDs cannot be instantiated",
+    "problem": "This PR exports `H20`, `H25`, and `HSS ... H20 ...` parameter IDs as supported public enums, but `LmsParaInit()` in the same change rejects every LMS tree height above 15. Callers can now select official-looking algorithm IDs that the implementation will always reject at runtime.",
+    "code": "CRYPT_LMS_SHA256_H15_W4 = BSL_CID_LMS_SHA256_H15_W4,\nCRYPT_LMS_SHA256_H20_W4 = BSL_CID_LMS_SHA256_H20_W4,\nCRYPT_LMS_SHA256_H25_W4 = BSL_CID_LMS_SHA256_H25_W4,\n...\nCRYPT_LMS_SHA256_H15_W8 = BSL_CID_LMS_SHA256_H15_W8,\nCRYPT_LMS_SHA256_H20_W8 = BSL_CID_LMS_SHA256_H20_W8,\nCRYPT_HSS_SHA256_L2_H10_H10 = BSL_CID_HSS_SHA256_L2_H10_H10,\nCRYPT_HSS_SHA256_L2_H15_H15 = BSL_CID_HSS_SHA256_L2_H15_H15,\nCRYPT_HSS_SHA256_L2_H20_H20 = BSL_CID_HSS_SHA256_L2_H20_H20,\nCRYPT_HSS_SHA256_L3_H10_H10_H10 = BSL_CID_HSS_SHA256_L3_H10_H10_H10,",
+    "fix": "/* Only publish parameter sets that the current implementation accepts. */\nCRYPT_LMS_SHA256_H5_W4 = BSL_CID_LMS_SHA256_H5_W4,\nCRYPT_LMS_SHA256_H10_W4 = BSL_CID_LMS_SHA256_H10_W4,\nCRYPT_LMS_SHA256_H15_W4 = BSL_CID_LMS_SHA256_H15_W4,\nCRYPT_LMS_SHA256_H10_W2 = BSL_CID_LMS_SHA256_H10_W2,\nCRYPT_LMS_SHA256_H15_W2 = BSL_CID_LMS_SHA256_H15_W2,\nCRYPT_LMS_SHA256_H10_W8 = BSL_CID_LMS_SHA256_H10_W8,\nCRYPT_LMS_SHA256_H15_W8 = BSL_CID_LMS_SHA256_H15_W8,\nCRYPT_HSS_SHA256_L2_H10_H10 = BSL_CID_HSS_SHA256_L2_H10_H10,\nCRYPT_HSS_SHA256_L2_H15_H15 = BSL_CID_HSS_SHA256_L2_H15_H15,\nCRYPT_HSS_SHA256_L3_H10_H10_H10 = BSL_CID_HSS_SHA256_L3_H10_H10_H10,"
   }
 ]

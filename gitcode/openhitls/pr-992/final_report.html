@@ -49,222 +49,277 @@
         <p style="margin-bottom: 1rem;"></p>
 
         <div class="stats">
-            <div class="stat"><div class="stat-value">11</div><div class="stat-label">Total</div></div>
+            <div class="stat"><div class="stat-value">15</div><div class="stat-label">Total</div></div>
             <div class="stat critical"><div class="stat-value">1</div><div class="stat-label">Critical</div></div>
-            <div class="stat high"><div class="stat-value">5</div><div class="stat-label">High</div></div>
-            <div class="stat medium"><div class="stat-value">2</div><div class="stat-label">Medium</div></div>
-            <div class="stat low"><div class="stat-value">3</div><div class="stat-label">Low</div></div>
+            <div class="stat high"><div class="stat-value">9</div><div class="stat-label">High</div></div>
+            <div class="stat medium"><div class="stat-value">5</div><div class="stat-label">Medium</div></div>
+            <div class="stat low"><div class="stat-value">0</div><div class="stat-label">Low</div></div>
         </div>
 
         <div class="reviewers">Reviewers: claude, gemini, codex</div>
 <div class="section"><div class="section-title critical">Critical</div>
 <div class="issue">
-                <div class="issue-title">Ignored return value of LmsHash in LmOtsGeneratePublicKey</div>
-                <div class="issue-location">crypto/lms/src/lms_ots.c:136</div>
+                <div class="issue-title">Buffer overflow due to integer underflow in memcpy_s destination size calculation</div>
+                <div class="issue-location">crypto/hbs/hss/src/hss_core.c:237-239</div>
                 <div class="issue-meta">
                     <span class="reviewers">Reviewers: GEMINI</span>
                     <span class="confidence-badge trusted">置信度: 可信</span>
                 </div>
-                <pre>LmsHash(publicKey, buffer, LMS_PBLC_PREFIX_LEN + params.p * params.n);
-BSL_SAL_FREE(buffer);
+                <pre>(void)memcpy_s(output-&gt;data, *output-&gt;len, parentSig, parentSigLen);
+(void)memcpy_s(output-&gt;data + parentSigLen, *output-&gt;len - parentSigLen, childPubKey, LMS_PUBKEY_LEN);
+*output-&gt;len = parentSigLen + LMS_PUBKEY_LEN;</pre>
+                <div class="problem"><strong>Issue:</strong> In HssGenerateSignedPubKey, the memcpy_s calls do not validate that output->len is large enough to hold parentSigLen + LMS_PUBKEY_LEN. When *output->len < parentSigLen, the expression *output->len - parentSigLen underflows to a huge value, and output->data + parentSigLen points out-of-bounds, allowing a buffer overflow of 56 bytes (LMS_PUBKEY_LEN). Additionally, the memcpy_s return values are ignored, preventing error detection.</div>
+                <div class="fix-label">Fix:</div><pre>if (*output-&gt;len &lt; parentSigLen + LMS_PUBKEY_LEN) {
+    BSL_SAL_Free(parentSig);
+    return CRYPT_LMS_BUFFER_TOO_SMALL;
+}
 
-return CRYPT_SUCCESS;</pre>
-                <div class="problem"><strong>Issue:</strong> The return value of `LmsHash` is ignored when generating the public key. If the hash calculation fails (e.g., due to hardware failure or resource exhaustion), the function returns `CRYPT_SUCCESS` but the `publicKey` buffer will contain uninitialized or partial data, leading to a compromised key.</div>
-                <div class="fix-label">Fix:</div><pre>ret = LmsHash(publicKey, buffer, LMS_PBLC_PREFIX_LEN + params.p * params.n);
-BSL_SAL_FREE(buffer);
-
-return ret;</pre>
+if (memcpy_s(output-&gt;data, *output-&gt;len, parentSig, parentSigLen) != 0) {
+    BSL_SAL_Free(parentSig);
+    return CRYPT_HSS_SIGN_FAIL;
+}
+if (memcpy_s(output-&gt;data + parentSigLen, *output-&gt;len - parentSigLen, childPubKey, LMS_PUBKEY_LEN) != 0) {
+    BSL_SAL_Free(parentSig);
+    return CRYPT_HSS_SIGN_FAIL;
+}
+*output-&gt;len = parentSigLen + LMS_PUBKEY_LEN;</pre>
             </div>
 </div>
 <div class="section"><div class="section-title high">High</div>
 <div class="issue">
-                <div class="issue-title">Ignored return value of LmsHash in LmOtsComputeQ</div>
-                <div class="issue-location">crypto/lms/src/lms_ots.c:172</div>
-                <div class="issue-meta">
-                    <span class="reviewers">Reviewers: GEMINI</span>
-                    <span class="confidence-badge trusted">置信度: 可信</span>
-                </div>
-                <pre>LmsHash(Q, prefix, LMS_MESG_PREFIX_LEN(ctx-&gt;n) + messageLen);
-BSL_SAL_FREE(prefix);
-
-LmsPutBigendian(&amp;Q[ctx-&gt;n], LmOtsComputeChecksum(Q, ctx-&gt;n, ctx-&gt;w, ctx-&gt;ls), LMS_CHECKSUM_LEN);
-return CRYPT_SUCCESS;</pre>
-                <div class="problem"><strong>Issue:</strong> The return value of `LmsHash` is ignored when computing the message digest `Q`. Failure to compute the hash correctly will result in an invalid signature or verification failure, but the function proceeds as if successful.</div>
-                <div class="fix-label">Fix:</div><pre>int32_t ret = LmsHash(Q, prefix, LMS_MESG_PREFIX_LEN(ctx-&gt;n) + messageLen);
-BSL_SAL_FREE(prefix);
-if (ret != CRYPT_SUCCESS) {
-    return ret;
-}
-
-LmsPutBigendian(&amp;Q[ctx-&gt;n], LmOtsComputeChecksum(Q, ctx-&gt;n, ctx-&gt;w, ctx-&gt;ls), LMS_CHECKSUM_LEN);
-return CRYPT_SUCCESS;</pre>
-            </div>
-<div class="issue">
-                <div class="issue-title">Ignored return value of LmsHash in LmOtsSignChains</div>
-                <div class="issue-location">crypto/lms/src/lms_ots.c:198</div>
-                <div class="issue-meta">
-                    <span class="reviewers">Reviewers: GEMINI</span>
-                    <span class="confidence-badge trusted">置信度: 可信</span>
-                </div>
-                <pre>(void)memcpy_s(iterBuf + LMS_ITER_PREV_OFFSET, ctx-&gt;n, tmp, ctx-&gt;n);
-LmsHash(tmp, iterBuf, LMS_ITER_LEN(ctx-&gt;n));</pre>
-                <div class="problem"><strong>Issue:</strong> `LmsHash` return value is ignored inside the signature chain generation loop. If any hash step fails, the resulting signature chain `tmp` will be invalid, creating a broken signature.</div>
-                <div class="fix-label">Fix:</div><pre>(void)memcpy_s(iterBuf + LMS_ITER_PREV_OFFSET, ctx-&gt;n, tmp, ctx-&gt;n);
-if (LmsHash(tmp, iterBuf, LMS_ITER_LEN(ctx-&gt;n)) != CRYPT_SUCCESS) {
-    return CRYPT_LMS_HASH_FAIL;
-}</pre>
-            </div>
-<div class="issue">
-                <div class="issue-title">Ignored return value of LmsHash in LmOtsValidateChains</div>
-                <div class="issue-location">crypto/lms/src/lms_ots.c:288</div>
-                <div class="issue-meta">
-                    <span class="reviewers">Reviewers: GEMINI</span>
-                    <span class="confidence-badge trusted">置信度: 可信</span>
-                </div>
-                <pre>(void)memcpy_s(iterBuf + LMS_ITER_PREV_OFFSET, ctx-&gt;n, tmp, ctx-&gt;n);
-LmsHash(tmp, iterBuf, LMS_ITER_LEN(ctx-&gt;n));</pre>
-                <div class="problem"><strong>Issue:</strong> `LmsHash` return value is ignored during signature validation chain recomputation. This can lead to incorrect validation results (false positives or false negatives) if the hash function fails.</div>
-                <div class="fix-label">Fix:</div><pre>(void)memcpy_s(iterBuf + LMS_ITER_PREV_OFFSET, ctx-&gt;n, tmp, ctx-&gt;n);
-if (LmsHash(tmp, iterBuf, LMS_ITER_LEN(ctx-&gt;n)) != CRYPT_SUCCESS) {
-    return CRYPT_LMS_HASH_FAIL;
-}</pre>
-            </div>
-<div class="issue">
-                <div class="issue-title">Ignored return value of LmsHash in LmOtsValidateSignature</div>
-                <div class="issue-location">crypto/lms/src/lms_ots.c:333</div>
-                <div class="issue-meta">
-                    <span class="reviewers">Reviewers: GEMINI</span>
-                    <span class="confidence-badge trusted">置信度: 可信</span>
-                </div>
-                <pre>LmsHash(computedPubKey, finalBuf, LMS_PBLC_PREFIX_LEN + params.p * params.n);
-
-LmsZeroize(Q, sizeof(Q));
-BSL_SAL_FREE(finalBuf);
-
-return CRYPT_SUCCESS;</pre>
-                <div class="problem"><strong>Issue:</strong> The final hash step to compute the public key candidate in `LmOtsValidateSignature` ignores the return value of `LmsHash`. This can cause incorrect signature validation if the hash fails.</div>
-                <div class="fix-label">Fix:</div><pre>int32_t ret2 = LmsHash(computedPubKey, finalBuf, LMS_PBLC_PREFIX_LEN + params.p * params.n);
-
-LmsZeroize(Q, sizeof(Q));
-BSL_SAL_FREE(finalBuf);
-
-return ret2;</pre>
-            </div>
-<div class="issue">
-                <div class="issue-title">Wrong height used for HSS tree index calculation</div>
-                <div class="issue-location">crypto/lms/src/hss_utils.c:360-362</div>
+                <div class="issue-title">HSS key export returns uninitialized buffers and writable aliases to internal key state</div>
+                <div class="issue-location">crypto/hbs/hss/src/hss_api.c:41-42</div>
                 <div class="issue-meta">
                     <span class="reviewers">Reviewers: CODEX</span>
                     <span class="confidence-badge trusted">置信度: 可信</span>
                 </div>
-                <pre>for (int32_t i = (int32_t)para-&gt;levels - 2; i &gt;= 0; i--) {
-    uint32_t childHeight = para-&gt;levelPara[i + 1].height;
-    sigsPerTree[i] = sigsPerTree[i + 1] * (1ULL &lt;&lt; childHeight);
-}</pre>
-                <div class="problem"><strong>Issue:</strong> The loop uses the child height (`para->levelPara[i + 1].height`) instead of the current level height when computing `sigsPerTree[i]`. This miscomputes `treeIndex`/`leafIndex` for non-uniform hierarchies, which can cause LM-OTS key reuse and incorrect capacity tracking. It also lacks overflow checks.</div>
-                <div class="fix-label">Fix:</div><pre>for (int32_t i = (int32_t)para-&gt;levels - 2; i &gt;= 0; i--) {
-    uint32_t height = para-&gt;levelPara[i].height;
-    if (height &gt; 63 || sigsPerTree[i + 1] &gt; (UINT64_MAX &gt;&gt; height)) {
-        return CRYPT_HSS_INVALID_PARAM;
+                <pre>ctx-&gt;publicKey = (uint8_t *)BSL_SAL_Calloc(1, HSS_PUBKEY_LEN);
+ctx-&gt;privateKey = (uint8_t *)BSL_SAL_Calloc(1, HSS_PRVKEY_LEN);
+
+int32_t CRYPT_HSS_GetPrvKey(CRYPT_HSS_Ctx *ctx, BSL_Param *param) {
+    if (ctx-&gt;privateKey == NULL) {
+        return CRYPT_HSS_NO_KEY;
     }
-    sigsPerTree[i] = sigsPerTree[i + 1] * (1ULL &lt;&lt; height);
+    BSL_PARAM_InitValue(param, CRYPT_PARAM_HSS_PRVKEY, BSL_PARAM_TYPE_OCTETS, ctx-&gt;privateKey, HSS_PRVKEY_LEN);
+    return CRYPT_SUCCESS;
+}</pre>
+                <div class="problem"><strong>Issue:</strong> CRYPT_HSS_NewCtx allocates zero-filled key buffers before any key is generated, and the export APIs only check for NULL, allowing "export" of all-zero keys. More critically, CRYPT_HSS_GetPrvKey and CRYPT_HSS_GetPubKey use BSL_PARAM_InitValue to point the caller at ctx->privateKey/ctx->publicKey instead of copying into caller-owned memory, allowing the caller to mutate the live key material in place.</div>
+                <div class="fix-label">Fix:</div><pre>ctx-&gt;publicKey = NULL;
+ctx-&gt;privateKey = NULL;
+
+int32_t CRYPT_HSS_GetPrvKey(CRYPT_HSS_Ctx *ctx, BSL_Param *param) {
+    if (ctx == NULL || param == NULL || ctx-&gt;privateKey == NULL) {
+        return (ctx == NULL || param == NULL) ? CRYPT_NULL_INPUT : CRYPT_HSS_NO_KEY;
+    }
+    BSL_Param *prv = BSL_PARAM_FindParam(param, CRYPT_PARAM_HSS_PRVKEY);
+    if (prv == NULL || prv-&gt;value == NULL || prv-&gt;valueLen &lt; HSS_PRVKEY_LEN) {
+        return CRYPT_HSS_INVALID_KEY_LEN;
+    }
+    (void)memcpy_s(prv-&gt;value, prv-&gt;valueLen, ctx-&gt;privateKey, HSS_PRVKEY_LEN);
+    prv-&gt;useLen = HSS_PRVKEY_LEN;
+    return CRYPT_SUCCESS;
+}
+
+int32_t CRYPT_HSS_GetPubKey(CRYPT_HSS_Ctx *ctx, BSL_Param *param) {
+    if (ctx == NULL || param == NULL || ctx-&gt;publicKey == NULL) {
+        return (ctx == NULL || param == NULL) ? CRYPT_NULL_INPUT : CRYPT_HSS_NO_KEY;
+    }
+    BSL_Param *pub = BSL_PARAM_FindParam(param, CRYPT_PARAM_HSS_PUBKEY);
+    if (pub == NULL || pub-&gt;value == NULL || pub-&gt;valueLen &lt; HSS_PUBKEY_LEN) {
+        return CRYPT_HSS_INVALID_KEY_LEN;
+    }
+    (void)memcpy_s(pub-&gt;value, pub-&gt;valueLen, ctx-&gt;publicKey, HSS_PUBKEY_LEN);
+    pub-&gt;useLen = HSS_PUBKEY_LEN;
+    return CRYPT_SUCCESS;
+}</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">Integer overflow in tree size allocation</div>
+                <div class="issue-location">crypto/hbs/common/hbs_tree.c:331</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CLAUDE</span>
+                    <span class="confidence-badge trusted">置信度: 可信</span>
+                </div>
+                <pre>size_t treeSize = 2u * numLeaves * n;
+uint8_t *tree = (uint8_t *)BSL_SAL_Calloc(treeSize, 1);</pre>
+                <div class="problem"><strong>Issue:</strong> The tree size calculation `treeSize = 2u * numLeaves * n` could overflow on 32-bit systems for large trees. While LMS_MAX_HEIGHT is 25, LMS_MAX_PRACTICAL_HEIGHT is 15, and this validation might not be enforced in all code paths reaching HbsLmsTree_GenerateAuthPath.</div>
+                <div class="fix-label">Fix:</div><pre>/* Check for overflow before calculating tree size */
+if (numLeaves &gt; (SIZE_MAX / (2 * n))) {
+    return CRYPT_LMS_INVALID_PARAM;
+}
+size_t treeSize = 2u * numLeaves * n;
+uint8_t *tree = (uint8_t *)BSL_SAL_Calloc(treeSize, 1);</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">Integer overflow in tree size allocation</div>
+                <div class="issue-location">crypto/hbs/lms/src/lms_tree.c:156</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CLAUDE</span>
+                    <span class="confidence-badge trusted">置信度: 可信</span>
+                </div>
+                <pre>uint32_t numLeaves = 1u &lt;&lt; ctx-&gt;height;
+size_t treeSize = 2 * numLeaves * ctx-&gt;n;
+uint8_t *tree = BSL_SAL_Calloc(treeSize, 1);</pre>
+                <div class="problem"><strong>Issue:</strong> The tree size calculation `treeSize = 2 * numLeaves * ctx->n` could overflow on 32-bit systems. While there's a height limit check in LmsParaInit, direct calls to LmsTree_ComputeRoot might bypass this validation.</div>
+                <div class="fix-label">Fix:</div><pre>uint32_t numLeaves = 1u &lt;&lt; ctx-&gt;height;
+
+/* Check for overflow: treeSize = 2 * numLeaves * n */
+if (numLeaves &gt; (SIZE_MAX / (2 * ctx-&gt;n))) {
+    return CRYPT_MEM_ALLOC_FAIL;
+}
+size_t treeSize = 2 * numLeaves * ctx-&gt;n;
+uint8_t *tree = BSL_SAL_Calloc(treeSize, 1);</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">Multi-level HSS verification depends on hidden caller-supplied parameters</div>
+                <div class="issue-location">crypto/hbs/hss/src/hss_tree.c:268</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CODEX</span>
+                    <span class="confidence-badge trusted">置信度: 可信</span>
+                </div>
+                <pre>HSS_ParsedSig parsed;
+memset(&amp;parsed, 0, sizeof(parsed));
+int32_t ret = HssParseSignature(&amp;parsed, para, signature, signatureLen);
+...
+for (uint32_t i = 0; i &lt; parsed.nspk; i++) {
+    const uint8_t *signedPubKey = parsed.signedPubKeys[i];
+    size_t lmsSigLen = para-&gt;levelPara[i].sigLen;</pre>
+                <div class="problem"><strong>Issue:</strong> HssTree_Verify parses each LMS sub-signature using `para->levelPara[i].sigLen` from the context, but CRYPT_HSS_SetPubKey only records level 0 from the public key. A verifier importing only a public key cannot validate multi-level signatures unless the caller separately supplies every lower-level LMS/LMOTS parameter out of band. The signature already contains the type words needed to derive each LMS signature length dynamically.</div>
+                <div class="fix-label">Fix:</div><pre>static int32_t HssGetLmsSigLenFromSig(const uint8_t *sig, size_t remaining, size_t *lmsSigLen)
+{
+    LmOtsParams ots;
+    uint32_t h, n, height;
+
+    if (remaining &lt; LMS_Q_LEN + LMS_TYPE_LEN) {
+        return CRYPT_HSS_SIGNATURE_PARSE_FAIL;
+    }
+
+    uint32_t otsType = (uint32_t)LmsGetBigendian(sig + LMS_Q_LEN, LMS_TYPE_LEN);
+    if (LmOtsLookupParamSet(otsType, &amp;ots) != CRYPT_SUCCESS) {
+        return CRYPT_HSS_SIGNATURE_PARSE_FAIL;
+    }
+
+    size_t otsSigLen = LMS_TYPE_LEN + ots.n + ots.p * ots.n;
+    if (remaining &lt; LMS_Q_LEN + otsSigLen + LMS_TYPE_LEN) {
+        return CRYPT_HSS_SIGNATURE_PARSE_FAIL;
+    }
+
+    uint32_t lmsType = (uint32_t)LmsGetBigendian(sig + LMS_Q_LEN + otsSigLen, LMS_TYPE_LEN);
+    if (LmsLookupParamSet(lmsType, &amp;h, &amp;n, &amp;height) != CRYPT_SUCCESS) {
+        return CRYPT_HSS_SIGNATURE_PARSE_FAIL;
+    }
+
+    *lmsSigLen = LMS_Q_LEN + otsSigLen + LMS_TYPE_LEN + height * n;
+    return (*lmsSigLen &lt;= remaining) ? CRYPT_SUCCESS : CRYPT_HSS_SIGNATURE_PARSE_FAIL;
+}
+
+/* In HssTree_Verify(): walk the signature with HssGetLmsSigLenFromSig()
+ * instead of para-&gt;levelPara[i].sigLen */</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">Unsafe memory function memset used instead of memset_s</div>
+                <div class="issue-location">crypto/hbs/hss/src/hss_tree.c:268</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: GEMINI</span>
+                    <span class="confidence-badge trusted">置信度: 可信</span>
+                </div>
+                <pre>memset(&amp;parsed, 0, sizeof(parsed));</pre>
+                <div class="problem"><strong>Issue:</strong> The code uses the unsafe memset function instead of the required memset_s from libboundscheck as per project coding conventions.</div>
+                <div class="fix-label">Fix:</div><pre>(void)memset_s(&amp;parsed, sizeof(parsed), 0, sizeof(parsed));</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">Unsafe memory function memset used instead of memset_s</div>
+                <div class="issue-location">crypto/hbs/hss/src/hss_utils.c:47</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: GEMINI</span>
+                    <span class="confidence-badge trusted">置信度: 可信</span>
+                </div>
+                <pre>memset(para, 0, sizeof(HSS_Para));</pre>
+                <div class="problem"><strong>Issue:</strong> The code uses the unsafe memset function instead of the required memset_s from libboundscheck as per project coding conventions.</div>
+                <div class="fix-label">Fix:</div><pre>(void)memset_s(para, sizeof(HSS_Para), 0, sizeof(HSS_Para));</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">Unsafe memory function memset used instead of memset_s</div>
+                <div class="issue-location">crypto/hbs/hss/src/hss_utils.c:141</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: GEMINI</span>
+                    <span class="confidence-badge trusted">置信度: 可信</span>
+                </div>
+                <pre>memset(compressed, 0, HSS_COMPRESSED_PARAMS_LEN);</pre>
+                <div class="problem"><strong>Issue:</strong> The code uses the unsafe memset function instead of the required memset_s from libboundscheck as per project coding conventions.</div>
+                <div class="fix-label">Fix:</div><pre>(void)memset_s(compressed, HSS_COMPRESSED_PARAMS_LEN, 0, HSS_COMPRESSED_PARAMS_LEN);</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">Unsafe memory function memset used instead of memset_s</div>
+                <div class="issue-location">crypto/hbs/lms/src/lms_hash.c:444</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: GEMINI</span>
+                    <span class="confidence-badge trusted">置信度: 可信</span>
+                </div>
+                <pre>memset(para, 0, sizeof(LMS_Para));</pre>
+                <div class="problem"><strong>Issue:</strong> The code uses the unsafe memset function instead of the required memset_s from libboundscheck as per project coding conventions.</div>
+                <div class="fix-label">Fix:</div><pre>(void)memset_s(para, sizeof(LMS_Para), 0, sizeof(LMS_Para));</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">Integer overflow in HssGetMaxSignatures returns sentinel value that may not be checked</div>
+                <div class="issue-location">crypto/hbs/hss/src/hss_utils.c:276-297</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CLAUDE</span>
+                    <span class="confidence-badge trusted">置信度: 可信</span>
+                </div>
+                <pre>uint64_t HssGetMaxSignatures(const HSS_Para *para)
+{
+    if (para == NULL || para-&gt;levels == 0) {
+        return 0;
+    }
+
+    uint64_t total = 1;
+    for (uint32_t i = 0; i &lt; para-&gt;levels; i++) {
+        uint32_t height = para-&gt;levelPara[i].height;
+
+        if (height &gt; LMS_MAX_SAFE_HEIGHT_FOR_UINT64 || total &gt; (UINT64_MAX &gt;&gt; height)) {
+            return UINT64_MAX;  // Return max to indicate overflow
+        }
+
+        total *= (1ULL &lt;&lt; height);
+    }
+
+    return total;
+}</pre>
+                <div class="problem"><strong>Issue:</strong> The function calculates total signatures as product of (1<<height) for all levels. It returns UINT64_MAX on overflow, but callers might not check for this sentinel value. Returning UINT64_MAX could be misinterpreted as a valid (though enormous) signature count.</div>
+                <div class="fix-label">Fix:</div><pre>uint64_t HssGetMaxSignatures(const HSS_Para *para)
+{
+    if (para == NULL || para-&gt;levels == 0) {
+        return 0;
+    }
+
+    uint64_t total = 1;
+    for (uint32_t i = 0; i &lt; para-&gt;levels; i++) {
+        uint32_t height = para-&gt;levelPara[i].height;
+
+        if (height &gt; LMS_MAX_SAFE_HEIGHT_FOR_UINT64) {
+            return 0;  // Invalid - indicates no signatures available
+        }
+        
+        uint64_t signaturesAtLevel = 1ULL &lt;&lt; height;
+        
+        if (total &gt; UINT64_MAX / signaturesAtLevel) {
+            return 0;  // Overflow - indicates no signatures available
+        }
+
+        total *= signaturesAtLevel;
+    }
+
+    return total;
 }</pre>
             </div>
 </div>
 <div class="section"><div class="section-title medium">Medium</div>
 <div class="issue">
-                <div class="issue-title">HSS private-key load leaves stale tree cache</div>
-                <div class="issue-location">crypto/lms/src/hss_api.c:373-378</div>
+                <div class="issue-title">HSS context comparison explicitly ignores the master seed</div>
+                <div class="issue-location">crypto/hbs/hss/src/hss_api.c:173-177</div>
                 <div class="issue-meta">
-                    <span class="reviewers">Reviewers: CODEX</span>
-                    <span class="confidence-badge trusted">置信度: 可信</span>
-                </div>
-                <pre>int32_t ret = HssDecompressParamSet(ctx-&gt;para, compressed);
-if (ret != CRYPT_SUCCESS) {
-    return ret;
-}
-
-return CRYPT_SUCCESS;</pre>
-                <div class="problem"><strong>Issue:</strong> After loading a new private key via `CRYPT_HSS_SetPrvKey`, cached Merkle trees from the previous key remain marked valid, so signing can reuse stale trees and produce invalid signatures or key reuse.</div>
-                <div class="fix-label">Fix:</div><pre>int32_t ret = HssDecompressParamSet(ctx-&gt;para, compressed);
-if (ret != CRYPT_SUCCESS) {
-    return ret;
-}
-
-for (uint32_t i = 0; i &lt; HSS_MAX_LEVELS; i++) {
-    if (ctx-&gt;cachedTrees[i] != NULL) {
-        LmsZeroize(ctx-&gt;cachedTrees[i], ctx-&gt;cachedTreeSizes[i]);
-        BSL_SAL_Free(ctx-&gt;cachedTrees[i]);
-        ctx-&gt;cachedTrees[i] = NULL;
-        ctx-&gt;cachedTreeSizes[i] = 0;
-    }
-    ctx-&gt;treeCacheValid[i] = false;
-}
-
-return CRYPT_SUCCESS;</pre>
-            </div>
-<div class="issue">
-                <div class="issue-title">Levels accepted that key format cannot encode</div>
-                <div class="issue-location">crypto/lms/src/hss_api.c:191-195</div>
-                <div class="issue-meta">
-                    <span class="reviewers">Reviewers: CODEX</span>
-                    <span class="confidence-badge trusted">置信度: 可信</span>
-                </div>
-                <pre>if (levels &lt; HSS_MIN_LEVELS || levels &gt; HSS_MAX_LEVELS) {
-    return CRYPT_HSS_INVALID_LEVEL;
-}
-ctx-&gt;para-&gt;levels = levels;</pre>
-                <div class="problem"><strong>Issue:</strong> The control API allows up to 8 levels (`HSS_MAX_LEVELS`), but the compressed parameter set in the private key only supports 3 levels (`HSS_MAX_COMPRESSED_LEVELS`), so valid configuration can still fail later in keygen or SetPrvKey.</div>
-                <div class="fix-label">Fix:</div><pre>if (levels &lt; HSS_MIN_LEVELS || levels &gt; HSS_MAX_LEVELS || levels &gt; HSS_MAX_COMPRESSED_LEVELS) {
-    return CRYPT_HSS_INVALID_LEVEL;
-}
-ctx-&gt;para-&gt;levels = levels;</pre>
-            </div>
-</div>
-<div class="section"><div class="section-title low">Low</div>
-<div class="issue">
-                <div class="issue-title">Master seed not cleared on root-seed hash failure</div>
-                <div class="issue-location">crypto/lms/src/hss_utils.c:284-286</div>
-                <div class="issue-meta">
-                    <span class="reviewers">Reviewers: CODEX</span>
-                    <span class="confidence-badge trusted">置信度: 可信</span>
-                </div>
-                <pre>int32_t ret = LmsHash(hash, buffer, HSS_ROOT_SEED_DERIVE_BUF_LEN);
-if (ret != CRYPT_SUCCESS) {
-    return CRYPT_HSS_SEED_DERIVE_FAIL;
-}</pre>
-                <div class="problem"><strong>Issue:</strong> On hash failure, the stack buffer containing `masterSeed` is returned without zeroization, leaving sensitive material in memory.</div>
-                <div class="fix-label">Fix:</div><pre>int32_t ret = LmsHash(hash, buffer, HSS_ROOT_SEED_DERIVE_BUF_LEN);
-if (ret != CRYPT_SUCCESS) {
-    LmsZeroize(buffer, sizeof(buffer));
-    LmsZeroize(hash, sizeof(hash));
-    return CRYPT_HSS_SEED_DERIVE_FAIL;
-}</pre>
-            </div>
-<div class="issue">
-                <div class="issue-title">Master seed not cleared on second hash failure</div>
-                <div class="issue-location">crypto/lms/src/hss_utils.c:294-296</div>
-                <div class="issue-meta">
-                    <span class="reviewers">Reviewers: CODEX</span>
-                    <span class="confidence-badge trusted">置信度: 可信</span>
-                </div>
-                <pre>ret = LmsHash(rootSeed, buffer, HSS_ROOT_SEED_DERIVE_BUF_LEN);
-if (ret != CRYPT_SUCCESS) {
-    return CRYPT_HSS_SEED_DERIVE_FAIL;
-}</pre>
-                <div class="problem"><strong>Issue:</strong> On the second hash failure in `HssGenerateRootSeed`, the stack buffer containing `masterSeed` is returned without zeroization, leaving sensitive material in memory.</div>
-                <div class="fix-label">Fix:</div><pre>ret = LmsHash(rootSeed, buffer, HSS_ROOT_SEED_DERIVE_BUF_LEN);
-if (ret != CRYPT_SUCCESS) {
-    LmsZeroize(buffer, sizeof(buffer));
-    LmsZeroize(hash, sizeof(hash));
-    return CRYPT_HSS_SEED_DERIVE_FAIL;
-}</pre>
-            </div>
-<div class="issue">
-                <div class="issue-title">HSS compare ignores private seed</div>
-                <div class="issue-location">crypto/lms/src/hss_api.c:173-177</div>
-                <div class="issue-meta">
-                    <span class="reviewers">Reviewers: CODEX</span>
+                    <span class="reviewers">Reviewers: CODEX, CLAUDE</span>
                     <span class="confidence-badge trusted">置信度: 可信</span>
                 </div>
                 <pre>if (ctx1-&gt;privateKey != NULL &amp;&amp; ctx2-&gt;privateKey != NULL) {
@@ -273,12 +328,122 @@ if (ret != CRYPT_SUCCESS) {
         return CRYPT_HSS_CMP_FALSE;
     }
 }</pre>
-                <div class="problem"><strong>Issue:</strong> Two different private keys with different master seeds can compare equal if public keys are not set, which can lead to incorrect key matching/caching. The comparison only checks the counter and parameters, not the secret seed.</div>
-                <div class="fix-label">Fix:</div><pre>if (ctx1-&gt;privateKey != NULL &amp;&amp; ctx2-&gt;privateKey != NULL) {
-    if (memcmp(ctx1-&gt;privateKey, ctx2-&gt;privateKey, HSS_PRVKEY_LEN) != 0) {
+                <div class="problem"><strong>Issue:</strong> CRYPT_HSS_Cmp compares only the counter and compressed-parameter prefix of the private key and explicitly skips the 32-byte master seed. Two distinct HSS private keys with the same counter therefore compare equal, causing CRYPT_EAL_PkeyCmp() to report false positives. Additionally, the comparison uses memcmp which is not constant-time.</div>
+                <div class="fix-label">Fix:</div><pre>/* Compare the full serialized private key using constant-time comparison */
+if (ctx1-&gt;privateKey != NULL &amp;&amp; ctx2-&gt;privateKey != NULL) {
+    if (ctx1-&gt;para-&gt;prvKeyLen != ctx2-&gt;para-&gt;prvKeyLen) {
+        return CRYPT_HSS_CMP_FALSE;
+    }
+    int result = CRYPT_Memcmp(ctx1-&gt;privateKey, ctx2-&gt;privateKey, HSS_PRVKEY_LEN);
+    if (result != 0) {
         return CRYPT_HSS_CMP_FALSE;
     }
 }</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">Non-constant-time private key comparison</div>
+                <div class="issue-location">crypto/hbs/lms/src/lms_api.c:161</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CLAUDE</span>
+                    <span class="confidence-badge trusted">置信度: 可信</span>
+                </div>
+                <pre>if (ctx1-&gt;privateKey != NULL &amp;&amp; memcmp(ctx1-&gt;privateKey, ctx2-&gt;privateKey, ctx1-&gt;para-&gt;prvKeyLen) != 0) {
+    return CRYPT_LMS_CMP_FALSE;
+}</pre>
+                <div class="problem"><strong>Issue:</strong> CRYPT_LMS_Cmp uses memcmp to compare private keys. While the comparison includes counter and parameters, the use of memcmp can leak timing information about private key state.</div>
+                <div class="fix-label">Fix:</div><pre>if (ctx1-&gt;privateKey != NULL &amp;&amp; ctx2-&gt;privateKey != NULL) {
+    if (ctx1-&gt;para-&gt;prvKeyLen != ctx2-&gt;para-&gt;prvKeyLen) {
+        return CRYPT_LMS_CMP_FALSE;
+    }
+    int result = CRYPT_Memcmp(ctx1-&gt;privateKey, ctx2-&gt;privateKey, ctx1-&gt;para-&gt;prvKeyLen);
+    if (result != 0) {
+        return CRYPT_LMS_CMP_FALSE;
+    }
+}</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">Public HSS level limit exceeds what the private-key format can encode</div>
+                <div class="issue-location">crypto/hbs/hss/src/hss_params.h:31</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CODEX</span>
+                    <span class="confidence-badge trusted">置信度: 可信</span>
+                </div>
+                <pre>#define HSS_MAX_LEVELS 8  // Maximum hierarchy levels (RFC 8554)
+#define HSS_MIN_LEVELS 1  // Minimum hierarchy levels (1 = equivalent to LMS)
+...
+#define HSS_MAX_COMPRESSED_LEVELS    3     // Maximum levels that fit in compressed format</pre>
+                <div class="problem"><strong>Issue:</strong> The API advertises HSS_MAX_LEVELS as 8, but the serialized private key stores the whole hierarchy in an 8-byte compressed parameter block and HSS_MAX_COMPRESSED_LEVELS is only 3. Levels 4-8 are accepted by control setup and then fail later during key generation/import, which is a broken contract.</div>
+                <div class="fix-label">Fix:</div><pre>#define HSS_MAX_LEVELS 3  // Maximum levels that fit in compressed parameter format
+#define HSS_MIN_LEVELS 1  // Minimum hierarchy levels (1 = equivalent to LMS)
+#define HSS_MAX_COMPRESSED_LEVELS    HSS_MAX_LEVELS</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">Published LMS/HSS parameter IDs cannot be instantiated</div>
+                <div class="issue-location">include/crypto/crypt_algid.h:367-378</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CODEX</span>
+                    <span class="confidence-badge trusted">置信度: 可信</span>
+                </div>
+                <pre>CRYPT_LMS_SHA256_H20_W4 = BSL_CID_LMS_SHA256_H20_W4,
+CRYPT_LMS_SHA256_H25_W4 = BSL_CID_LMS_SHA256_H25_W4,
+...
+CRYPT_LMS_SHA256_H20_W2 = BSL_CID_LMS_SHA256_H20_W2,
+CRYPT_LMS_SHA256_H20_W8 = BSL_CID_LMS_SHA256_H20_W8,
+CRYPT_HSS_SHA256_L2_H20_H20 = BSL_CID_HSS_SHA256_L2_H20_H20,</pre>
+                <div class="problem"><strong>Issue:</strong> This PR exports H20, H25, and HSS H20 parameter IDs as supported public enums, but LmsParaInit rejects every LMS tree height above LMS_MAX_PRACTICAL_HEIGHT (15). Callers can select official-looking algorithm IDs that the implementation will always reject at runtime.</div>
+                <div class="fix-label">Fix:</div><pre>/* Only publish parameter sets that the current implementation accepts. */
+CRYPT_LMS_SHA256_H5_W4 = BSL_CID_LMS_SHA256_H5_W4,
+CRYPT_LMS_SHA256_H10_W4 = BSL_CID_LMS_SHA256_H10_W4,
+CRYPT_LMS_SHA256_H15_W4 = BSL_CID_LMS_SHA256_H15_W4,
+CRYPT_LMS_SHA256_H10_W2 = BSL_CID_LMS_SHA256_H10_W2,
+CRYPT_LMS_SHA256_H15_W2 = BSL_CID_LMS_SHA256_H15_W2,
+CRYPT_LMS_SHA256_H10_W8 = BSL_CID_LMS_SHA256_H10_W8,
+CRYPT_LMS_SHA256_H15_W8 = BSL_CID_LMS_SHA256_H15_W8,
+CRYPT_HSS_SHA256_L2_H10_H10 = BSL_CID_HSS_SHA256_L2_H10_H10,
+CRYPT_HSS_SHA256_L2_H15_H15 = BSL_CID_HSS_SHA256_L2_H15_H15,
+CRYPT_HSS_SHA256_L3_H10_H10_H10 = BSL_CID_HSS_SHA256_L3_H10_H10_H10,</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">BaseB function has potential integer overflow</div>
+                <div class="issue-location">crypto/hbs/common/hbs_wots.c:41-56</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CLAUDE</span>
+                    <span class="confidence-badge likely">置信度: 较可信</span>
+                </div>
+                <pre>static void BaseB(const uint8_t *x, uint32_t xLen, uint32_t b, uint32_t *out, uint32_t outLen)
+{
+    uint32_t bit = 0;
+    uint32_t o = 0;
+    uint32_t xi = 0;
+    for (uint32_t i = 0; i &lt; outLen; i++) {
+        while (bit &lt; b &amp;&amp; xi &lt; xLen) {
+            o = (o &lt;&lt; BYTE_BITS) + x[xi];
+            bit += 8;
+            xi++;
+        }</pre>
+                <div class="problem"><strong>Issue:</strong> The BaseB function can overflow the `o` variable when processing input data. The calculation `o = (o << BYTE_BITS) + x[xi]` can overflow if `b` is large and multiple bytes are processed. While for W=16 (4-bit chunks) this is unlikely, the function doesn't validate its inputs.</div>
+                <div class="fix-label">Fix:</div><pre>static void BaseB(const uint8_t *x, uint32_t xLen, uint32_t b, uint32_t *out, uint32_t outLen)
+{
+    uint32_t bit = 0;
+    uint32_t o = 0;
+    uint32_t xi = 0;
+    
+    /* Validate input: b must be &lt;= 16 (for W=16) to prevent overflow */
+    if (b &gt; 16 || outLen == 0) {
+        return;
+    }
+    
+    for (uint32_t i = 0; i &lt; outLen; i++) {
+        while (bit &lt; b &amp;&amp; xi &lt; xLen) {
+            /* Use 64-bit intermediate to prevent overflow */
+            uint64_t temp = ((uint64_t)o &lt;&lt; BYTE_BITS) + x[xi];
+            if (temp &gt; UINT32_MAX) {
+                return;
+            }
+            o = (uint32_t)temp;
+            bit += 8;
+            xi++;
+        }</pre>
             </div>
 </div>
 </div></body></html>

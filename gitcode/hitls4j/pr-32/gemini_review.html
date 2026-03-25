@@ -1,0 +1,264 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Code Review: openHiTLS/hitls4j#32 - GEMINI</title>
+    <style>
+        :root { --critical: #dc2626; --high: #ea580c; --medium: #ca8a04; --low: #65a30d; }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: system-ui, sans-serif; background: #f8fafc; color: #1e293b; padding: 2rem; line-height: 1.6; }
+        .container { max-width: 900px; margin: 0 auto; }
+        h1 { font-size: 1.5rem; margin-bottom: 0.5rem; }
+        .subtitle { color: #64748b; margin-bottom: 2rem; }
+        .section { margin-bottom: 2rem; }
+        .section-title { font-size: 1.1rem; font-weight: 600; padding: 0.5rem 1rem; border-radius: 0.5rem 0.5rem 0 0; color: white; }
+        .section-title.critical { background: var(--critical); }
+        .section-title.high { background: var(--high); }
+        .section-title.medium { background: var(--medium); }
+        .section-title.low { background: var(--low); }
+        .issue { background: white; border: 1px solid #e2e8f0; border-top: none; padding: 1rem; }
+        .issue:last-child { border-radius: 0 0 0.5rem 0.5rem; }
+        .issue-title { font-weight: 600; margin-bottom: 0.25rem; }
+        .issue-location { font-family: monospace; font-size: 0.875rem; color: #64748b; margin-bottom: 0.75rem; }
+        .issue-source { font-size: 0.75rem; color: #94a3b8; margin-top: 0.5rem; }
+        pre { background: #1e293b; color: #e2e8f0; padding: 0.75rem; border-radius: 0.375rem; overflow-x: auto; font-size: 0.875rem; margin: 0.5rem 0; }
+        .problem { margin: 0.75rem 0; }
+        .fix-label { font-weight: 600; margin-top: 0.75rem; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Code Review: openHiTLS/hitls4j#32 - GEMINI</h1>
+        <div class="subtitle"></div>
+<div class="section"><div class="section-title high">High</div>
+<div class="issue">
+                <div class="issue-title">Missing NULL check after GetStringUTFChars in frodoKemCreateContext</div>
+                <div class="issue-location">src/main/native/crypto_native_jni.c:3329-3333</div>
+                <pre>(JNIEnv *env, jclass cls, jstring jparameterSet) {
+    const char *parameterSet = (*env)-&gt;GetStringUTFChars(env, jparameterSet, NULL);
+    int paramId = getFrodoKemParamId(parameterSet);
+    (*env)-&gt;ReleaseStringUTFChars(env, jparameterSet, parameterSet);
+    if (paramId == -1) {</pre>
+                <div class="problem"><strong>Issue:</strong> The JNI function `GetStringUTFChars` can return NULL if the JVM runs out of memory. If it returns NULL, passing it to `strcmp` in `getFrodoKemParamId` will cause a segmentation fault and crash the JVM.</div>
+                <div class="fix-label">Fix:</div><pre>(JNIEnv *env, jclass cls, jstring jparameterSet) {
+    const char *parameterSet = (*env)-&gt;GetStringUTFChars(env, jparameterSet, NULL);
+    if (parameterSet == NULL) {
+        return 0;
+    }
+    int paramId = getFrodoKemParamId(parameterSet);
+    (*env)-&gt;ReleaseStringUTFChars(env, jparameterSet, parameterSet);
+    if (paramId == -1) {</pre>
+                <div class="issue-source">Reviewer: gemini</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">Missing NULL check after GetStringUTFChars in frodoKemGenerateKeyPair</div>
+                <div class="issue-location">src/main/native/crypto_native_jni.c:3359-3363</div>
+                <pre>int publicKeySize;
+    int privateKeySize;
+    const char *parameterSet = (*env)-&gt;GetStringUTFChars(env, jparameterSet, NULL);
+    int paramId = getFrodoKemParamId(parameterSet);
+    (*env)-&gt;ReleaseStringUTFChars(env, jparameterSet, parameterSet);
+
+    getFrodoKemKeySizes(paramId, &amp;publicKeySize, &amp;privateKeySize);</pre>
+                <div class="problem"><strong>Issue:</strong> `GetStringUTFChars` can return NULL. Passing NULL to `getFrodoKemParamId` will result in a segmentation fault.</div>
+                <div class="fix-label">Fix:</div><pre>int publicKeySize;
+    int privateKeySize;
+    const char *parameterSet = (*env)-&gt;GetStringUTFChars(env, jparameterSet, NULL);
+    if (parameterSet == NULL) {
+        return NULL;
+    }
+    int paramId = getFrodoKemParamId(parameterSet);
+    (*env)-&gt;ReleaseStringUTFChars(env, jparameterSet, parameterSet);
+
+    getFrodoKemKeySizes(paramId, &amp;publicKeySize, &amp;privateKeySize);</pre>
+                <div class="issue-source">Reviewer: gemini</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">Missing NULL check after GetByteArrayElements for encapsulate key in frodoKemSetKeys</div>
+                <div class="issue-location">src/main/native/crypto_native_jni.c:3449-3453</div>
+                <pre>CRYPT_EAL_PkeyPub pubKey;
+        memset(&amp;pubKey, 0, sizeof(CRYPT_EAL_PkeyPub));
+        pubKey.id = CRYPT_PKEY_FRODOKEM;
+        pubKey.key.kemEk.data = (uint8_t *)(*env)-&gt;GetByteArrayElements(env, jencapKey, NULL);
+        pubKey.key.kemEk.len = (*env)-&gt;GetArrayLength(env, jencapKey);
+
+        ret = CRYPT_EAL_PkeySetPub(pkey, &amp;pubKey);</pre>
+                <div class="problem"><strong>Issue:</strong> `GetByteArrayElements` can return NULL on out-of-memory. Using this NULL pointer or passing it to `ReleaseByteArrayElements` will cause undefined behavior or crash the JVM.</div>
+                <div class="fix-label">Fix:</div><pre>CRYPT_EAL_PkeyPub pubKey;
+        memset(&amp;pubKey, 0, sizeof(CRYPT_EAL_PkeyPub));
+        pubKey.id = CRYPT_PKEY_FRODOKEM;
+        pubKey.key.kemEk.data = (uint8_t *)(*env)-&gt;GetByteArrayElements(env, jencapKey, NULL);
+        if (pubKey.key.kemEk.data == NULL) {
+            return;
+        }
+        pubKey.key.kemEk.len = (*env)-&gt;GetArrayLength(env, jencapKey);
+
+        ret = CRYPT_EAL_PkeySetPub(pkey, &amp;pubKey);</pre>
+                <div class="issue-source">Reviewer: gemini</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">Missing NULL check after GetByteArrayElements for decapsulate key in frodoKemSetKeys</div>
+                <div class="issue-location">src/main/native/crypto_native_jni.c:3464-3468</div>
+                <pre>CRYPT_EAL_PkeyPrv privKey;
+        memset(&amp;privKey, 0, sizeof(CRYPT_EAL_PkeyPrv));
+        privKey.id = CRYPT_PKEY_FRODOKEM;
+        privKey.key.kemDk.data = (uint8_t *)(*env)-&gt;GetByteArrayElements(env, jdecapKey, NULL);
+        privKey.key.kemDk.len = (*env)-&gt;GetArrayLength(env, jdecapKey);
+
+        ret = CRYPT_EAL_PkeySetPrv(pkey, &amp;privKey);</pre>
+                <div class="problem"><strong>Issue:</strong> `GetByteArrayElements` can return NULL on out-of-memory. Using this NULL pointer or passing it to `ReleaseByteArrayElements` will cause undefined behavior or crash the JVM.</div>
+                <div class="fix-label">Fix:</div><pre>CRYPT_EAL_PkeyPrv privKey;
+        memset(&amp;privKey, 0, sizeof(CRYPT_EAL_PkeyPrv));
+        privKey.id = CRYPT_PKEY_FRODOKEM;
+        privKey.key.kemDk.data = (uint8_t *)(*env)-&gt;GetByteArrayElements(env, jdecapKey, NULL);
+        if (privKey.key.kemDk.data == NULL) {
+            return;
+        }
+        privKey.key.kemDk.len = (*env)-&gt;GetArrayLength(env, jdecapKey);
+
+        ret = CRYPT_EAL_PkeySetPrv(pkey, &amp;privKey);</pre>
+                <div class="issue-source">Reviewer: gemini</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">Missing NULL check after GetStringUTFChars in mcelieceCreateContext</div>
+                <div class="issue-location">src/main/native/crypto_native_jni.c:3662-3667</div>
+                <pre>JNIEXPORT jlong JNICALL Java_org_openhitls_crypto_core_CryptoNative_mcelieceCreateContext
+  (JNIEnv *env, jclass cls, jstring jparameterSet) {
+    const char *parameterSet = (*env)-&gt;GetStringUTFChars(env, jparameterSet, NULL);
+    int paramId = getMcElieceParamId(parameterSet);
+    (*env)-&gt;ReleaseStringUTFChars(env, jparameterSet, parameterSet);
+    if (paramId == -1) {</pre>
+                <div class="problem"><strong>Issue:</strong> `GetStringUTFChars` can return NULL. Passing NULL to `getMcElieceParamId` will result in a segmentation fault.</div>
+                <div class="fix-label">Fix:</div><pre>JNIEXPORT jlong JNICALL Java_org_openhitls_crypto_core_CryptoNative_mcelieceCreateContext
+  (JNIEnv *env, jclass cls, jstring jparameterSet) {
+    const char *parameterSet = (*env)-&gt;GetStringUTFChars(env, jparameterSet, NULL);
+    if (parameterSet == NULL) {
+        return 0;
+    }
+    int paramId = getMcElieceParamId(parameterSet);
+    (*env)-&gt;ReleaseStringUTFChars(env, jparameterSet, parameterSet);
+    if (paramId == -1) {</pre>
+                <div class="issue-source">Reviewer: gemini</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">Missing NULL check after GetStringUTFChars in mcelieceGenerateKeyPair</div>
+                <div class="issue-location">src/main/native/crypto_native_jni.c:3693-3697</div>
+                <pre>int publicKeySize;
+    int privateKeySize;
+    const char *parameterSet = (*env)-&gt;GetStringUTFChars(env, jparameterSet, NULL);
+    int paramId = getMcElieceParamId(parameterSet);
+    (*env)-&gt;ReleaseStringUTFChars(env, jparameterSet, parameterSet);
+
+    getMcElieceKeySizes(paramId, &amp;publicKeySize, &amp;privateKeySize);</pre>
+                <div class="problem"><strong>Issue:</strong> `GetStringUTFChars` can return NULL. Passing NULL to `getMcElieceParamId` will result in a segmentation fault.</div>
+                <div class="fix-label">Fix:</div><pre>int publicKeySize;
+    int privateKeySize;
+    const char *parameterSet = (*env)-&gt;GetStringUTFChars(env, jparameterSet, NULL);
+    if (parameterSet == NULL) {
+        return NULL;
+    }
+    int paramId = getMcElieceParamId(parameterSet);
+    (*env)-&gt;ReleaseStringUTFChars(env, jparameterSet, parameterSet);
+
+    getMcElieceKeySizes(paramId, &amp;publicKeySize, &amp;privateKeySize);</pre>
+                <div class="issue-source">Reviewer: gemini</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">Missing NULL check after GetByteArrayElements for encapsulate key in mcelieceSetKeys</div>
+                <div class="issue-location">src/main/native/crypto_native_jni.c:3783-3787</div>
+                <pre>CRYPT_EAL_PkeyPub pubKey;
+        memset(&amp;pubKey, 0, sizeof(CRYPT_EAL_PkeyPub));
+        pubKey.id = CRYPT_PKEY_MCELIECE;
+        pubKey.key.kemEk.data = (uint8_t *)(*env)-&gt;GetByteArrayElements(env, jencapKey, NULL);
+        pubKey.key.kemEk.len = (*env)-&gt;GetArrayLength(env, jencapKey);
+
+        ret = CRYPT_EAL_PkeySetPub(pkey, &amp;pubKey);</pre>
+                <div class="problem"><strong>Issue:</strong> `GetByteArrayElements` can return NULL on out-of-memory. Using this NULL pointer or passing it to `ReleaseByteArrayElements` will cause undefined behavior or crash the JVM.</div>
+                <div class="fix-label">Fix:</div><pre>CRYPT_EAL_PkeyPub pubKey;
+        memset(&amp;pubKey, 0, sizeof(CRYPT_EAL_PkeyPub));
+        pubKey.id = CRYPT_PKEY_MCELIECE;
+        pubKey.key.kemEk.data = (uint8_t *)(*env)-&gt;GetByteArrayElements(env, jencapKey, NULL);
+        if (pubKey.key.kemEk.data == NULL) {
+            return;
+        }
+        pubKey.key.kemEk.len = (*env)-&gt;GetArrayLength(env, jencapKey);
+
+        ret = CRYPT_EAL_PkeySetPub(pkey, &amp;pubKey);</pre>
+                <div class="issue-source">Reviewer: gemini</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">Missing NULL check after GetByteArrayElements for decapsulate key in mcelieceSetKeys</div>
+                <div class="issue-location">src/main/native/crypto_native_jni.c:3798-3802</div>
+                <pre>CRYPT_EAL_PkeyPrv privKey;
+        memset(&amp;privKey, 0, sizeof(CRYPT_EAL_PkeyPrv));
+        privKey.id = CRYPT_PKEY_MCELIECE;
+        privKey.key.kemDk.data = (uint8_t *)(*env)-&gt;GetByteArrayElements(env, jdecapKey, NULL);
+        privKey.key.kemDk.len = (*env)-&gt;GetArrayLength(env, jdecapKey);
+
+        ret = CRYPT_EAL_PkeySetPrv(pkey, &amp;privKey);</pre>
+                <div class="problem"><strong>Issue:</strong> `GetByteArrayElements` can return NULL on out-of-memory. Using this NULL pointer or passing it to `ReleaseByteArrayElements` will cause undefined behavior or crash the JVM.</div>
+                <div class="fix-label">Fix:</div><pre>CRYPT_EAL_PkeyPrv privKey;
+        memset(&amp;privKey, 0, sizeof(CRYPT_EAL_PkeyPrv));
+        privKey.id = CRYPT_PKEY_MCELIECE;
+        privKey.key.kemDk.data = (uint8_t *)(*env)-&gt;GetByteArrayElements(env, jdecapKey, NULL);
+        if (privKey.key.kemDk.data == NULL) {
+            return;
+        }
+        privKey.key.kemDk.len = (*env)-&gt;GetArrayLength(env, jdecapKey);
+
+        ret = CRYPT_EAL_PkeySetPrv(pkey, &amp;privKey);</pre>
+                <div class="issue-source">Reviewer: gemini</div>
+            </div>
+</div>
+<div class="section"><div class="section-title medium">Medium</div>
+<div class="issue">
+                <div class="issue-title">Incorrect exception type thrown for short buffers</div>
+                <div class="issue-location">src/main/java/org/openhitls/crypto/jce/keyagreement/FrodoKEMKeyAgreement.java:80-87</div>
+                <pre>@Override
+    protected int engineGenerateSecret(byte[] sharedSecret, int offset) throws InvalidParameterException {
+        byte[] secret = engineGenerateSecret();
+        if (sharedSecret.length - offset &lt; secret.length) {
+            throw new IllegalStateException("Insufficient space in sharedSecret array");
+        }
+        System.arraycopy(secret, 0, sharedSecret, offset, secret.length);
+        return secret.length;
+    }</pre>
+                <div class="problem"><strong>Issue:</strong> When generating a secret into an existing array that is too small, the implementation throws `IllegalStateException`. According to the JCE contract for `KeyAgreementSpi.engineGenerateSecret(byte[], int)`, a `javax.crypto.ShortBufferException` must be thrown in this case to allow calling applications to handle the size dynamically.</div>
+                <div class="fix-label">Fix:</div><pre>@Override
+    protected int engineGenerateSecret(byte[] sharedSecret, int offset) throws IllegalStateException, javax.crypto.ShortBufferException {
+        byte[] secret = engineGenerateSecret();
+        if (sharedSecret.length - offset &lt; secret.length) {
+            throw new javax.crypto.ShortBufferException("Insufficient space in sharedSecret array");
+        }
+        System.arraycopy(secret, 0, sharedSecret, offset, secret.length);
+        return secret.length;
+    }</pre>
+                <div class="issue-source">Reviewer: gemini</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">Incorrect exception type thrown for short buffers</div>
+                <div class="issue-location">src/main/java/org/openhitls/crypto/jce/keyagreement/McElieceKeyAgreement.java:116-123</div>
+                <pre>@Override
+    protected int engineGenerateSecret(byte[] sharedSecret, int offset) throws InvalidParameterException {
+        byte[] secret = engineGenerateSecret();
+        if (sharedSecret.length - offset &lt; secret.length) {
+            throw new IllegalStateException("Insufficient space in sharedSecret array");
+        }
+        System.arraycopy(secret, 0, sharedSecret, offset, secret.length);
+        return secret.length;
+    }</pre>
+                <div class="problem"><strong>Issue:</strong> When generating a secret into an existing array that is too small, the implementation throws `IllegalStateException`. According to the JCE contract for `KeyAgreementSpi.engineGenerateSecret(byte[], int)`, a `javax.crypto.ShortBufferException` must be thrown in this case to allow calling applications to handle the size dynamically.</div>
+                <div class="fix-label">Fix:</div><pre>@Override
+    protected int engineGenerateSecret(byte[] sharedSecret, int offset) throws IllegalStateException, javax.crypto.ShortBufferException {
+        byte[] secret = engineGenerateSecret();
+        if (sharedSecret.length - offset &lt; secret.length) {
+            throw new javax.crypto.ShortBufferException("Insufficient space in sharedSecret array");
+        }
+        System.arraycopy(secret, 0, sharedSecret, offset, secret.length);
+        return secret.length;
+    }</pre>
+                <div class="issue-source">Reviewer: gemini</div>
+            </div>
+</div>
+</div></body></html>

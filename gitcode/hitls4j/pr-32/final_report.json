@@ -1,0 +1,330 @@
+{
+  "context": {
+    "owner": "openHiTLS",
+    "repo": "hitls4j",
+    "pr_id": "32",
+    "title": "",
+    "reviewers": [
+      "claude",
+      "gemini",
+      "codex"
+    ]
+  },
+  "statistics": {
+    "total": 28,
+    "critical": 0,
+    "high": 18,
+    "medium": 4,
+    "low": 6
+  },
+  "issues": [
+    {
+      "file": "src/main/java/org/openhitls/crypto/jce/key/FrodoKEMPrivateKeyImpl.java",
+      "line": "11-14",
+      "severity": "high",
+      "title": "Key constructor stores direct reference to encoded array without cloning",
+      "reviewers": "CLAUDE",
+      "confidence": "trusted",
+      "problem": "The constructor stores a direct reference to the input array instead of cloning it. This allows external code to modify the key material after the key object is created, which is a security vulnerability. The same pattern exists in the public key constructor and both McEliece key classes.",
+      "code": "public FrodoKEMPrivateKeyImpl(byte[] encoded) {\n    this.encoded = encoded;  // Direct reference - not cloned\n    this.params = null;\n}",
+      "fix": "public FrodoKEMPrivateKeyImpl(byte[] encoded) {\n    this.encoded = encoded != null ? encoded.clone() : null;\n    this.params = null;\n}"
+    },
+    {
+      "file": "src/main/java/org/openhitls/crypto/jce/key/FrodoKEMPublicKeyImpl.java",
+      "line": "11-14",
+      "severity": "high",
+      "title": "Key constructor stores direct reference to encoded array without cloning",
+      "reviewers": "CLAUDE",
+      "confidence": "trusted",
+      "problem": "The constructor stores a direct reference to the input array instead of cloning it. This allows external code to modify the key material after the key object is created, which is a security vulnerability.",
+      "code": "public FrodoKEMPublicKeyImpl(byte[] encoded) {\n    this.encoded = encoded;  // Direct reference - not cloned\n    this.params = null;\n}",
+      "fix": "public FrodoKEMPublicKeyImpl(byte[] encoded) {\n    this.encoded = encoded != null ? encoded.clone() : null;\n    this.params = null;\n}"
+    },
+    {
+      "file": "src/main/java/org/openhitls/crypto/jce/key/McEliecePrivateKeyImpl.java",
+      "line": "11-14",
+      "severity": "high",
+      "title": "Key constructor stores direct reference to encoded array without cloning",
+      "reviewers": "CLAUDE",
+      "confidence": "trusted",
+      "problem": "The constructor stores a direct reference to the input array instead of cloning it. This allows external code to modify the key material after the key object is created, which is a security vulnerability.",
+      "code": "public McEliecePrivateKeyImpl(byte[] encoded) {\n    this.encoded = encoded;  // Direct reference - not cloned\n    this.params = null;\n}",
+      "fix": "public McEliecePrivateKeyImpl(byte[] encoded) {\n    this.encoded = encoded != null ? encoded.clone() : null;\n    this.params = null;\n}"
+    },
+    {
+      "file": "src/main/java/org/openhitls/crypto/jce/key/McEliecePublicKeyImpl.java",
+      "line": "11-14",
+      "severity": "high",
+      "title": "Key constructor stores direct reference to encoded array without cloning",
+      "reviewers": "CLAUDE",
+      "confidence": "trusted",
+      "problem": "The constructor stores a direct reference to the input array instead of cloning it. This allows external code to modify the key material after the key object is created, which is a security vulnerability.",
+      "code": "public McEliecePublicKeyImpl(byte[] encoded) {\n    this.encoded = encoded;  // Direct reference - not cloned\n    this.params = null;\n}",
+      "fix": "public McEliecePublicKeyImpl(byte[] encoded) {\n    this.encoded = encoded != null ? encoded.clone() : null;\n    this.params = null;\n}"
+    },
+    {
+      "file": "src/main/native/crypto_native_jni.c",
+      "line": "3330-3332",
+      "severity": "high",
+      "title": "Missing NULL check after GetStringUTFChars in frodoKemCreateContext",
+      "reviewers": "GEMINI",
+      "confidence": "trusted",
+      "problem": "The JNI function GetStringUTFChars can return NULL if the JVM runs out of memory. If it returns NULL, passing it to getFrodoKemParamId (which uses strcmp) will cause a segmentation fault and crash the JVM. The same pattern exists in mcelieceCreateContext.",
+      "code": "const char *parameterSet = (*env)->GetStringUTFChars(env, jparameterSet, NULL);\nint paramId = getFrodoKemParamId(parameterSet);",
+      "fix": "const char *parameterSet = (*env)->GetStringUTFChars(env, jparameterSet, NULL);\nif (parameterSet == NULL) {\n    return 0;\n}\nint paramId = getFrodoKemParamId(parameterSet);"
+    },
+    {
+      "file": "src/main/native/crypto_native_jni.c",
+      "line": "3361-3363",
+      "severity": "high",
+      "title": "Missing NULL check after GetStringUTFChars in frodoKemGenerateKeyPair",
+      "reviewers": "GEMINI",
+      "confidence": "trusted",
+      "problem": "GetStringUTFChars can return NULL on out-of-memory. Passing NULL to getFrodoKemParamId will result in a segmentation fault. The same issue exists in mcelieceGenerateKeyPair.",
+      "code": "const char *parameterSet = (*env)->GetStringUTFChars(env, jparameterSet, NULL);\nint paramId = getFrodoKemParamId(parameterSet);",
+      "fix": "const char *parameterSet = (*env)->GetStringUTFChars(env, jparameterSet, NULL);\nif (parameterSet == NULL) {\n    return NULL;\n}\nint paramId = getFrodoKemParamId(parameterSet);"
+    },
+    {
+      "file": "src/main/native/crypto_native_jni.c",
+      "line": "3450-3451",
+      "severity": "high",
+      "title": "Missing NULL check after GetByteArrayElements for encapsulate key in frodoKemSetKeys",
+      "reviewers": "GEMINI",
+      "confidence": "trusted",
+      "problem": "GetByteArrayElements can return NULL on out-of-memory. Using this NULL pointer or passing it to ReleaseByteArrayElements will cause undefined behavior or crash the JVM. The same issue exists in mcelieceSetKeys for both encapsulation and decapsulation keys.",
+      "code": "pubKey.key.kemEk.data = (uint8_t *)(*env)->GetByteArrayElements(env, jencapKey, NULL);\npubKey.key.kemEk.len = (*env)->GetArrayLength(env, jencapKey);",
+      "fix": "pubKey.key.kemEk.data = (uint8_t *)(*env)->GetByteArrayElements(env, jencapKey, NULL);\nif (pubKey.key.kemEk.data == NULL) {\n    return;\n}\npubKey.key.kemEk.len = (*env)->GetArrayLength(env, jencapKey);"
+    },
+    {
+      "file": "src/main/native/crypto_native_jni.c",
+      "line": "3465-3466",
+      "severity": "high",
+      "title": "Missing NULL check after GetByteArrayElements for decapsulate key in frodoKemSetKeys",
+      "reviewers": "GEMINI",
+      "confidence": "trusted",
+      "problem": "GetByteArrayElements can return NULL on out-of-memory. Using this NULL pointer will cause undefined behavior or crash the JVM. The same issue exists in mcelieceSetKeys.",
+      "code": "privKey.key.kemDk.data = (uint8_t *)(*env)->GetByteArrayElements(env, jdecapKey, NULL);\nprivKey.key.kemDk.len = (*env)->GetArrayLength(env, jdecapKey);",
+      "fix": "privKey.key.kemDk.data = (uint8_t *)(*env)->GetByteArrayElements(env, jdecapKey, NULL);\nif (privKey.key.kemDk.data == NULL) {\n    return;\n}\nprivKey.key.kemDk.len = (*env)->GetArrayLength(env, jdecapKey);"
+    },
+    {
+      "file": "src/main/native/crypto_native_jni.c",
+      "line": "3664-3666",
+      "severity": "high",
+      "title": "Missing NULL check after GetStringUTFChars in mcelieceCreateContext",
+      "reviewers": "GEMINI",
+      "confidence": "trusted",
+      "problem": "GetStringUTFChars can return NULL. Passing NULL to getMcElieceParamId will result in a segmentation fault.",
+      "code": "const char *parameterSet = (*env)->GetStringUTFChars(env, jparameterSet, NULL);\nint paramId = getMcElieceParamId(parameterSet);",
+      "fix": "const char *parameterSet = (*env)->GetStringUTFChars(env, jparameterSet, NULL);\nif (parameterSet == NULL) {\n    return 0;\n}\nint paramId = getMcElieceParamId(parameterSet);"
+    },
+    {
+      "file": "src/main/native/crypto_native_jni.c",
+      "line": "3695-3697",
+      "severity": "high",
+      "title": "Missing NULL check after GetStringUTFChars in mcelieceGenerateKeyPair",
+      "reviewers": "GEMINI",
+      "confidence": "trusted",
+      "problem": "GetStringUTFChars can return NULL. Passing NULL to getMcElieceParamId will result in a segmentation fault.",
+      "code": "const char *parameterSet = (*env)->GetStringUTFChars(env, jparameterSet, NULL);\nint paramId = getMcElieceParamId(parameterSet);",
+      "fix": "const char *parameterSet = (*env)->GetStringUTFChars(env, jparameterSet, NULL);\nif (parameterSet == NULL) {\n    return NULL;\n}\nint paramId = getMcElieceParamId(parameterSet);"
+    },
+    {
+      "file": "src/main/native/crypto_native_jni.c",
+      "line": "3784-3785",
+      "severity": "high",
+      "title": "Missing NULL check after GetByteArrayElements for encapsulate key in mcelieceSetKeys",
+      "reviewers": "GEMINI",
+      "confidence": "trusted",
+      "problem": "GetByteArrayElements can return NULL on out-of-memory. Using this NULL pointer will cause undefined behavior or crash the JVM.",
+      "code": "pubKey.key.kemEk.data = (uint8_t *)(*env)->GetByteArrayElements(env, jencapKey, NULL);\npubKey.key.kemEk.len = (*env)->GetArrayLength(env, jencapKey);",
+      "fix": "pubKey.key.kemEk.data = (uint8_t *)(*env)->GetByteArrayElements(env, jencapKey, NULL);\nif (pubKey.key.kemEk.data == NULL) {\n    return;\n}\npubKey.key.kemEk.len = (*env)->GetArrayLength(env, jencapKey);"
+    },
+    {
+      "file": "src/main/native/crypto_native_jni.c",
+      "line": "3799-3800",
+      "severity": "high",
+      "title": "Missing NULL check after GetByteArrayElements for decapsulate key in mcelieceSetKeys",
+      "reviewers": "GEMINI",
+      "confidence": "trusted",
+      "problem": "GetByteArrayElements can return NULL on out-of-memory. Using this NULL pointer will cause undefined behavior or crash the JVM.",
+      "code": "privKey.key.kemDk.data = (uint8_t *)(*env)->GetByteArrayElements(env, jdecapKey, NULL);\nprivKey.key.kemDk.len = (*env)->GetArrayLength(env, jdecapKey);",
+      "fix": "privKey.key.kemDk.data = (uint8_t *)(*env)->GetByteArrayElements(env, jdecapKey, NULL);\nif (privKey.key.kemDk.data == NULL) {\n    return;\n}\nprivKey.key.kemDk.len = (*env)->GetArrayLength(env, jdecapKey);"
+    },
+    {
+      "file": "src/main/java/org/openhitls/crypto/jce/keyagreement/FrodoKEMKeyAgreement.java",
+      "line": "115",
+      "severity": "high",
+      "title": "Bounds check vulnerable to integer underflow",
+      "reviewers": "CLAUDE",
+      "confidence": "trusted",
+      "problem": "The bounds check `sharedSecret.length - offset < secret.length` can underflow if `offset` is negative or very large (close to Integer.MAX_VALUE), potentially allowing a buffer overflow or negative indexing in System.arraycopy. The same issue exists in McElieceKeyAgreement.",
+      "code": "if (sharedSecret.length - offset < secret.length) {\n    throw new IllegalStateException(\"Insufficient space in sharedSecret array\");\n}\nSystem.arraycopy(secret, 0, sharedSecret, offset, secret.length);",
+      "fix": "if (offset < 0 || sharedSecret.length - offset < secret.length) {\n    throw new InvalidParameterException(\"Invalid offset or insufficient space\");\n}\nSystem.arraycopy(secret, 0, sharedSecret, offset, secret.length);"
+    },
+    {
+      "file": "src/main/java/org/openhitls/crypto/jce/keyagreement/McElieceKeyAgreement.java",
+      "line": "118",
+      "severity": "high",
+      "title": "Bounds check vulnerable to integer underflow",
+      "reviewers": "CLAUDE",
+      "confidence": "trusted",
+      "problem": "The bounds check `sharedSecret.length - offset < secret.length` can underflow if `offset` is negative or very large, potentially allowing a buffer overflow or negative indexing.",
+      "code": "if (sharedSecret.length - offset < secret.length) {\n    throw new IllegalStateException(\"Insufficient space in sharedSecret array\");\n}\nSystem.arraycopy(secret, 0, sharedSecret, offset, secret.length);",
+      "fix": "if (offset < 0 || sharedSecret.length - offset < secret.length) {\n    throw new InvalidParameterException(\"Invalid offset or insufficient space\");\n}\nSystem.arraycopy(secret, 0, sharedSecret, offset, secret.length);"
+    },
+    {
+      "file": "src/main/java/org/openhitls/crypto/jce/key/factory/FrodoKEMKeyFactory.java",
+      "line": "26-31",
+      "severity": "high",
+      "title": "KeyFactory treats raw bytes as PKCS#8/X.509 without parsing",
+      "reviewers": "CODEX",
+      "confidence": "trusted",
+      "problem": "The KeyFactory accepts PKCS8EncodedKeySpec and X509EncodedKeySpec, but never parses or validates any ASN.1 wrapper. It just copies the byte array and later re-exports the same bytes as if they were standard encodings. This breaks interoperability with code that expects real PKCS#8 or SubjectPublicKeyInfo data. The same issue exists in McElieceKeyFactory.",
+      "code": "} else if (keySpec instanceof PKCS8EncodedKeySpec) {\n    try {\n        return new FrodoKEMPrivateKeyImpl(((PKCS8EncodedKeySpec) keySpec).getEncoded());\n    } catch (Exception e) {\n        throw new InvalidKeySpecException(\"Invalid PKCS8EncodedKeySpec for FrodoKEM private key\", e);\n    }\n}\n...\n} else if (keySpec instanceof X509EncodedKeySpec) {\n    try {\n        return new FrodoKEMPublicKeyImpl(((X509EncodedKeySpec) keySpec).getEncoded());\n    } catch (Exception e) {\n        throw new InvalidKeySpecException(\"Invalid X509EncodedKeySpec for FrodoKEM public key\", e);\n    }\n}\n...\nif (keySpec.isAssignableFrom(X509EncodedKeySpec.class)) {\n    return keySpec.cast(new X509EncodedKeySpec(key.getEncoded()));\n}\n...\nif (keySpec.isAssignableFrom(PKCS8EncodedKeySpec.class)) {\n    return keySpec.cast(new PKCS8EncodedKeySpec(key.getEncoded()));\n}",
+      "fix": "@Override\nprotected PrivateKey engineGeneratePrivate(KeySpec keySpec) throws InvalidKeySpecException {\n    if (keySpec instanceof FrodoKEMPrivateKeySpec) {\n        FrodoKEMPrivateKeySpec spec = (FrodoKEMPrivateKeySpec) keySpec;\n        return new FrodoKEMPrivateKeyImpl(spec.getParams(), spec.getEncoded());\n    }\n    if (keySpec instanceof PKCS8EncodedKeySpec) {\n        throw new InvalidKeySpecException(\n                \"PKCS#8 encoding is not implemented for FrodoKEM keys; use FrodoKEMPrivateKeySpec\");\n    }\n    throw new InvalidKeySpecException(\"Unsupported key specification: \" + keySpec.getClass().getName());\n}\n\n@Override\nprotected PublicKey engineGeneratePublic(KeySpec keySpec) throws InvalidKeySpecException {\n    if (keySpec instanceof FrodoKEMPublicKeySpec) {\n        FrodoKEMPublicKeySpec spec = (FrodoKEMPublicKeySpec) keySpec;\n        return new FrodoKEMPublicKeyImpl(spec.getParams(), spec.getEncoded());\n    }\n    if (keySpec instanceof X509EncodedKeySpec) {\n        throw new InvalidKeySpecException(\n                \"X.509 encoding is not implemented for FrodoKEM keys; use FrodoKEMPublicKeySpec\");\n    }\n    throw new InvalidKeySpecException(\"Unsupported key specification: \" + keySpec.getClass().getName());\n}\n\n@Override\nprotected <T extends KeySpec> T engineGetKeySpec(Key key, Class<T> keySpec) throws InvalidKeySpecException {\n    if (keySpec.isAssignableFrom(X509EncodedKeySpec.class)\n            || keySpec.isAssignableFrom(PKCS8EncodedKeySpec.class)) {\n        throw new InvalidKeySpecException(\n                \"Standard X.509/PKCS#8 encodings are not implemented for FrodoKEM keys\");\n    }\n    // existing FrodoKEMPublicKeySpec / FrodoKEMPrivateKeySpec handling stays here\n}"
+    },
+    {
+      "file": "src/main/java/org/openhitls/crypto/jce/key/factory/McElieceKeyFactory.java",
+      "line": "26-31",
+      "severity": "high",
+      "title": "KeyFactory treats raw bytes as PKCS#8/X.509 without parsing",
+      "reviewers": "CODEX",
+      "confidence": "trusted",
+      "problem": "The KeyFactory accepts PKCS8EncodedKeySpec and X509EncodedKeySpec, but never parses or validates any ASN.1 wrapper. It just copies the byte array and later re-exports the same bytes as if they were standard encodings.",
+      "code": "} else if (keySpec instanceof PKCS8EncodedKeySpec) {\n    try {\n        return new McEliecePrivateKeyImpl(((PKCS8EncodedKeySpec) keySpec).getEncoded());\n    } catch (Exception e) {\n        throw new InvalidKeySpecException(\"Invalid PKCS8EncodedKeySpec for Classic McEliece private key\", e);\n    }\n}\n...\n} else if (keySpec instanceof X509EncodedKeySpec) {\n    try {\n        return new McEliecePublicKeyImpl(((X509EncodedKeySpec) keySpec).getEncoded());\n    } catch (Exception e) {\n        throw new InvalidKeySpecException(\"Invalid X509EncodedKeySpec for Classic McEliece public key\", e);\n    }\n}\n...\nif (keySpec.isAssignableFrom(X509EncodedKeySpec.class)) {\n    return keySpec.cast(new X509EncodedKeySpec(key.getEncoded()));\n}\n...\nif (keySpec.isAssignableFrom(PKCS8EncodedKeySpec.class)) {\n    return keySpec.cast(new PKCS8EncodedKeySpec(key.getEncoded()));\n}",
+      "fix": "@Override\nprotected PrivateKey engineGeneratePrivate(KeySpec keySpec) throws InvalidKeySpecException {\n    if (keySpec instanceof McEliecePrivateKeySpec) {\n        McEliecePrivateKeySpec spec = (McEliecePrivateKeySpec) keySpec;\n        return new McEliecePrivateKeyImpl(spec.getParams(), spec.getEncoded());\n    }\n    if (keySpec instanceof PKCS8EncodedKeySpec) {\n        throw new InvalidKeySpecException(\n                \"PKCS#8 encoding is not implemented for Classic McEliece keys; use McEliecePrivateKeySpec\");\n    }\n    throw new InvalidKeySpecException(\"Unsupported key specification: \" + keySpec.getClass().getName());\n}\n\n@Override\nprotected PublicKey engineGeneratePublic(KeySpec keySpec) throws InvalidKeySpecException {\n    if (keySpec instanceof McEliecePublicKeySpec) {\n        McEliecePublicKeySpec spec = (McEliecePublicKeySpec) keySpec;\n        return new McEliecePublicKeyImpl(spec.getParams(), spec.getEncoded());\n    }\n    if (keySpec instanceof X509EncodedKeySpec) {\n        throw new InvalidKeySpecException(\n                \"X.509 encoding is not implemented for Classic McEliece keys; use McEliecePublicKeySpec\");\n    }\n    throw new InvalidKeySpecException(\"Unsupported key specification: \" + keySpec.getClass().getName());\n}\n\n@Override\nprotected <T extends KeySpec> T engineGetKeySpec(Key key, Class<T> keySpec) throws InvalidKeySpecException {\n    if (keySpec.isAssignableFrom(X509EncodedKeySpec.class)\n            || keySpec.isAssignableFrom(PKCS8EncodedKeySpec.class)) {\n        throw new InvalidKeySpecException(\n                \"Standard X.509/PKCS#8 encodings are not implemented for Classic McEliece keys\");\n    }\n    // existing McEliecePublicKeySpec / McEliecePrivateKeySpec handling stays here\n}"
+    },
+    {
+      "file": "src/test/java/org/openhitls/crypto/jce/pqc/FrodoKEMTest.java",
+      "line": "44",
+      "severity": "high",
+      "title": "Test suite uses incorrect provider name",
+      "reviewers": "CODEX",
+      "confidence": "trusted",
+      "problem": "These calls request provider \"HiTls4j\", but the provider is registered as \"HITLS4J\" (case-sensitive). Every getInstance(..., \"HiTls4j\") call will throw NoSuchProviderException and the tests will fail. The same issue exists in McElieceTest.",
+      "code": "KeyPairGenerator kpg = KeyPairGenerator.getInstance(\"FrodoKEM\", \"HiTls4j\");\nKeyAgreement senderAgreement = KeyAgreement.getInstance(\"FrodoKEM\", \"HiTls4j\");\nKeyAgreement receiverAgreement = KeyAgreement.getInstance(\"FrodoKEM\", \"HiTls4j\");",
+      "fix": "KeyPairGenerator kpg = KeyPairGenerator.getInstance(\"FrodoKEM\", HiTls4jProvider.PROVIDER_NAME);\nKeyAgreement senderAgreement = KeyAgreement.getInstance(\"FrodoKEM\", HiTls4jProvider.PROVIDER_NAME);\nKeyAgreement receiverAgreement = KeyAgreement.getInstance(\"FrodoKEM\", HiTls4jProvider.PROVIDER_NAME);"
+    },
+    {
+      "file": "src/test/java/org/openhitls/crypto/jce/pqc/McElieceTest.java",
+      "line": "40",
+      "severity": "high",
+      "title": "Test suite uses incorrect provider name",
+      "reviewers": "CODEX",
+      "confidence": "trusted",
+      "problem": "The test requests provider \"HiTls4j\" instead of the registered \"HITLS4J\". Because provider lookup is case-sensitive, the test will fail with NoSuchProviderException.",
+      "code": "KeyPairGenerator kpg = KeyPairGenerator.getInstance(\"Classic-McEliece\", \"HiTls4j\");\nKeyAgreement senderAgreement = KeyAgreement.getInstance(\"Classic-McEliece\", \"HiTls4j\");\nKeyAgreement receiverAgreement = KeyAgreement.getInstance(\"Classic-McEliece\", \"HiTls4j\");",
+      "fix": "KeyPairGenerator kpg = KeyPairGenerator.getInstance(\"Classic-McEliece\", HiTls4jProvider.PROVIDER_NAME);\nKeyAgreement senderAgreement = KeyAgreement.getInstance(\"Classic-McEliece\", HiTls4jProvider.PROVIDER_NAME);\nKeyAgreement receiverAgreement = KeyAgreement.getInstance(\"Classic-McEliece\", HiTls4jProvider.PROVIDER_NAME);"
+    },
+    {
+      "file": "src/main/java/org/openhitls/crypto/jce/keyagreement/FrodoKEMKeyAgreement.java",
+      "line": "52-55",
+      "severity": "medium",
+      "title": "Missing null check on key parameters causes NullPointerException",
+      "reviewers": "CODEX",
+      "confidence": "trusted",
+      "problem": "The init method assumes every FrodoKEM key carries a non-null FrodoKEMParameterSpec. Keys created from the PKCS8EncodedKeySpec/X509EncodedKeySpec constructors have params=null, causing a NullPointerException instead of a proper InvalidKeyException. The same issue exists in McElieceKeyAgreement.",
+      "code": "} else if (frodoKemPrivateKey != null) {\n    parameterSet = frodoKemPrivateKey.getParams().getName();\n} else if (frodoKemPublicKey != null) {\n    parameterSet = frodoKemPublicKey.getParams().getName();\n}",
+      "fix": "FrodoKEMParameterSpec keyParams = null;\nif (frodoKemPrivateKey != null) {\n    keyParams = frodoKemPrivateKey.getParams();\n} else if (frodoKemPublicKey != null) {\n    keyParams = frodoKemPublicKey.getParams();\n}\n\nif (params != null) {\n    parameterSet = params.getName();\n    if (keyParams != null && !parameterSet.equals(keyParams.getName())) {\n        throw new InvalidKeyException(\"Key parameter set does not match the supplied FrodoKEM parameters\");\n    }\n} else if (keyParams != null) {\n    parameterSet = keyParams.getName();\n} else {\n    throw new InvalidKeyException(\"FrodoKEM key is missing parameter metadata\");\n}"
+    },
+    {
+      "file": "src/main/java/org/openhitls/crypto/jce/keyagreement/McElieceKeyAgreement.java",
+      "line": "55-58",
+      "severity": "medium",
+      "title": "Missing null check on key parameters causes NullPointerException",
+      "reviewers": "CODEX",
+      "confidence": "trusted",
+      "problem": "The init method dereferences getParams() without checking for null. Keys constructed from the encoded-key paths have params=null, causing a NullPointerException instead of a checked InvalidKeyException.",
+      "code": "} else if (mcEliecePrivateKey != null) {\n    parameterSet = mcEliecePrivateKey.getParams().getName();\n} else if (mcEliecePublicKey != null) {\n    parameterSet = mcEliecePublicKey.getParams().getName();\n}",
+      "fix": "McElieceParameterSpec keyParams = null;\nif (mcEliecePrivateKey != null) {\n    keyParams = mcEliecePrivateKey.getParams();\n} else if (mcEliecePublicKey != null) {\n    keyParams = mcEliecePublicKey.getParams();\n}\n\nif (params != null) {\n    parameterSet = params.getName();\n    if (keyParams != null && !parameterSet.equals(keyParams.getName())) {\n        throw new InvalidKeyException(\"Key parameter set does not match the supplied Classic McEliece parameters\");\n    }\n} else if (keyParams != null) {\n    parameterSet = keyParams.getName();\n} else {\n    throw new InvalidKeyException(\"Classic McEliece key is missing parameter metadata\");\n}"
+    },
+    {
+      "file": "src/main/java/org/openhitls/crypto/jce/keyagreement/FrodoKEMKeyAgreement.java",
+      "line": "116",
+      "severity": "medium",
+      "title": "Incorrect exception type thrown for short buffers",
+      "reviewers": "GEMINI",
+      "confidence": "trusted",
+      "problem": "When generating a secret into an existing array that is too small, the implementation throws IllegalStateException. According to the JCE contract for KeyAgreementSpi.engineGenerateSecret(byte[], int), a javax.crypto.ShortBufferException must be thrown to allow calling applications to handle the size dynamically. The same issue exists in McElieceKeyAgreement.",
+      "code": "if (sharedSecret.length - offset < secret.length) {\n    throw new IllegalStateException(\"Insufficient space in sharedSecret array\");\n}",
+      "fix": "if (sharedSecret.length - offset < secret.length) {\n    throw new javax.crypto.ShortBufferException(\"Insufficient space in sharedSecret array\");\n}"
+    },
+    {
+      "file": "src/main/java/org/openhitls/crypto/jce/keyagreement/McElieceKeyAgreement.java",
+      "line": "119",
+      "severity": "medium",
+      "title": "Incorrect exception type thrown for short buffers",
+      "reviewers": "GEMINI",
+      "confidence": "trusted",
+      "problem": "When generating a secret into an existing array that is too small, the implementation throws IllegalStateException. According to the JCE contract for KeyAgreementSpi.engineGenerateSecret(byte[], int), a javax.crypto.ShortBufferException must be thrown.",
+      "code": "if (sharedSecret.length - offset < secret.length) {\n    throw new IllegalStateException(\"Insufficient space in sharedSecret array\");\n}",
+      "fix": "if (sharedSecret.length - offset < secret.length) {\n    throw new javax.crypto.ShortBufferException(\"Insufficient space in sharedSecret array\");\n}"
+    },
+    {
+      "file": "src/main/java/org/openhitls/crypto/jce/keyagreement/FrodoKEMKeyAgreement.java",
+      "line": "97-100",
+      "severity": "low",
+      "title": "Ciphertext not cleared after use, potential key material leak",
+      "reviewers": "CLAUDE",
+      "confidence": "likely",
+      "problem": "In engineGenerateSecret(), the shared key is cleared after use but the ciphertext field is not. The ciphertext contains cryptographic material that should be cleared from memory after use to prevent potential leakage.",
+      "code": "if (sharedKey != null) {\n    byte[] result = sharedKey;\n    sharedKey = null;  // Cleared after use\n    return result;\n}",
+      "fix": "if (sharedKey != null) {\n    byte[] result = sharedKey;\n    sharedKey = null;\n    if (ciphertext != null) {\n        Arrays.fill(ciphertext, (byte) 0);\n        ciphertext = null;\n    }\n    return result;\n}"
+    },
+    {
+      "file": "src/main/java/org/openhitls/crypto/jce/keyagreement/McElieceKeyAgreement.java",
+      "line": "100-103",
+      "severity": "low",
+      "title": "Ciphertext not cleared after use, potential key material leak",
+      "reviewers": "CLAUDE",
+      "confidence": "likely",
+      "problem": "In engineGenerateSecret(), the shared key is cleared after use but the ciphertext field is not. The ciphertext contains cryptographic material that should be cleared from memory after use.",
+      "code": "if (sharedKey != null) {\n    byte[] result = sharedKey;\n    sharedKey = null;  // Cleared after use\n    return result;\n}",
+      "fix": "if (sharedKey != null) {\n    byte[] result = sharedKey;\n    sharedKey = null;\n    if (ciphertext != null) {\n        Arrays.fill(ciphertext, (byte) 0);\n        ciphertext = null;\n    }\n    return result;\n}"
+    },
+    {
+      "file": "src/main/java/org/openhitls/crypto/jce/key/FrodoKEMCiphertextKey.java",
+      "line": "8-10",
+      "severity": "low",
+      "title": "Missing null check in constructor could allow null ciphertext",
+      "reviewers": "CLAUDE",
+      "confidence": "likely",
+      "problem": "The constructor accepts null ciphertext and stores it without validation. While getEncoded() handles null by returning null, allowing null ciphertext could lead to unexpected behavior in cryptographic operations.",
+      "code": "public FrodoKEMCiphertextKey(byte[] ciphertext) {\n    this.ciphertext = ciphertext != null ? ciphertext.clone() : null;\n}",
+      "fix": "public FrodoKEMCiphertextKey(byte[] ciphertext) {\n    if (ciphertext == null) {\n        throw new IllegalArgumentException(\"Ciphertext cannot be null\");\n    }\n    this.ciphertext = ciphertext.clone();\n}"
+    },
+    {
+      "file": "src/main/java/org/openhitls/crypto/jce/key/McElieceCiphertextKey.java",
+      "line": "8-10",
+      "severity": "low",
+      "title": "Missing null check in constructor could allow null ciphertext",
+      "reviewers": "CLAUDE",
+      "confidence": "likely",
+      "problem": "The constructor accepts null ciphertext and stores it without validation. Allowing null ciphertext could lead to unexpected behavior in cryptographic operations.",
+      "code": "public McElieceCiphertextKey(byte[] ciphertext) {\n    this.ciphertext = ciphertext != null ? ciphertext.clone() : null;\n}",
+      "fix": "public McElieceCiphertextKey(byte[] ciphertext) {\n    if (ciphertext == null) {\n        throw new IllegalArgumentException(\"Ciphertext cannot be null\");\n    }\n    this.ciphertext = ciphertext.clone();\n}"
+    },
+    {
+      "file": "src/main/java/org/openhitls/crypto/jce/spec/FrodoKEMGenParameterSpec.java",
+      "line": "8-10",
+      "severity": "low",
+      "title": "Missing validation of parameter name in constructor",
+      "reviewers": "CLAUDE",
+      "confidence": "likely",
+      "problem": "The constructor accepts any string without validating it's a valid FrodoKEM parameter set name. This allows creation of invalid parameter specs that will fail later.",
+      "code": "public FrodoKEMGenParameterSpec(String name) {\n    this.name = name;\n}",
+      "fix": "public FrodoKEMGenParameterSpec(String name) {\n    if (name == null) {\n        throw new NullPointerException(\"name cannot be null\");\n    }\n    if (!name.matches(\"^FrodoKEM-(640|976|1344)-(SHAKE|AES)$\")) {\n        throw new IllegalArgumentException(\"Invalid FrodoKEM parameter set: \" + name);\n    }\n    this.name = name;\n}"
+    },
+    {
+      "file": "src/main/java/org/openhitls/crypto/jce/spec/McElieceGenParameterSpec.java",
+      "line": "8-10",
+      "severity": "low",
+      "title": "Missing validation of parameter name in constructor",
+      "reviewers": "CLAUDE",
+      "confidence": "likely",
+      "problem": "The constructor accepts any string without validating it's a valid McEliece parameter set name.",
+      "code": "public McElieceGenParameterSpec(String name) {\n    this.name = name;\n}",
+      "fix": "public McElieceGenParameterSpec(String name) {\n    if (name == null) {\n        throw new NullPointerException(\"name cannot be null\");\n    }\n    if (!name.matches(\"^McEliece-(6688128|6688128f|6688128pc|6688128pcf|6960119|6960119f|6960119pc|6960119pcf|8192128|8192128f|8192128pc|8192128pcf)$\")) {\n        throw new IllegalArgumentException(\"Invalid McEliece parameter set: \" + name);\n    }\n    this.name = name;\n}"
+    }
+  ]
+}

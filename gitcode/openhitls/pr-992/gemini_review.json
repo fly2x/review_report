@@ -1,92 +1,52 @@
 [
   {
     "source": "gemini",
-    "file": "crypto/lms/src/lms_ots.c",
-    "line": "135",
+    "file": "crypto/hbs/hss/src/hss_core.c",
+    "line": "237-239",
     "severity": "critical",
-    "title": "Ignored return value of LmsHash in LmOtsGeneratePublicKey",
-    "problem": "The return value of `LmsHash` is ignored. If the hash calculation fails (e.g., due to hardware failure or resource exhaustion), the function returns `CRYPT_SUCCESS` but the `publicKey` buffer will contain uninitialized or partial data, leading to a compromised key.",
-    "code": "LmsHash(publicKey, buffer, LMS_PBLC_PREFIX_LEN + params.p * params.n);\n    BSL_SAL_FREE(buffer);\n\n    return CRYPT_SUCCESS;",
-    "fix": "ret = LmsHash(publicKey, buffer, LMS_PBLC_PREFIX_LEN + params.p * params.n);\n    BSL_SAL_FREE(buffer);\n\n    return ret;"
+    "title": "Buffer overflow due to integer underflow in destination size calculation for memcpy_s",
+    "problem": "In `HssGenerateSignedPubKey`, `memcpy_s` is used to copy `parentSig` and `childPubKey` into `output->data` without verifying that `*output->len` is sufficiently large. If `*output->len < parentSigLen`, the expression `*output->len - parentSigLen` will result in an integer underflow, yielding a massive `destMax` value for the second `memcpy_s`. Furthermore, `output->data + parentSigLen` will point to out-of-bounds memory where 56 bytes (`LMS_PUBKEY_LEN`) will be written, leading to a severe buffer overflow. The return values of `memcpy_s` are also unsafely ignored.",
+    "code": "(void)memcpy_s(output->data, *output->len, parentSig, parentSigLen);\n    (void)memcpy_s(output->data + parentSigLen, *output->len - parentSigLen, childPubKey, LMS_PUBKEY_LEN);\n    *output->len = parentSigLen + LMS_PUBKEY_LEN;",
+    "fix": "if (*output->len < parentSigLen + LMS_PUBKEY_LEN) {\n        BSL_SAL_Free(parentSig);\n        return CRYPT_LMS_BUFFER_TOO_SMALL;\n    }\n\n    if (memcpy_s(output->data, *output->len, parentSig, parentSigLen) != 0) {\n        BSL_SAL_Free(parentSig);\n        return CRYPT_HSS_SIGN_FAIL;\n    }\n    if (memcpy_s(output->data + parentSigLen, *output->len - parentSigLen, childPubKey, LMS_PUBKEY_LEN) != 0) {\n        BSL_SAL_Free(parentSig);\n        return CRYPT_HSS_SIGN_FAIL;\n    }\n    *output->len = parentSigLen + LMS_PUBKEY_LEN;"
   },
   {
     "source": "gemini",
-    "file": "crypto/lms/src/lms_ots.c",
-    "line": "171",
+    "file": "crypto/hbs/hss/src/hss_tree.c",
+    "line": "268",
     "severity": "high",
-    "title": "Ignored return value of LmsHash in LmOtsComputeQ",
-    "problem": "The return value of `LmsHash` is ignored when computing the message digest `Q`. Failure to compute the hash correctly will result in an invalid signature or verification failure, but the function proceeds as if successful.",
-    "code": "LmsHash(Q, prefix, LMS_MESG_PREFIX_LEN(ctx->n) + messageLen);\n    BSL_SAL_FREE(prefix);\n\n    LmsPutBigendian(&Q[ctx->n], LmOtsComputeChecksum(Q, ctx->n, ctx->w, ctx->ls), LMS_CHECKSUM_LEN);\n    return CRYPT_SUCCESS;",
-    "fix": "int32_t ret = LmsHash(Q, prefix, LMS_MESG_PREFIX_LEN(ctx->n) + messageLen);\n    BSL_SAL_FREE(prefix);\n    if (ret != CRYPT_SUCCESS) {\n        return ret;\n    }\n\n    LmsPutBigendian(&Q[ctx->n], LmOtsComputeChecksum(Q, ctx->n, ctx->w, ctx->ls), LMS_CHECKSUM_LEN);\n    return CRYPT_SUCCESS;"
+    "title": "Unsafe memory function memset used instead of memset_s",
+    "problem": "The code uses the unsafe `memset` function instead of the required `memset_s` from `libboundscheck` as per project coding conventions.",
+    "code": "memset(&parsed, 0, sizeof(parsed));",
+    "fix": "(void)memset_s(&parsed, sizeof(parsed), 0, sizeof(parsed));"
   },
   {
     "source": "gemini",
-    "file": "crypto/lms/src/lms_ots.c",
-    "line": "197",
+    "file": "crypto/hbs/hss/src/hss_utils.c",
+    "line": "47",
     "severity": "high",
-    "title": "Ignored return value of LmsHash in LmOtsSignChains",
-    "problem": "`LmsHash` return value is ignored inside the signature chain generation loop. If any hash step fails, the resulting signature chain `tmp` will be invalid, creating a broken signature.",
-    "code": "(void)memcpy_s(iterBuf + LMS_ITER_PREV_OFFSET, ctx->n, tmp, ctx->n);\n            LmsHash(tmp, iterBuf, LMS_ITER_LEN(ctx->n));\n        }\n\n        (void)memcpy_s(&signature[LMS_TYPE_LEN + ctx->n + ctx->n * i], ctx->n, tmp, ctx->n);",
-    "fix": "(void)memcpy_s(iterBuf + LMS_ITER_PREV_OFFSET, ctx->n, tmp, ctx->n);\n            if (LmsHash(tmp, iterBuf, LMS_ITER_LEN(ctx->n)) != CRYPT_SUCCESS) {\n                return CRYPT_LMS_HASH_FAIL;\n            }\n        }\n\n        (void)memcpy_s(&signature[LMS_TYPE_LEN + ctx->n + ctx->n * i], ctx->n, tmp, ctx->n);"
+    "title": "Unsafe memory function memset used instead of memset_s",
+    "problem": "The code uses the unsafe `memset` function instead of the required `memset_s` from `libboundscheck` as per project coding conventions.",
+    "code": "memset(para, 0, sizeof(HSS_Para));",
+    "fix": "(void)memset_s(para, sizeof(HSS_Para), 0, sizeof(HSS_Para));"
   },
   {
     "source": "gemini",
-    "file": "crypto/lms/src/lms_ots.c",
-    "line": "289",
+    "file": "crypto/hbs/hss/src/hss_utils.c",
+    "line": "141",
     "severity": "high",
-    "title": "Ignored return value of LmsHash in LmOtsValidateChains",
-    "problem": "`LmsHash` return value is ignored during signature validation chain recomputation. This can lead to incorrect validation results (false positives or false negatives) if the hash function fails.",
-    "code": "(void)memcpy_s(iterBuf + LMS_ITER_PREV_OFFSET, ctx->n, tmp, ctx->n);\n            LmsHash(tmp, iterBuf, LMS_ITER_LEN(ctx->n));\n        }\n\n        (void)memcpy_s(finalBuf + LMS_PBLC_PREFIX_LEN + i * ctx->n, ctx->n, tmp, ctx->n);",
-    "fix": "(void)memcpy_s(iterBuf + LMS_ITER_PREV_OFFSET, ctx->n, tmp, ctx->n);\n            if (LmsHash(tmp, iterBuf, LMS_ITER_LEN(ctx->n)) != CRYPT_SUCCESS) {\n                return CRYPT_LMS_HASH_FAIL;\n            }\n        }\n\n        (void)memcpy_s(finalBuf + LMS_PBLC_PREFIX_LEN + i * ctx->n, ctx->n, tmp, ctx->n);"
+    "title": "Unsafe memory function memset used instead of memset_s",
+    "problem": "The code uses the unsafe `memset` function instead of the required `memset_s` from `libboundscheck` as per project coding conventions.",
+    "code": "memset(compressed, 0, HSS_COMPRESSED_PARAMS_LEN);",
+    "fix": "(void)memset_s(compressed, HSS_COMPRESSED_PARAMS_LEN, 0, HSS_COMPRESSED_PARAMS_LEN);"
   },
   {
     "source": "gemini",
-    "file": "crypto/lms/src/lms_ots.c",
-    "line": "333",
+    "file": "crypto/hbs/lms/src/lms_hash.c",
+    "line": "444",
     "severity": "high",
-    "title": "Ignored return value of LmsHash in LmOtsValidateSignature",
-    "problem": "The final hash step to compute the public key candidate in `LmOtsValidateSignature` ignores the return value of `LmsHash`.",
-    "code": "LmsHash(computedPubKey, finalBuf, LMS_PBLC_PREFIX_LEN + params.p * params.n);\n\n    LmsZeroize(Q, sizeof(Q));\n    BSL_SAL_FREE(finalBuf);\n\n    return CRYPT_SUCCESS;",
-    "fix": "int32_t ret2 = LmsHash(computedPubKey, finalBuf, LMS_PBLC_PREFIX_LEN + params.p * params.n);\n\n    LmsZeroize(Q, sizeof(Q));\n    BSL_SAL_FREE(finalBuf);\n\n    return ret2;"
-  },
-  {
-    "source": "gemini",
-    "file": "crypto/lms/src/hss_core.c",
-    "line": "188",
-    "severity": "medium",
-    "title": "Incorrect memory free macro BSL_SAL_Free",
-    "problem": "The code uses `BSL_SAL_Free` (mixed case) instead of `BSL_SAL_FREE` (screaming snake case), which is used consistently elsewhere in the project and in `lms_core.c`. This is likely a compilation or linking error if the mixed-case alias doesn't exist.",
-    "code": "ret = HssSignChildPubKey(&parentOutput, signCtx, parent, childPubKey, cache);\n    if (ret != CRYPT_SUCCESS) {\n        BSL_SAL_Free(parentSig);\n        return ret;\n    }\n\n    (void)memcpy_s(output->data, *output->len, parentSig, parentSigLen);\n    (void)memcpy_s(output->data + parentSigLen, *output->len - parentSigLen, childPubKey, LMS_PUBKEY_LEN);\n    *output->len = parentSigLen + LMS_PUBKEY_LEN;\n\n    BSL_SAL_Free(parentSig);\n    return CRYPT_SUCCESS;\n}",
-    "fix": "ret = HssSignChildPubKey(&parentOutput, signCtx, parent, childPubKey, cache);\n    if (ret != CRYPT_SUCCESS) {\n        BSL_SAL_FREE(parentSig);\n        return ret;\n    }\n\n    (void)memcpy_s(output->data, *output->len, parentSig, parentSigLen);\n    (void)memcpy_s(output->data + parentSigLen, *output->len - parentSigLen, childPubKey, LMS_PUBKEY_LEN);\n    *output->len = parentSigLen + LMS_PUBKEY_LEN;\n\n    BSL_SAL_FREE(parentSig);\n    return CRYPT_SUCCESS;\n}"
-  },
-  {
-    "source": "gemini",
-    "file": "crypto/lms/src/hss_api.c",
-    "line": "36",
-    "severity": "medium",
-    "title": "Incorrect memory free macro BSL_SAL_Free",
-    "problem": "`BSL_SAL_Free` is used instead of the standard `BSL_SAL_FREE`. This occurs multiple times in this file.",
-    "code": "ctx->para = (HSS_Para *)BSL_SAL_Calloc(1, sizeof(HSS_Para));\n    if (ctx->para == NULL) {\n        BSL_SAL_Free(ctx);\n        return NULL;\n    }",
-    "fix": "ctx->para = (HSS_Para *)BSL_SAL_Calloc(1, sizeof(HSS_Para));\n    if (ctx->para == NULL) {\n        BSL_SAL_FREE(ctx);\n        return NULL;\n    }"
-  },
-  {
-    "source": "gemini",
-    "file": "crypto/lms/src/hss_api.c",
-    "line": "46",
-    "severity": "medium",
-    "title": "Incorrect memory free macro BSL_SAL_Free in CRYPT_HSS_NewCtx",
-    "problem": "`BSL_SAL_Free` is used instead of `BSL_SAL_FREE`.",
-    "code": "if (ctx->publicKey == NULL || ctx->privateKey == NULL) {\n        if (ctx->publicKey != NULL) {\n            BSL_SAL_Free(ctx->publicKey);\n        }\n        if (ctx->privateKey != NULL) {\n            BSL_SAL_Free(ctx->privateKey);\n        }\n        BSL_SAL_Free(ctx->para);\n        BSL_SAL_Free(ctx);\n        return NULL;\n    }",
-    "fix": "if (ctx->publicKey == NULL || ctx->privateKey == NULL) {\n        if (ctx->publicKey != NULL) {\n            BSL_SAL_FREE(ctx->publicKey);\n        }\n        if (ctx->privateKey != NULL) {\n            BSL_SAL_FREE(ctx->privateKey);\n        }\n        BSL_SAL_FREE(ctx->para);\n        BSL_SAL_FREE(ctx);\n        return NULL;\n    }"
-  },
-  {
-    "source": "gemini",
-    "file": "crypto/lms/src/hss_api.c",
-    "line": "87",
-    "severity": "medium",
-    "title": "Incorrect memory free macro BSL_SAL_Free in CRYPT_HSS_FreeCtx",
-    "problem": "`BSL_SAL_Free` is used consistently throughout `CRYPT_HSS_FreeCtx`.",
-    "code": "if (ctx->privateKey != NULL) {\n        LmsZeroize(ctx->privateKey, HSS_PRVKEY_LEN);\n        BSL_SAL_Free(ctx->privateKey);\n    }\n\n    if (ctx->publicKey != NULL) {\n        BSL_SAL_Free(ctx->publicKey);\n    }\n\n    if (ctx->para != NULL) {\n        LmsZeroize(ctx->para, sizeof(HSS_Para));\n        BSL_SAL_Free(ctx->para);\n    }\n\n    // Free cached trees\n    for (uint32_t i = 0; i < HSS_MAX_LEVELS; i++) {\n        if (ctx->cachedTrees[i] != NULL) {\n            LmsZeroize(ctx->cachedTrees[i], ctx->cachedTreeSizes[i]);\n            BSL_SAL_Free(ctx->cachedTrees[i]);\n        }\n    }\n\n    BSL_SAL_Free(ctx);",
-    "fix": "if (ctx->privateKey != NULL) {\n        LmsZeroize(ctx->privateKey, HSS_PRVKEY_LEN);\n        BSL_SAL_FREE(ctx->privateKey);\n    }\n\n    if (ctx->publicKey != NULL) {\n        BSL_SAL_FREE(ctx->publicKey);\n    }\n\n    if (ctx->para != NULL) {\n        LmsZeroize(ctx->para, sizeof(HSS_Para));\n        BSL_SAL_FREE(ctx->para);\n    }\n\n    // Free cached trees\n    for (uint32_t i = 0; i < HSS_MAX_LEVELS; i++) {\n        if (ctx->cachedTrees[i] != NULL) {\n            LmsZeroize(ctx->cachedTrees[i], ctx->cachedTreeSizes[i]);\n            BSL_SAL_FREE(ctx->cachedTrees[i]);\n        }\n    }\n\n    BSL_SAL_FREE(ctx);"
+    "title": "Unsafe memory function memset used instead of memset_s",
+    "problem": "The code uses the unsafe `memset` function instead of the required `memset_s` from `libboundscheck` as per project coding conventions.",
+    "code": "memset(para, 0, sizeof(LMS_Para));",
+    "fix": "(void)memset_s(para, sizeof(LMS_Para), 0, sizeof(LMS_Para));"
   }
 ]

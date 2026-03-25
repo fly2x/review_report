@@ -11,133 +11,177 @@
     ]
   },
   "statistics": {
-    "total": 11,
+    "total": 15,
     "critical": 1,
-    "high": 5,
-    "medium": 2,
-    "low": 3
+    "high": 9,
+    "medium": 5,
+    "low": 0
   },
   "issues": [
     {
-      "file": "crypto/lms/src/lms_ots.c",
-      "line": "136",
+      "file": "crypto/hbs/hss/src/hss_core.c",
+      "line": "237-239",
       "severity": "critical",
-      "title": "Ignored return value of LmsHash in LmOtsGeneratePublicKey",
+      "title": "Buffer overflow due to integer underflow in memcpy_s destination size calculation",
       "reviewers": "GEMINI",
       "confidence": "trusted",
-      "problem": "The return value of `LmsHash` is ignored when generating the public key. If the hash calculation fails (e.g., due to hardware failure or resource exhaustion), the function returns `CRYPT_SUCCESS` but the `publicKey` buffer will contain uninitialized or partial data, leading to a compromised key.",
-      "code": "LmsHash(publicKey, buffer, LMS_PBLC_PREFIX_LEN + params.p * params.n);\nBSL_SAL_FREE(buffer);\n\nreturn CRYPT_SUCCESS;",
-      "fix": "ret = LmsHash(publicKey, buffer, LMS_PBLC_PREFIX_LEN + params.p * params.n);\nBSL_SAL_FREE(buffer);\n\nreturn ret;"
+      "problem": "In HssGenerateSignedPubKey, the memcpy_s calls do not validate that output->len is large enough to hold parentSigLen + LMS_PUBKEY_LEN. When *output->len < parentSigLen, the expression *output->len - parentSigLen underflows to a huge value, and output->data + parentSigLen points out-of-bounds, allowing a buffer overflow of 56 bytes (LMS_PUBKEY_LEN). Additionally, the memcpy_s return values are ignored, preventing error detection.",
+      "code": "(void)memcpy_s(output->data, *output->len, parentSig, parentSigLen);\n(void)memcpy_s(output->data + parentSigLen, *output->len - parentSigLen, childPubKey, LMS_PUBKEY_LEN);\n*output->len = parentSigLen + LMS_PUBKEY_LEN;",
+      "fix": "if (*output->len < parentSigLen + LMS_PUBKEY_LEN) {\n    BSL_SAL_Free(parentSig);\n    return CRYPT_LMS_BUFFER_TOO_SMALL;\n}\n\nif (memcpy_s(output->data, *output->len, parentSig, parentSigLen) != 0) {\n    BSL_SAL_Free(parentSig);\n    return CRYPT_HSS_SIGN_FAIL;\n}\nif (memcpy_s(output->data + parentSigLen, *output->len - parentSigLen, childPubKey, LMS_PUBKEY_LEN) != 0) {\n    BSL_SAL_Free(parentSig);\n    return CRYPT_HSS_SIGN_FAIL;\n}\n*output->len = parentSigLen + LMS_PUBKEY_LEN;"
     },
     {
-      "file": "crypto/lms/src/lms_ots.c",
-      "line": "172",
+      "file": "crypto/hbs/hss/src/hss_api.c",
+      "line": "41-42",
       "severity": "high",
-      "title": "Ignored return value of LmsHash in LmOtsComputeQ",
+      "title": "HSS key export returns uninitialized buffers and writable aliases to internal key state",
+      "reviewers": "CODEX",
+      "confidence": "trusted",
+      "problem": "CRYPT_HSS_NewCtx allocates zero-filled key buffers before any key is generated, and the export APIs only check for NULL, allowing \"export\" of all-zero keys. More critically, CRYPT_HSS_GetPrvKey and CRYPT_HSS_GetPubKey use BSL_PARAM_InitValue to point the caller at ctx->privateKey/ctx->publicKey instead of copying into caller-owned memory, allowing the caller to mutate the live key material in place.",
+      "code": "ctx->publicKey = (uint8_t *)BSL_SAL_Calloc(1, HSS_PUBKEY_LEN);\nctx->privateKey = (uint8_t *)BSL_SAL_Calloc(1, HSS_PRVKEY_LEN);\n\nint32_t CRYPT_HSS_GetPrvKey(CRYPT_HSS_Ctx *ctx, BSL_Param *param) {\n    if (ctx->privateKey == NULL) {\n        return CRYPT_HSS_NO_KEY;\n    }\n    BSL_PARAM_InitValue(param, CRYPT_PARAM_HSS_PRVKEY, BSL_PARAM_TYPE_OCTETS, ctx->privateKey, HSS_PRVKEY_LEN);\n    return CRYPT_SUCCESS;\n}",
+      "fix": "ctx->publicKey = NULL;\nctx->privateKey = NULL;\n\nint32_t CRYPT_HSS_GetPrvKey(CRYPT_HSS_Ctx *ctx, BSL_Param *param) {\n    if (ctx == NULL || param == NULL || ctx->privateKey == NULL) {\n        return (ctx == NULL || param == NULL) ? CRYPT_NULL_INPUT : CRYPT_HSS_NO_KEY;\n    }\n    BSL_Param *prv = BSL_PARAM_FindParam(param, CRYPT_PARAM_HSS_PRVKEY);\n    if (prv == NULL || prv->value == NULL || prv->valueLen < HSS_PRVKEY_LEN) {\n        return CRYPT_HSS_INVALID_KEY_LEN;\n    }\n    (void)memcpy_s(prv->value, prv->valueLen, ctx->privateKey, HSS_PRVKEY_LEN);\n    prv->useLen = HSS_PRVKEY_LEN;\n    return CRYPT_SUCCESS;\n}\n\nint32_t CRYPT_HSS_GetPubKey(CRYPT_HSS_Ctx *ctx, BSL_Param *param) {\n    if (ctx == NULL || param == NULL || ctx->publicKey == NULL) {\n        return (ctx == NULL || param == NULL) ? CRYPT_NULL_INPUT : CRYPT_HSS_NO_KEY;\n    }\n    BSL_Param *pub = BSL_PARAM_FindParam(param, CRYPT_PARAM_HSS_PUBKEY);\n    if (pub == NULL || pub->value == NULL || pub->valueLen < HSS_PUBKEY_LEN) {\n        return CRYPT_HSS_INVALID_KEY_LEN;\n    }\n    (void)memcpy_s(pub->value, pub->valueLen, ctx->publicKey, HSS_PUBKEY_LEN);\n    pub->useLen = HSS_PUBKEY_LEN;\n    return CRYPT_SUCCESS;\n}"
+    },
+    {
+      "file": "crypto/hbs/common/hbs_tree.c",
+      "line": "331",
+      "severity": "high",
+      "title": "Integer overflow in tree size allocation",
+      "reviewers": "CLAUDE",
+      "confidence": "trusted",
+      "problem": "The tree size calculation `treeSize = 2u * numLeaves * n` could overflow on 32-bit systems for large trees. While LMS_MAX_HEIGHT is 25, LMS_MAX_PRACTICAL_HEIGHT is 15, and this validation might not be enforced in all code paths reaching HbsLmsTree_GenerateAuthPath.",
+      "code": "size_t treeSize = 2u * numLeaves * n;\nuint8_t *tree = (uint8_t *)BSL_SAL_Calloc(treeSize, 1);",
+      "fix": "/* Check for overflow before calculating tree size */\nif (numLeaves > (SIZE_MAX / (2 * n))) {\n    return CRYPT_LMS_INVALID_PARAM;\n}\nsize_t treeSize = 2u * numLeaves * n;\nuint8_t *tree = (uint8_t *)BSL_SAL_Calloc(treeSize, 1);"
+    },
+    {
+      "file": "crypto/hbs/lms/src/lms_tree.c",
+      "line": "156",
+      "severity": "high",
+      "title": "Integer overflow in tree size allocation",
+      "reviewers": "CLAUDE",
+      "confidence": "trusted",
+      "problem": "The tree size calculation `treeSize = 2 * numLeaves * ctx->n` could overflow on 32-bit systems. While there's a height limit check in LmsParaInit, direct calls to LmsTree_ComputeRoot might bypass this validation.",
+      "code": "uint32_t numLeaves = 1u << ctx->height;\nsize_t treeSize = 2 * numLeaves * ctx->n;\nuint8_t *tree = BSL_SAL_Calloc(treeSize, 1);",
+      "fix": "uint32_t numLeaves = 1u << ctx->height;\n\n/* Check for overflow: treeSize = 2 * numLeaves * n */\nif (numLeaves > (SIZE_MAX / (2 * ctx->n))) {\n    return CRYPT_MEM_ALLOC_FAIL;\n}\nsize_t treeSize = 2 * numLeaves * ctx->n;\nuint8_t *tree = BSL_SAL_Calloc(treeSize, 1);"
+    },
+    {
+      "file": "crypto/hbs/hss/src/hss_tree.c",
+      "line": "268",
+      "severity": "high",
+      "title": "Multi-level HSS verification depends on hidden caller-supplied parameters",
+      "reviewers": "CODEX",
+      "confidence": "trusted",
+      "problem": "HssTree_Verify parses each LMS sub-signature using `para->levelPara[i].sigLen` from the context, but CRYPT_HSS_SetPubKey only records level 0 from the public key. A verifier importing only a public key cannot validate multi-level signatures unless the caller separately supplies every lower-level LMS/LMOTS parameter out of band. The signature already contains the type words needed to derive each LMS signature length dynamically.",
+      "code": "HSS_ParsedSig parsed;\nmemset(&parsed, 0, sizeof(parsed));\nint32_t ret = HssParseSignature(&parsed, para, signature, signatureLen);\n...\nfor (uint32_t i = 0; i < parsed.nspk; i++) {\n    const uint8_t *signedPubKey = parsed.signedPubKeys[i];\n    size_t lmsSigLen = para->levelPara[i].sigLen;",
+      "fix": "static int32_t HssGetLmsSigLenFromSig(const uint8_t *sig, size_t remaining, size_t *lmsSigLen)\n{\n    LmOtsParams ots;\n    uint32_t h, n, height;\n\n    if (remaining < LMS_Q_LEN + LMS_TYPE_LEN) {\n        return CRYPT_HSS_SIGNATURE_PARSE_FAIL;\n    }\n\n    uint32_t otsType = (uint32_t)LmsGetBigendian(sig + LMS_Q_LEN, LMS_TYPE_LEN);\n    if (LmOtsLookupParamSet(otsType, &ots) != CRYPT_SUCCESS) {\n        return CRYPT_HSS_SIGNATURE_PARSE_FAIL;\n    }\n\n    size_t otsSigLen = LMS_TYPE_LEN + ots.n + ots.p * ots.n;\n    if (remaining < LMS_Q_LEN + otsSigLen + LMS_TYPE_LEN) {\n        return CRYPT_HSS_SIGNATURE_PARSE_FAIL;\n    }\n\n    uint32_t lmsType = (uint32_t)LmsGetBigendian(sig + LMS_Q_LEN + otsSigLen, LMS_TYPE_LEN);\n    if (LmsLookupParamSet(lmsType, &h, &n, &height) != CRYPT_SUCCESS) {\n        return CRYPT_HSS_SIGNATURE_PARSE_FAIL;\n    }\n\n    *lmsSigLen = LMS_Q_LEN + otsSigLen + LMS_TYPE_LEN + height * n;\n    return (*lmsSigLen <= remaining) ? CRYPT_SUCCESS : CRYPT_HSS_SIGNATURE_PARSE_FAIL;\n}\n\n/* In HssTree_Verify(): walk the signature with HssGetLmsSigLenFromSig()\n * instead of para->levelPara[i].sigLen */"
+    },
+    {
+      "file": "crypto/hbs/hss/src/hss_tree.c",
+      "line": "268",
+      "severity": "high",
+      "title": "Unsafe memory function memset used instead of memset_s",
       "reviewers": "GEMINI",
       "confidence": "trusted",
-      "problem": "The return value of `LmsHash` is ignored when computing the message digest `Q`. Failure to compute the hash correctly will result in an invalid signature or verification failure, but the function proceeds as if successful.",
-      "code": "LmsHash(Q, prefix, LMS_MESG_PREFIX_LEN(ctx->n) + messageLen);\nBSL_SAL_FREE(prefix);\n\nLmsPutBigendian(&Q[ctx->n], LmOtsComputeChecksum(Q, ctx->n, ctx->w, ctx->ls), LMS_CHECKSUM_LEN);\nreturn CRYPT_SUCCESS;",
-      "fix": "int32_t ret = LmsHash(Q, prefix, LMS_MESG_PREFIX_LEN(ctx->n) + messageLen);\nBSL_SAL_FREE(prefix);\nif (ret != CRYPT_SUCCESS) {\n    return ret;\n}\n\nLmsPutBigendian(&Q[ctx->n], LmOtsComputeChecksum(Q, ctx->n, ctx->w, ctx->ls), LMS_CHECKSUM_LEN);\nreturn CRYPT_SUCCESS;"
+      "problem": "The code uses the unsafe memset function instead of the required memset_s from libboundscheck as per project coding conventions.",
+      "code": "memset(&parsed, 0, sizeof(parsed));",
+      "fix": "(void)memset_s(&parsed, sizeof(parsed), 0, sizeof(parsed));"
     },
     {
-      "file": "crypto/lms/src/lms_ots.c",
-      "line": "198",
+      "file": "crypto/hbs/hss/src/hss_utils.c",
+      "line": "47",
       "severity": "high",
-      "title": "Ignored return value of LmsHash in LmOtsSignChains",
+      "title": "Unsafe memory function memset used instead of memset_s",
       "reviewers": "GEMINI",
       "confidence": "trusted",
-      "problem": "`LmsHash` return value is ignored inside the signature chain generation loop. If any hash step fails, the resulting signature chain `tmp` will be invalid, creating a broken signature.",
-      "code": "(void)memcpy_s(iterBuf + LMS_ITER_PREV_OFFSET, ctx->n, tmp, ctx->n);\nLmsHash(tmp, iterBuf, LMS_ITER_LEN(ctx->n));",
-      "fix": "(void)memcpy_s(iterBuf + LMS_ITER_PREV_OFFSET, ctx->n, tmp, ctx->n);\nif (LmsHash(tmp, iterBuf, LMS_ITER_LEN(ctx->n)) != CRYPT_SUCCESS) {\n    return CRYPT_LMS_HASH_FAIL;\n}"
+      "problem": "The code uses the unsafe memset function instead of the required memset_s from libboundscheck as per project coding conventions.",
+      "code": "memset(para, 0, sizeof(HSS_Para));",
+      "fix": "(void)memset_s(para, sizeof(HSS_Para), 0, sizeof(HSS_Para));"
     },
     {
-      "file": "crypto/lms/src/lms_ots.c",
-      "line": "288",
+      "file": "crypto/hbs/hss/src/hss_utils.c",
+      "line": "141",
       "severity": "high",
-      "title": "Ignored return value of LmsHash in LmOtsValidateChains",
+      "title": "Unsafe memory function memset used instead of memset_s",
       "reviewers": "GEMINI",
       "confidence": "trusted",
-      "problem": "`LmsHash` return value is ignored during signature validation chain recomputation. This can lead to incorrect validation results (false positives or false negatives) if the hash function fails.",
-      "code": "(void)memcpy_s(iterBuf + LMS_ITER_PREV_OFFSET, ctx->n, tmp, ctx->n);\nLmsHash(tmp, iterBuf, LMS_ITER_LEN(ctx->n));",
-      "fix": "(void)memcpy_s(iterBuf + LMS_ITER_PREV_OFFSET, ctx->n, tmp, ctx->n);\nif (LmsHash(tmp, iterBuf, LMS_ITER_LEN(ctx->n)) != CRYPT_SUCCESS) {\n    return CRYPT_LMS_HASH_FAIL;\n}"
+      "problem": "The code uses the unsafe memset function instead of the required memset_s from libboundscheck as per project coding conventions.",
+      "code": "memset(compressed, 0, HSS_COMPRESSED_PARAMS_LEN);",
+      "fix": "(void)memset_s(compressed, HSS_COMPRESSED_PARAMS_LEN, 0, HSS_COMPRESSED_PARAMS_LEN);"
     },
     {
-      "file": "crypto/lms/src/lms_ots.c",
-      "line": "333",
+      "file": "crypto/hbs/lms/src/lms_hash.c",
+      "line": "444",
       "severity": "high",
-      "title": "Ignored return value of LmsHash in LmOtsValidateSignature",
+      "title": "Unsafe memory function memset used instead of memset_s",
       "reviewers": "GEMINI",
       "confidence": "trusted",
-      "problem": "The final hash step to compute the public key candidate in `LmOtsValidateSignature` ignores the return value of `LmsHash`. This can cause incorrect signature validation if the hash fails.",
-      "code": "LmsHash(computedPubKey, finalBuf, LMS_PBLC_PREFIX_LEN + params.p * params.n);\n\nLmsZeroize(Q, sizeof(Q));\nBSL_SAL_FREE(finalBuf);\n\nreturn CRYPT_SUCCESS;",
-      "fix": "int32_t ret2 = LmsHash(computedPubKey, finalBuf, LMS_PBLC_PREFIX_LEN + params.p * params.n);\n\nLmsZeroize(Q, sizeof(Q));\nBSL_SAL_FREE(finalBuf);\n\nreturn ret2;"
+      "problem": "The code uses the unsafe memset function instead of the required memset_s from libboundscheck as per project coding conventions.",
+      "code": "memset(para, 0, sizeof(LMS_Para));",
+      "fix": "(void)memset_s(para, sizeof(LMS_Para), 0, sizeof(LMS_Para));"
     },
     {
-      "file": "crypto/lms/src/hss_utils.c",
-      "line": "360-362",
+      "file": "crypto/hbs/hss/src/hss_utils.c",
+      "line": "276-297",
       "severity": "high",
-      "title": "Wrong height used for HSS tree index calculation",
-      "reviewers": "CODEX",
+      "title": "Integer overflow in HssGetMaxSignatures returns sentinel value that may not be checked",
+      "reviewers": "CLAUDE",
       "confidence": "trusted",
-      "problem": "The loop uses the child height (`para->levelPara[i + 1].height`) instead of the current level height when computing `sigsPerTree[i]`. This miscomputes `treeIndex`/`leafIndex` for non-uniform hierarchies, which can cause LM-OTS key reuse and incorrect capacity tracking. It also lacks overflow checks.",
-      "code": "for (int32_t i = (int32_t)para->levels - 2; i >= 0; i--) {\n    uint32_t childHeight = para->levelPara[i + 1].height;\n    sigsPerTree[i] = sigsPerTree[i + 1] * (1ULL << childHeight);\n}",
-      "fix": "for (int32_t i = (int32_t)para->levels - 2; i >= 0; i--) {\n    uint32_t height = para->levelPara[i].height;\n    if (height > 63 || sigsPerTree[i + 1] > (UINT64_MAX >> height)) {\n        return CRYPT_HSS_INVALID_PARAM;\n    }\n    sigsPerTree[i] = sigsPerTree[i + 1] * (1ULL << height);\n}"
+      "problem": "The function calculates total signatures as product of (1<<height) for all levels. It returns UINT64_MAX on overflow, but callers might not check for this sentinel value. Returning UINT64_MAX could be misinterpreted as a valid (though enormous) signature count.",
+      "code": "uint64_t HssGetMaxSignatures(const HSS_Para *para)\n{\n    if (para == NULL || para->levels == 0) {\n        return 0;\n    }\n\n    uint64_t total = 1;\n    for (uint32_t i = 0; i < para->levels; i++) {\n        uint32_t height = para->levelPara[i].height;\n\n        if (height > LMS_MAX_SAFE_HEIGHT_FOR_UINT64 || total > (UINT64_MAX >> height)) {\n            return UINT64_MAX;  // Return max to indicate overflow\n        }\n\n        total *= (1ULL << height);\n    }\n\n    return total;\n}",
+      "fix": "uint64_t HssGetMaxSignatures(const HSS_Para *para)\n{\n    if (para == NULL || para->levels == 0) {\n        return 0;\n    }\n\n    uint64_t total = 1;\n    for (uint32_t i = 0; i < para->levels; i++) {\n        uint32_t height = para->levelPara[i].height;\n\n        if (height > LMS_MAX_SAFE_HEIGHT_FOR_UINT64) {\n            return 0;  // Invalid - indicates no signatures available\n        }\n        \n        uint64_t signaturesAtLevel = 1ULL << height;\n        \n        if (total > UINT64_MAX / signaturesAtLevel) {\n            return 0;  // Overflow - indicates no signatures available\n        }\n\n        total *= signaturesAtLevel;\n    }\n\n    return total;\n}"
     },
     {
-      "file": "crypto/lms/src/hss_api.c",
-      "line": "373-378",
-      "severity": "medium",
-      "title": "HSS private-key load leaves stale tree cache",
-      "reviewers": "CODEX",
-      "confidence": "trusted",
-      "problem": "After loading a new private key via `CRYPT_HSS_SetPrvKey`, cached Merkle trees from the previous key remain marked valid, so signing can reuse stale trees and produce invalid signatures or key reuse.",
-      "code": "int32_t ret = HssDecompressParamSet(ctx->para, compressed);\nif (ret != CRYPT_SUCCESS) {\n    return ret;\n}\n\nreturn CRYPT_SUCCESS;",
-      "fix": "int32_t ret = HssDecompressParamSet(ctx->para, compressed);\nif (ret != CRYPT_SUCCESS) {\n    return ret;\n}\n\nfor (uint32_t i = 0; i < HSS_MAX_LEVELS; i++) {\n    if (ctx->cachedTrees[i] != NULL) {\n        LmsZeroize(ctx->cachedTrees[i], ctx->cachedTreeSizes[i]);\n        BSL_SAL_Free(ctx->cachedTrees[i]);\n        ctx->cachedTrees[i] = NULL;\n        ctx->cachedTreeSizes[i] = 0;\n    }\n    ctx->treeCacheValid[i] = false;\n}\n\nreturn CRYPT_SUCCESS;"
-    },
-    {
-      "file": "crypto/lms/src/hss_api.c",
-      "line": "191-195",
-      "severity": "medium",
-      "title": "Levels accepted that key format cannot encode",
-      "reviewers": "CODEX",
-      "confidence": "trusted",
-      "problem": "The control API allows up to 8 levels (`HSS_MAX_LEVELS`), but the compressed parameter set in the private key only supports 3 levels (`HSS_MAX_COMPRESSED_LEVELS`), so valid configuration can still fail later in keygen or SetPrvKey.",
-      "code": "if (levels < HSS_MIN_LEVELS || levels > HSS_MAX_LEVELS) {\n    return CRYPT_HSS_INVALID_LEVEL;\n}\nctx->para->levels = levels;",
-      "fix": "if (levels < HSS_MIN_LEVELS || levels > HSS_MAX_LEVELS || levels > HSS_MAX_COMPRESSED_LEVELS) {\n    return CRYPT_HSS_INVALID_LEVEL;\n}\nctx->para->levels = levels;"
-    },
-    {
-      "file": "crypto/lms/src/hss_utils.c",
-      "line": "284-286",
-      "severity": "low",
-      "title": "Master seed not cleared on root-seed hash failure",
-      "reviewers": "CODEX",
-      "confidence": "trusted",
-      "problem": "On hash failure, the stack buffer containing `masterSeed` is returned without zeroization, leaving sensitive material in memory.",
-      "code": "int32_t ret = LmsHash(hash, buffer, HSS_ROOT_SEED_DERIVE_BUF_LEN);\nif (ret != CRYPT_SUCCESS) {\n    return CRYPT_HSS_SEED_DERIVE_FAIL;\n}",
-      "fix": "int32_t ret = LmsHash(hash, buffer, HSS_ROOT_SEED_DERIVE_BUF_LEN);\nif (ret != CRYPT_SUCCESS) {\n    LmsZeroize(buffer, sizeof(buffer));\n    LmsZeroize(hash, sizeof(hash));\n    return CRYPT_HSS_SEED_DERIVE_FAIL;\n}"
-    },
-    {
-      "file": "crypto/lms/src/hss_utils.c",
-      "line": "294-296",
-      "severity": "low",
-      "title": "Master seed not cleared on second hash failure",
-      "reviewers": "CODEX",
-      "confidence": "trusted",
-      "problem": "On the second hash failure in `HssGenerateRootSeed`, the stack buffer containing `masterSeed` is returned without zeroization, leaving sensitive material in memory.",
-      "code": "ret = LmsHash(rootSeed, buffer, HSS_ROOT_SEED_DERIVE_BUF_LEN);\nif (ret != CRYPT_SUCCESS) {\n    return CRYPT_HSS_SEED_DERIVE_FAIL;\n}",
-      "fix": "ret = LmsHash(rootSeed, buffer, HSS_ROOT_SEED_DERIVE_BUF_LEN);\nif (ret != CRYPT_SUCCESS) {\n    LmsZeroize(buffer, sizeof(buffer));\n    LmsZeroize(hash, sizeof(hash));\n    return CRYPT_HSS_SEED_DERIVE_FAIL;\n}"
-    },
-    {
-      "file": "crypto/lms/src/hss_api.c",
+      "file": "crypto/hbs/hss/src/hss_api.c",
       "line": "173-177",
-      "severity": "low",
-      "title": "HSS compare ignores private seed",
+      "severity": "medium",
+      "title": "HSS context comparison explicitly ignores the master seed",
+      "reviewers": "CODEX, CLAUDE",
+      "confidence": "trusted",
+      "problem": "CRYPT_HSS_Cmp compares only the counter and compressed-parameter prefix of the private key and explicitly skips the 32-byte master seed. Two distinct HSS private keys with the same counter therefore compare equal, causing CRYPT_EAL_PkeyCmp() to report false positives. Additionally, the comparison uses memcmp which is not constant-time.",
+      "code": "if (ctx1->privateKey != NULL && ctx2->privateKey != NULL) {\n    // Only compare the counter and parameters, not the secret seed\n    if (memcmp(ctx1->privateKey, ctx2->privateKey, HSS_PRVKEY_SEED_OFFSET) != 0) {\n        return CRYPT_HSS_CMP_FALSE;\n    }\n}",
+      "fix": "/* Compare the full serialized private key using constant-time comparison */\nif (ctx1->privateKey != NULL && ctx2->privateKey != NULL) {\n    if (ctx1->para->prvKeyLen != ctx2->para->prvKeyLen) {\n        return CRYPT_HSS_CMP_FALSE;\n    }\n    int result = CRYPT_Memcmp(ctx1->privateKey, ctx2->privateKey, HSS_PRVKEY_LEN);\n    if (result != 0) {\n        return CRYPT_HSS_CMP_FALSE;\n    }\n}"
+    },
+    {
+      "file": "crypto/hbs/lms/src/lms_api.c",
+      "line": "161",
+      "severity": "medium",
+      "title": "Non-constant-time private key comparison",
+      "reviewers": "CLAUDE",
+      "confidence": "trusted",
+      "problem": "CRYPT_LMS_Cmp uses memcmp to compare private keys. While the comparison includes counter and parameters, the use of memcmp can leak timing information about private key state.",
+      "code": "if (ctx1->privateKey != NULL && memcmp(ctx1->privateKey, ctx2->privateKey, ctx1->para->prvKeyLen) != 0) {\n    return CRYPT_LMS_CMP_FALSE;\n}",
+      "fix": "if (ctx1->privateKey != NULL && ctx2->privateKey != NULL) {\n    if (ctx1->para->prvKeyLen != ctx2->para->prvKeyLen) {\n        return CRYPT_LMS_CMP_FALSE;\n    }\n    int result = CRYPT_Memcmp(ctx1->privateKey, ctx2->privateKey, ctx1->para->prvKeyLen);\n    if (result != 0) {\n        return CRYPT_LMS_CMP_FALSE;\n    }\n}"
+    },
+    {
+      "file": "crypto/hbs/hss/src/hss_params.h",
+      "line": "31",
+      "severity": "medium",
+      "title": "Public HSS level limit exceeds what the private-key format can encode",
       "reviewers": "CODEX",
       "confidence": "trusted",
-      "problem": "Two different private keys with different master seeds can compare equal if public keys are not set, which can lead to incorrect key matching/caching. The comparison only checks the counter and parameters, not the secret seed.",
-      "code": "if (ctx1->privateKey != NULL && ctx2->privateKey != NULL) {\n    // Only compare the counter and parameters, not the secret seed\n    if (memcmp(ctx1->privateKey, ctx2->privateKey, HSS_PRVKEY_SEED_OFFSET) != 0) {\n        return CRYPT_HSS_CMP_FALSE;\n    }\n}",
-      "fix": "if (ctx1->privateKey != NULL && ctx2->privateKey != NULL) {\n    if (memcmp(ctx1->privateKey, ctx2->privateKey, HSS_PRVKEY_LEN) != 0) {\n        return CRYPT_HSS_CMP_FALSE;\n    }\n}"
+      "problem": "The API advertises HSS_MAX_LEVELS as 8, but the serialized private key stores the whole hierarchy in an 8-byte compressed parameter block and HSS_MAX_COMPRESSED_LEVELS is only 3. Levels 4-8 are accepted by control setup and then fail later during key generation/import, which is a broken contract.",
+      "code": "#define HSS_MAX_LEVELS 8  // Maximum hierarchy levels (RFC 8554)\n#define HSS_MIN_LEVELS 1  // Minimum hierarchy levels (1 = equivalent to LMS)\n...\n#define HSS_MAX_COMPRESSED_LEVELS    3     // Maximum levels that fit in compressed format",
+      "fix": "#define HSS_MAX_LEVELS 3  // Maximum levels that fit in compressed parameter format\n#define HSS_MIN_LEVELS 1  // Minimum hierarchy levels (1 = equivalent to LMS)\n#define HSS_MAX_COMPRESSED_LEVELS    HSS_MAX_LEVELS"
+    },
+    {
+      "file": "include/crypto/crypt_algid.h",
+      "line": "367-378",
+      "severity": "medium",
+      "title": "Published LMS/HSS parameter IDs cannot be instantiated",
+      "reviewers": "CODEX",
+      "confidence": "trusted",
+      "problem": "This PR exports H20, H25, and HSS H20 parameter IDs as supported public enums, but LmsParaInit rejects every LMS tree height above LMS_MAX_PRACTICAL_HEIGHT (15). Callers can select official-looking algorithm IDs that the implementation will always reject at runtime.",
+      "code": "CRYPT_LMS_SHA256_H20_W4 = BSL_CID_LMS_SHA256_H20_W4,\nCRYPT_LMS_SHA256_H25_W4 = BSL_CID_LMS_SHA256_H25_W4,\n...\nCRYPT_LMS_SHA256_H20_W2 = BSL_CID_LMS_SHA256_H20_W2,\nCRYPT_LMS_SHA256_H20_W8 = BSL_CID_LMS_SHA256_H20_W8,\nCRYPT_HSS_SHA256_L2_H20_H20 = BSL_CID_HSS_SHA256_L2_H20_H20,",
+      "fix": "/* Only publish parameter sets that the current implementation accepts. */\nCRYPT_LMS_SHA256_H5_W4 = BSL_CID_LMS_SHA256_H5_W4,\nCRYPT_LMS_SHA256_H10_W4 = BSL_CID_LMS_SHA256_H10_W4,\nCRYPT_LMS_SHA256_H15_W4 = BSL_CID_LMS_SHA256_H15_W4,\nCRYPT_LMS_SHA256_H10_W2 = BSL_CID_LMS_SHA256_H10_W2,\nCRYPT_LMS_SHA256_H15_W2 = BSL_CID_LMS_SHA256_H15_W2,\nCRYPT_LMS_SHA256_H10_W8 = BSL_CID_LMS_SHA256_H10_W8,\nCRYPT_LMS_SHA256_H15_W8 = BSL_CID_LMS_SHA256_H15_W8,\nCRYPT_HSS_SHA256_L2_H10_H10 = BSL_CID_HSS_SHA256_L2_H10_H10,\nCRYPT_HSS_SHA256_L2_H15_H15 = BSL_CID_HSS_SHA256_L2_H15_H15,\nCRYPT_HSS_SHA256_L3_H10_H10_H10 = BSL_CID_HSS_SHA256_L3_H10_H10_H10,"
+    },
+    {
+      "file": "crypto/hbs/common/hbs_wots.c",
+      "line": "41-56",
+      "severity": "medium",
+      "title": "BaseB function has potential integer overflow",
+      "reviewers": "CLAUDE",
+      "confidence": "likely",
+      "problem": "The BaseB function can overflow the `o` variable when processing input data. The calculation `o = (o << BYTE_BITS) + x[xi]` can overflow if `b` is large and multiple bytes are processed. While for W=16 (4-bit chunks) this is unlikely, the function doesn't validate its inputs.",
+      "code": "static void BaseB(const uint8_t *x, uint32_t xLen, uint32_t b, uint32_t *out, uint32_t outLen)\n{\n    uint32_t bit = 0;\n    uint32_t o = 0;\n    uint32_t xi = 0;\n    for (uint32_t i = 0; i < outLen; i++) {\n        while (bit < b && xi < xLen) {\n            o = (o << BYTE_BITS) + x[xi];\n            bit += 8;\n            xi++;\n        }",
+      "fix": "static void BaseB(const uint8_t *x, uint32_t xLen, uint32_t b, uint32_t *out, uint32_t outLen)\n{\n    uint32_t bit = 0;\n    uint32_t o = 0;\n    uint32_t xi = 0;\n    \n    /* Validate input: b must be <= 16 (for W=16) to prevent overflow */\n    if (b > 16 || outLen == 0) {\n        return;\n    }\n    \n    for (uint32_t i = 0; i < outLen; i++) {\n        while (bit < b && xi < xLen) {\n            /* Use 64-bit intermediate to prevent overflow */\n            uint64_t temp = ((uint64_t)o << BYTE_BITS) + x[xi];\n            if (temp > UINT32_MAX) {\n                return;\n            }\n            o = (uint32_t)temp;\n            bit += 8;\n            xi++;\n        }"
     }
   ]
 }
