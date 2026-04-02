@@ -6,11 +6,11 @@ You are reviewing PR #1153 for openHiTLS/openhitls.
 ## Local Repository Context
 
 - Repository root: `openhitls-1153/openhitls`
-- Base ref: `e6f9560091967dbcdddde9c74ce5a8aa771cba08`
+- Base ref: `a7405a1967d1efca51f8dbbaaa379298af142291`
 - Head ref: `mr-1153`
 - The change under review is already checked out locally in this repository.
 
-## Changed Files (23 files)
+## Changed Files (25 files)
 
 **Source** (22 files):
   - crypto/mldsa/src/asm/aarch64_zeta_table.c
@@ -35,17 +35,18 @@ You are reviewing PR #1153 for openHiTLS/openhitls.
   - crypto/mldsa/src/ml_dsa_local.h
   - ... and 2 more
 
-**Config** (1 files):
-  - config/json/feature.json
+**Docs** (1 files):
+  - crypto/mldsa/CMakeLists.txt
+
+**Other** (2 files):
+  - cmake/config.h.in
+  - cmake/hitls_options.cmake
 
 
 ## Hard Constraints
 
 - Review ONLY the local repository checkout in the current working directory.
 - Use local git/file inspection only.
-- Do NOT search the web.
-- Do NOT open GitHub, GitLab, Gitee, or GitCode pages for this review.
-- Do NOT rely on remote PR pages or web search results for code analysis.
 - If a git command fails, retry with another local command or inspect the changed files directly.
 - If local tooling is limited, continue from the checked-out files and changed-file list instead of switching to network search.
 
@@ -54,11 +55,11 @@ You are reviewing PR #1153 for openHiTLS/openhitls.
 Perform a thorough change review by:
 
 1. **Understand the Change**
-   - Read the diff stats: `git diff --stat e6f9560091967dbcdddde9c74ce5a8aa771cba08 mr-1153`
+   - Read the diff stats: `git diff --stat a7405a1967d1efca51f8dbbaaa379298af142291 mr-1153`
    - Understand what this PR is trying to achieve
 
 2. **Review Each File**
-   - For each changed file, view its diff: `git diff e6f9560091967dbcdddde9c74ce5a8aa771cba08 mr-1153 -- <file>`
+   - For each changed file, view its diff: `git diff a7405a1967d1efca51f8dbbaaa379298af142291 mr-1153 -- <file>`
    - If you need more context, read the full file or search for related code
    - Look for: security issues, logic errors, edge cases, error handling
    - Treat assembly files (`.S`, `.s`, `.asm`) as source code and review ABI/calling convention,

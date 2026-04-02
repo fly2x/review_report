@@ -1,22 +1,32 @@
 [
   {
     "source": "codex",
-    "file": "crypto/mldsa/src/asm/rej_uniform_armv8.S",
-    "line": "103-106",
+    "file": "crypto/mldsa/src/ml_dsa_core.c",
+    "line": "616-630",
     "severity": "high",
-    "title": "AArch64 rejection sampler incorrectly rejects the valid value `q - 1`",
-    "problem": "The sampler loads `8380417 - 1` into `mldsa_q` and then uses `cmhi`, which is a strict `>` comparison. That accepts only values `< q - 1`, so the valid coefficient `8380416` is rejected in both the main loop and the 24-byte tail path. This biases `ExpandA` on every armv8 build and makes the generated ML-DSA matrices diverge from the spec and from the portable implementation.",
-    "code": "// load q = 8380417 - 1\n    movz wtmp, #0xE000\n    movk wtmp, #0x7F, lsl #16    // 8380417 = 0x7FE001\n    dup mldsa_q.4s, wtmp\n...\n        cmhi tmp0.4s, mldsa_q.4s, val0.4s\n        cmhi tmp1.4s, mldsa_q.4s, val1.4s\n        cmhi tmp2.4s, mldsa_q.4s, val2.4s\n        cmhi tmp3.4s, mldsa_q.4s, val3.4s\n...\n        cmhi    tmp0.4s, mldsa_q.4s, val0.4s\n        cmhi    tmp1.4s, mldsa_q.4s, val1.4s",
-    "fix": "// load q = 8380417\n    movz wtmp, #0xE001\n    movk wtmp, #0x7F, lsl #16\n    dup mldsa_q.4s, wtmp\n\n    cmhi tmp0.4s, mldsa_q.4s, val0.4s\n    cmhi tmp1.4s, mldsa_q.4s, val1.4s\n    cmhi tmp2.4s, mldsa_q.4s, val2.4s\n    cmhi tmp3.4s, mldsa_q.4s, val3.4s\n\n    cmhi tmp0.4s, mldsa_q.4s, val0.4s\n    cmhi tmp1.4s, mldsa_q.4s, val1.4s"
+    "title": "Secret-dependent early returns leak signing state",
+    "problem": "These helpers used to scan every vector and accumulate the result. The new early-return form stops at the first failing vector. `MLDSA_SignInternal()` calls these checks on secret-dependent `z`, `r0`, and `ct0`, so the signing runtime now reveals which vector fails first in each rejection-sampling round.",
+    "code": "static bool ValidityChecksL(const CRYPT_ML_DSA_Ctx *ctx, int32_t *const z[MLDSA_L_MAX], uint32_t t)\n{\n    bool valid = true;\n    for (uint8_t i = 0; i < ctx->info->l; i++) {\n        if (MLDSA_ValidityChecks(z[i], t) == false) {\n            return false;\n        }\n    }\n    return valid;\n}\n\nstatic bool ValidityChecksK(const CRYPT_ML_DSA_Ctx *ctx, int32_t *const z[MLDSA_K_MAX], uint32_t t)\n{\n    bool valid = true;\n    for (uint8_t i = 0; i < ctx->info->k; i++) {\n        if (MLDSA_ValidityChecks(z[i], t) == false) {\n            return false;\n        }\n    }\n    return valid;\n}",
+    "fix": "static bool ValidityChecksL(const CRYPT_ML_DSA_Ctx *ctx, int32_t *const z[MLDSA_L_MAX], uint32_t t)\n{\n    bool valid = true;\n    for (uint8_t i = 0; i < ctx->info->l; i++) {\n        valid &= MLDSA_ValidityChecks(z[i], t);\n    }\n    return valid;\n}\n\nstatic bool ValidityChecksK(const CRYPT_ML_DSA_Ctx *ctx, int32_t *const z[MLDSA_K_MAX], uint32_t t)\n{\n    bool valid = true;\n    for (uint8_t i = 0; i < ctx->info->k; i++) {\n        valid &= MLDSA_ValidityChecks(z[i], t);\n    }\n    return valid;\n}"
   },
   {
     "source": "codex",
-    "file": "crypto/mldsa/src/asm/export_ml_dsa_armv8.c",
-    "line": "99-104",
-    "severity": "medium",
-    "title": "In-place `HTOLE32` conversion corrupts the byte stream for big-endian armv8",
-    "problem": "`MldRejUniformAsm` consumes the SHAKE output as raw bytes, not as 32-bit words. Swapping every `uint32_t` in `buf` before passing it to the assembly routine reverses the byte order inside each 4-byte chunk on big-endian AArch64 builds. The project already has big-endian support paths, so this makes armv8 big-endian derive a different public matrix than the portable implementation.",
-    "code": "GOTO_ERR_IF(hashMethod->squeeze(mdCtx, (uint8_t *)buf, outlen), ret);\n    for (uint32_t i = 0; i < buflen; i++) {\n        buf[i] = CRYPT_HTOLE32(buf[i]);\n    }\n    uint32_t gensize = 0;\n    gensize = MldRejUniformAsm(a, (uint8_t *) buf, outlen, MLD_REJ_UNIFORM_TABLE);",
-    "fix": "GOTO_ERR_IF(hashMethod->squeeze(mdCtx, (uint8_t *)buf, outlen), ret);\n    uint32_t gensize = 0;\n    gensize = MldRejUniformAsm(a, (const uint8_t *)buf, outlen, MLD_REJ_UNIFORM_TABLE);"
+    "file": "crypto/mldsa/src/asm/validity_check_armv8.S",
+    "line": "100-105",
+    "severity": "high",
+    "title": "ARMv8 bound check short-circuits on first failing chunk",
+    "problem": "The new ARMv8 fast path exits as soon as any 32-coefficient chunk fails. That makes the leak above much finer-grained on Armv8: signing time depends on the first failing chunk inside each vector, not just the first failing vector.",
+    "code": "UMAXV s30, mask_final.4s\n    umov w3, v30.s[0]\n    cbnz w3, done\n\n    subs count, count, #1\n    cbnz count, check_loop",
+    "fix": "eor tmp.16b, tmp.16b, tmp.16b\n\ncheck_loop:\n    load_data\n    check_one_line data0, mask_final\n\n    check_one_line data1, mask_tmp\n    ORR mask_final.16b, mask_final.16b, mask_tmp.16b\n    check_one_line data2, mask_tmp\n    ORR mask_final.16b, mask_final.16b, mask_tmp.16b\n    check_one_line data3, mask_tmp\n    ORR mask_final.16b, mask_final.16b, mask_tmp.16b\n    check_one_line data4, mask_tmp\n    ORR mask_final.16b, mask_final.16b, mask_tmp.16b\n    check_one_line data5, mask_tmp\n    ORR mask_final.16b, mask_final.16b, mask_tmp.16b\n    check_one_line data6, mask_tmp\n    ORR mask_final.16b, mask_final.16b, mask_tmp.16b\n    check_one_line data7, mask_tmp\n    ORR mask_final.16b, mask_final.16b, mask_tmp.16b\n\n    ORR tmp.16b, tmp.16b, mask_final.16b\n    subs count, count, #1\n    cbnz count, check_loop\n\n    UMAXV s29, tmp.4s\n    umov w3, v29.s[0]"
+  },
+  {
+    "source": "codex",
+    "file": "crypto/mldsa/src/asm/validity_check_armv8.S",
+    "line": "30-37",
+    "severity": "low",
+    "title": "ABS-based check accepts INT32_MIN as in-range",
+    "problem": "The scalar reference computes the magnitude with bit-twiddling, which rejects `INT32_MIN`. This replacement uses `ABS` and then a signed `CMGE`. On AArch64, `ABS` does not make `INT32_MIN` positive, so `CMGE` sees it as negative and the bound check can return a false success for that value.",
+    "code": ".macro check_one_line ldata, lmask\n    // n = z[j] >> 31;    // Shift rightwards by 31 bits.\n    // n = z[j] - (n & ((uint32_t)z[j] << 1));\n    // if (n >= t) return false;\n    // => n = z < 0? z - z*2 : z = ABS(z); \n    // n>=t -> hit -> return 1\n    ABS \\ldata\\().4s, \\ldata\\().4s\n    CMGE \\lmask\\().4s, \\ldata\\().4s, const_t.4s\n.endm",
+    "fix": ".macro check_one_line ldata, lmask\n    // n = z - ((z >> 31) & ((uint32_t)z << 1))\n    SSHR tmp1.4s, \\ldata\\().4s, #31\n    SHL  \\lmask\\().4s, \\ldata\\().4s, #1\n    AND  \\lmask\\().16b, \\lmask\\().16b, tmp1.16b\n    SUB  \\ldata\\().4s, \\ldata\\().4s, \\lmask\\().4s\n    CMGE \\lmask\\().4s, \\ldata\\().4s, const_t.4s\n.endm"
   }
 ]

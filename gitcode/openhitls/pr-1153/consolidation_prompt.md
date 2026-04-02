@@ -15,62 +15,69 @@ You are consolidating change review findings from multiple AI reviewers.
 **Reviewer**: CLAUDE
 
 
-## Low
-
-### Inconsistent register naming in PolyzUnpack19Asm
-`crypto/mldsa/src/asm/polyz_unpack_armv8.S:145-146`
-```
-polyz_unpack_19_loop:
-    ldr q_buf1, [buf, #16]
-    ldr d2, [buf, #32]
-    ldr q0, [buf], #40
-```
-**Issue**: The PolyzUnpack19Asm function uses raw register names (d2, q0) instead of the defined aliases (buf2, buf0) used elsewhere in the code. This is inconsistent with the coding style and could cause confusion during maintenance. The code is functionally correct because d2 is the lower 64 bits of v2 (aliased as buf2), and the index table only accesses bytes 0-7 which are properly loaded.
-**Fix**:
-```
-polyz_unpack_19_loop:
-    ldr q_buf1, [buf, #16]
-    ldr q_buf2, [buf, #32]
-    ldr q_buf0, [buf], #40
-```
-
----
-
-
----
-
-## GEMINI Review
-
-# Code Review: openHiTLS/openhitls#1153
-**Reviewer**: GEMINI
-
-
 ## High
 
-### Missing negative value correction in MLDSA_Batch_Decompose
-`crypto/mldsa/src/noasm/export_mldsa_c.c:76-83`
+### Missing ARMv8 architecture check before including assembly files
+`crypto/mldsa/CMakeLists.txt:15-28`
 ```
-void MLDSA_Batch_Decompose(const CRYPT_ML_DSA_Ctx *ctx, int32_t a[MLDSA_N], int32_t r1[MLDSA_N])
-{
-    for (uint32_t i = 0; i < MLDSA_N; i++) {
-        int32_t r0;
-        MLDSA_Decompose(ctx, a[i], &r1[i], &r0);
-        a[i] = r0;
-    }
-}
+if(HITLS_CRYPTO_MLDSA_ARMV8)
+    list(APPEND _mldsa_sources ${CMAKE_CURRENT_SOURCE_DIR}/src/asm/decompose_armv8.S)
+    ...
 ```
-**Issue**: In `ml_dsa_core.c`, the original `ComputesW` function correctly added `MLDSA_Q` to negative values of `w[i][j]` before calling `Decompose()`. The refactored code extracts this loop into `MLDSA_Batch_Decompose()`. While the assembly version (`BatchDecompose88`/`32`) includes this correction via the `finit` macro, the C fallback version in `export_mldsa_c.c` omits it. Since `MLDSA_ComputesINVNTT()` can yield negative values, passing a negative `int32_t` directly to `MLDSA_Decompose()` causes the cast to `uint32_t` to produce a huge number, breaking the decomposition logic.
+**Issue**: The CMakeLists.txt includes ARMv8 assembly files when HITLS_CRYPTO_MLDSA_ARMV8 is ON, but doesn't verify the build architecture is actually ARMv8. Building with HITLS_CRYPTO_MLDSA_ARMV8=ON on x86_64 will fail to compile or produce incorrect results. The check should also verify HITLS_ASM_ARMV8 is enabled.
 **Fix**:
 ```
-void MLDSA_Batch_Decompose(const CRYPT_ML_DSA_Ctx *ctx, int32_t a[MLDSA_N], int32_t r1[MLDSA_N])
-{
-    for (uint32_t i = 0; i < MLDSA_N; i++) {
-        int32_t r0;
-        a[i] = a[i] + (MLDSA_Q & (a[i] >> 31));
-        MLDSA_Decompose(ctx, a[i], &r1[i], &r0);
-        a[i] = r0;
-    }
-}
+if(HITLS_CRYPTO_MLDSA_ARMV8 AND HITLS_ASM_ARMV8)
+    list(APPEND _mldsa_sources ${CMAKE_CURRENT_SOURCE_DIR}/src/asm/decompose_armv8.S)
+    ...
+```
+
+---
+
+### Missing HITLS_CRYPTO_MLDSA_ARMV8 dependency definition
+`cmake/hitls_define_dependencies.cmake:420-424`
+```
+hitls_define_dependency(HITLS_CRYPTO_MLDSA
+    DEPS HITLS_CRYPTO_PKEY
+        HITLS_CRYPTO_PKEY_SIGN HITLS_CRYPTO_SHA3 HITLS_BSL_PARAMS HITLS_BSL_OBJ_DEFAULT
+    CHILDREN HITLS_CRYPTO_MLDSA_CHECK
+)
+```
+**Issue**: HITLS_CRYPTO_MLDSA_ARMV8 is not defined in hitls_define_dependencies.cmake, unlike all other *_ARMV8 features. This means there's no automatic validation that HITLS_ASM_ARMV8 is enabled when HITLS_CRYPTO_MLDSA_ARMV8 is ON. Other ARMV8 features (like HITLS_CRYPTO_BN_ARMV8, HITLS_CRYPTO_AES_ARMV8) have proper dependency definitions.
+**Fix**:
+```
+hitls_define_dependency(HITLS_CRYPTO_MLDSA
+    DEPS HITLS_CRYPTO_PKEY
+        HITLS_CRYPTO_PKEY_SIGN HITLS_CRYPTO_SHA3 HITLS_BSL_PARAMS HITLS_BSL_OBJ_DEFAULT
+    CHILDREN HITLS_CRYPTO_MLDSA_CHECK HITLS_CRYPTO_MLDSA_ARMV8
+)
+hitls_define_dependency(HITLS_CRYPTO_MLDSA_ARMV8 DEPS HITLS_CRYPTO_MLDSA)
+```
+
+---
+
+### HITLS_CRYPTO_MLDSA_ARMV8 bypasses ASM architecture validation
+`cmake/hitls_config_check.cmake:113-117`
+```
+if(_var MATCHES "^HITLS_CRYPTO_.*_ARMV8$")
+    if(NOT HITLS_ASM_ARMV8)
+```
+**Issue**: The config check validates that all other *_ARMV8 features require HITLS_ASM_ARMV8, but HITLS_CRYPTO_MLDSA_ARMV8 is not included in this check because it's not in the dependency system. The pattern matching regex "^HITLS_CRYPTO_.*_ARMV8$" should match MLDSA_ARMV8 but the feature isn't properly registered.
+
+---
+
+
+## Low
+
+### Header file incorrectly added as source file
+`crypto/mldsa/CMakeLists.txt:28`
+```
+list(APPEND _mldsa_sources ${CMAKE_CURRENT_SOURCE_DIR}/src/asm/export_ml_dsa_armv8.h)
+```
+**Issue**: Header file export_ml_dsa_armv8.h is added to _mldsa_sources. Header files should not be listed as sources in CMake.
+**Fix**:
+```
+# Remove this line - header files should not be in source lists
 ```
 
 ---
@@ -86,60 +93,126 @@ void MLDSA_Batch_Decompose(const CRYPT_ML_DSA_Ctx *ctx, int32_t a[MLDSA_N], int3
 
 ## High
 
-### AArch64 rejection sampler incorrectly rejects the valid value `q - 1`
-`crypto/mldsa/src/asm/rej_uniform_armv8.S:103-106`
+### Secret-dependent early returns leak signing state
+`crypto/mldsa/src/ml_dsa_core.c:616-630`
 ```
-// load q = 8380417 - 1
-    movz wtmp, #0xE000
-    movk wtmp, #0x7F, lsl #16    // 8380417 = 0x7FE001
-    dup mldsa_q.4s, wtmp
-...
-        cmhi tmp0.4s, mldsa_q.4s, val0.4s
-        cmhi tmp1.4s, mldsa_q.4s, val1.4s
-        cmhi tmp2.4s, mldsa_q.4s, val2.4s
-        cmhi tmp3.4s, mldsa_q.4s, val3.4s
-...
-        cmhi    tmp0.4s, mldsa_q.4s, val0.4s
-        cmhi    tmp1.4s, mldsa_q.4s, val1.4s
+static bool ValidityChecksL(const CRYPT_ML_DSA_Ctx *ctx, int32_t *const z[MLDSA_L_MAX], uint32_t t)
+{
+    bool valid = true;
+    for (uint8_t i = 0; i < ctx->info->l; i++) {
+        if (MLDSA_ValidityChecks(z[i], t) == false) {
+            return false;
+        }
+    }
+    return valid;
+}
+
+static bool ValidityChecksK(const CRYPT_ML_DSA_Ctx *ctx, int32_t *const z[MLDSA_K_MAX], uint32_t t)
+{
+    bool valid = true;
+    for (uint8_t i = 0; i < ctx->info->k; i++) {
+        if (MLDSA_ValidityChecks(z[i], t) == false) {
+            return false;
+        }
+    }
+    return valid;
+}
 ```
-**Issue**: The sampler loads `8380417 - 1` into `mldsa_q` and then uses `cmhi`, which is a strict `>` comparison. That accepts only values `< q - 1`, so the valid coefficient `8380416` is rejected in both the main loop and the 24-byte tail path. This biases `ExpandA` on every armv8 build and makes the generated ML-DSA matrices diverge from the spec and from the portable implementation.
+**Issue**: These helpers used to scan every vector and accumulate the result. The new early-return form stops at the first failing vector. `MLDSA_SignInternal()` calls these checks on secret-dependent `z`, `r0`, and `ct0`, so the signing runtime now reveals which vector fails first in each rejection-sampling round.
 **Fix**:
 ```
-// load q = 8380417
-    movz wtmp, #0xE001
-    movk wtmp, #0x7F, lsl #16
-    dup mldsa_q.4s, wtmp
+static bool ValidityChecksL(const CRYPT_ML_DSA_Ctx *ctx, int32_t *const z[MLDSA_L_MAX], uint32_t t)
+{
+    bool valid = true;
+    for (uint8_t i = 0; i < ctx->info->l; i++) {
+        valid &= MLDSA_ValidityChecks(z[i], t);
+    }
+    return valid;
+}
 
-    cmhi tmp0.4s, mldsa_q.4s, val0.4s
-    cmhi tmp1.4s, mldsa_q.4s, val1.4s
-    cmhi tmp2.4s, mldsa_q.4s, val2.4s
-    cmhi tmp3.4s, mldsa_q.4s, val3.4s
+static bool ValidityChecksK(const CRYPT_ML_DSA_Ctx *ctx, int32_t *const z[MLDSA_K_MAX], uint32_t t)
+{
+    bool valid = true;
+    for (uint8_t i = 0; i < ctx->info->k; i++) {
+        valid &= MLDSA_ValidityChecks(z[i], t);
+    }
+    return valid;
+}
+```
 
-    cmhi tmp0.4s, mldsa_q.4s, val0.4s
-    cmhi tmp1.4s, mldsa_q.4s, val1.4s
+---
+
+### ARMv8 bound check short-circuits on first failing chunk
+`crypto/mldsa/src/asm/validity_check_armv8.S:100-105`
+```
+UMAXV s30, mask_final.4s
+    umov w3, v30.s[0]
+    cbnz w3, done
+
+    subs count, count, #1
+    cbnz count, check_loop
+```
+**Issue**: The new ARMv8 fast path exits as soon as any 32-coefficient chunk fails. That makes the leak above much finer-grained on Armv8: signing time depends on the first failing chunk inside each vector, not just the first failing vector.
+**Fix**:
+```
+eor tmp.16b, tmp.16b, tmp.16b
+
+check_loop:
+    load_data
+    check_one_line data0, mask_final
+
+    check_one_line data1, mask_tmp
+    ORR mask_final.16b, mask_final.16b, mask_tmp.16b
+    check_one_line data2, mask_tmp
+    ORR mask_final.16b, mask_final.16b, mask_tmp.16b
+    check_one_line data3, mask_tmp
+    ORR mask_final.16b, mask_final.16b, mask_tmp.16b
+    check_one_line data4, mask_tmp
+    ORR mask_final.16b, mask_final.16b, mask_tmp.16b
+    check_one_line data5, mask_tmp
+    ORR mask_final.16b, mask_final.16b, mask_tmp.16b
+    check_one_line data6, mask_tmp
+    ORR mask_final.16b, mask_final.16b, mask_tmp.16b
+    check_one_line data7, mask_tmp
+    ORR mask_final.16b, mask_final.16b, mask_tmp.16b
+
+    ORR tmp.16b, tmp.16b, mask_final.16b
+    subs count, count, #1
+    cbnz count, check_loop
+
+    UMAXV s29, tmp.4s
+    umov w3, v29.s[0]
 ```
 
 ---
 
 
-## Medium
+## Low
 
-### In-place `HTOLE32` conversion corrupts the byte stream for big-endian armv8
-`crypto/mldsa/src/asm/export_ml_dsa_armv8.c:99-104`
+### ABS-based check accepts INT32_MIN as in-range
+`crypto/mldsa/src/asm/validity_check_armv8.S:30-37`
 ```
-GOTO_ERR_IF(hashMethod->squeeze(mdCtx, (uint8_t *)buf, outlen), ret);
-    for (uint32_t i = 0; i < buflen; i++) {
-        buf[i] = CRYPT_HTOLE32(buf[i]);
-    }
-    uint32_t gensize = 0;
-    gensize = MldRejUniformAsm(a, (uint8_t *) buf, outlen, MLD_REJ_UNIFORM_TABLE);
+.macro check_one_line ldata, lmask
+    // n = z[j] >> 31;    // Shift rightwards by 31 bits.
+    // n = z[j] - (n & ((uint32_t)z[j] << 1));
+    // if (n >= t) return false;
+    // => n = z < 0? z - z*2 : z = ABS(z); 
+    // n>=t -> hit -> return 1
+    ABS \ldata\().4s, \ldata\().4s
+    CMGE \lmask\().4s, \ldata\().4s, const_t.4s
+.endm
 ```
-**Issue**: `MldRejUniformAsm` consumes the SHAKE output as raw bytes, not as 32-bit words. Swapping every `uint32_t` in `buf` before passing it to the assembly routine reverses the byte order inside each 4-byte chunk on big-endian AArch64 builds. The project already has big-endian support paths, so this makes armv8 big-endian derive a different public matrix than the portable implementation.
+**Issue**: The scalar reference computes the magnitude with bit-twiddling, which rejects `INT32_MIN`. This replacement uses `ABS` and then a signed `CMGE`. On AArch64, `ABS` does not make `INT32_MIN` positive, so `CMGE` sees it as negative and the bound check can return a false success for that value.
 **Fix**:
 ```
-GOTO_ERR_IF(hashMethod->squeeze(mdCtx, (uint8_t *)buf, outlen), ret);
-    uint32_t gensize = 0;
-    gensize = MldRejUniformAsm(a, (const uint8_t *)buf, outlen, MLD_REJ_UNIFORM_TABLE);
+.macro check_one_line ldata, lmask
+    // n = z - ((z >> 31) & ((uint32_t)z << 1))
+    SSHR tmp1.4s, \ldata\().4s, #31
+    SHL  \lmask\().4s, \ldata\().4s, #1
+    AND  \lmask\().16b, \lmask\().16b, tmp1.16b
+    SUB  \ldata\().4s, \ldata\().4s, \lmask\().4s
+    CMGE \lmask\().4s, \ldata\().4s, const_t.4s
+.endm
 ```
 
 ---

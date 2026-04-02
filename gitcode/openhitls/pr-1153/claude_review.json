@@ -1,12 +1,41 @@
 [
   {
     "source": "claude",
-    "file": "crypto/mldsa/src/asm/polyz_unpack_armv8.S",
-    "line": "145-146",
+    "file": "crypto/mldsa/CMakeLists.txt",
+    "line": "15-28",
+    "severity": "high",
+    "title": "Missing ARMv8 architecture check before including assembly files",
+    "problem": "The CMakeLists.txt includes ARMv8 assembly files when HITLS_CRYPTO_MLDSA_ARMV8 is ON, but doesn't verify the build architecture is actually ARMv8. Building with HITLS_CRYPTO_MLDSA_ARMV8=ON on x86_64 will fail to compile or produce incorrect results. The check should also verify HITLS_ASM_ARMV8 is enabled.",
+    "code": "if(HITLS_CRYPTO_MLDSA_ARMV8)\n    list(APPEND _mldsa_sources ${CMAKE_CURRENT_SOURCE_DIR}/src/asm/decompose_armv8.S)\n    ...",
+    "fix": "if(HITLS_CRYPTO_MLDSA_ARMV8 AND HITLS_ASM_ARMV8)\n    list(APPEND _mldsa_sources ${CMAKE_CURRENT_SOURCE_DIR}/src/asm/decompose_armv8.S)\n    ..."
+  },
+  {
+    "source": "claude",
+    "file": "cmake/hitls_define_dependencies.cmake",
+    "line": "420-424",
+    "severity": "high",
+    "title": "Missing HITLS_CRYPTO_MLDSA_ARMV8 dependency definition",
+    "problem": "HITLS_CRYPTO_MLDSA_ARMV8 is not defined in hitls_define_dependencies.cmake, unlike all other *_ARMV8 features. This means there's no automatic validation that HITLS_ASM_ARMV8 is enabled when HITLS_CRYPTO_MLDSA_ARMV8 is ON. Other ARMV8 features (like HITLS_CRYPTO_BN_ARMV8, HITLS_CRYPTO_AES_ARMV8) have proper dependency definitions.",
+    "code": "hitls_define_dependency(HITLS_CRYPTO_MLDSA\n    DEPS HITLS_CRYPTO_PKEY\n        HITLS_CRYPTO_PKEY_SIGN HITLS_CRYPTO_SHA3 HITLS_BSL_PARAMS HITLS_BSL_OBJ_DEFAULT\n    CHILDREN HITLS_CRYPTO_MLDSA_CHECK\n)",
+    "fix": "hitls_define_dependency(HITLS_CRYPTO_MLDSA\n    DEPS HITLS_CRYPTO_PKEY\n        HITLS_CRYPTO_PKEY_SIGN HITLS_CRYPTO_SHA3 HITLS_BSL_PARAMS HITLS_BSL_OBJ_DEFAULT\n    CHILDREN HITLS_CRYPTO_MLDSA_CHECK HITLS_CRYPTO_MLDSA_ARMV8\n)\nhitls_define_dependency(HITLS_CRYPTO_MLDSA_ARMV8 DEPS HITLS_CRYPTO_MLDSA)"
+  },
+  {
+    "source": "claude",
+    "file": "cmake/hitls_config_check.cmake",
+    "line": "113-117",
+    "severity": "high",
+    "title": "HITLS_CRYPTO_MLDSA_ARMV8 bypasses ASM architecture validation",
+    "problem": "The config check validates that all other *_ARMV8 features require HITLS_ASM_ARMV8, but HITLS_CRYPTO_MLDSA_ARMV8 is not included in this check because it's not in the dependency system. The pattern matching regex \"^HITLS_CRYPTO_.*_ARMV8$\" should match MLDSA_ARMV8 but the feature isn't properly registered.",
+    "code": "if(_var MATCHES \"^HITLS_CRYPTO_.*_ARMV8$\")\n    if(NOT HITLS_ASM_ARMV8)"
+  },
+  {
+    "source": "claude",
+    "file": "crypto/mldsa/CMakeLists.txt",
+    "line": "28",
     "severity": "low",
-    "title": "Inconsistent register naming in PolyzUnpack19Asm",
-    "problem": "The PolyzUnpack19Asm function uses raw register names (d2, q0) instead of the defined aliases (buf2, buf0) used elsewhere in the code. This is inconsistent with the coding style and could cause confusion during maintenance. The code is functionally correct because d2 is the lower 64 bits of v2 (aliased as buf2), and the index table only accesses bytes 0-7 which are properly loaded.",
-    "code": "polyz_unpack_19_loop:\n    ldr q_buf1, [buf, #16]\n    ldr d2, [buf, #32]\n    ldr q0, [buf], #40",
-    "fix": "polyz_unpack_19_loop:\n    ldr q_buf1, [buf, #16]\n    ldr q_buf2, [buf, #32]\n    ldr q_buf0, [buf], #40"
+    "title": "Header file incorrectly added as source file",
+    "problem": "Header file export_ml_dsa_armv8.h is added to _mldsa_sources. Header files should not be listed as sources in CMake.",
+    "code": "list(APPEND _mldsa_sources ${CMAKE_CURRENT_SOURCE_DIR}/src/asm/export_ml_dsa_armv8.h)",
+    "fix": "# Remove this line - header files should not be in source lists"
   }
 ]

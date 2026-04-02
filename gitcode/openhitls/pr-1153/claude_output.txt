@@ -1,24 +1,77 @@
-Based on my comprehensive review of PR #1153 for openHiTLS, which adds ARMv8 assembly optimizations for ML-DSA (post-quantum cryptography), I have completed the analysis. The code quality is high and the recent commits have already addressed the issues that were found during development.
+Based on my thorough review, I've identified several critical issues:
 
 ===ISSUE===
-FILE: crypto/mldsa/src/asm/polyz_unpack_armv8.S
-LINE: 145-146
-SEVERITY: low
-TITLE: Inconsistent register naming in PolyzUnpack19Asm
-PROBLEM: The PolyzUnpack19Asm function uses raw register names (d2, q0) instead of the defined aliases (buf2, buf0) used elsewhere in the code. This is inconsistent with the coding style and could cause confusion during maintenance. The code is functionally correct because d2 is the lower 64 bits of v2 (aliased as buf2), and the index table only accesses bytes 0-7 which are properly loaded.
+FILE: crypto/mldsa/CMakeLists.txt
+LINE: 15-28
+SEVERITY: high
+TITLE: Missing ARMv8 architecture check before including assembly files
+PROBLEM: The CMakeLists.txt includes ARMv8 assembly files when HITLS_CRYPTO_MLDSA_ARMV8 is ON, but doesn't verify the build architecture is actually ARMv8. Building with HITLS_CRYPTO_MLDSA_ARMV8=ON on x86_64 will fail to compile or produce incorrect results. The check should also verify HITLS_ASM_ARMV8 is enabled.
 CODE:
-```
-polyz_unpack_19_loop:
-    ldr q_buf1, [buf, #16]
-    ldr d2, [buf, #32]
-    ldr q0, [buf], #40
+```cmake
+if(HITLS_CRYPTO_MLDSA_ARMV8)
+    list(APPEND _mldsa_sources ${CMAKE_CURRENT_SOURCE_DIR}/src/asm/decompose_armv8.S)
+    ...
 ```
 FIX:
+```cmake
+if(HITLS_CRYPTO_MLDSA_ARMV8 AND HITLS_ASM_ARMV8)
+    list(APPEND _mldsa_sources ${CMAKE_CURRENT_SOURCE_DIR}/src/asm/decompose_armv8.S)
+    ...
 ```
-polyz_unpack_19_loop:
-    ldr q_buf1, [buf, #16]
-    ldr q_buf2, [buf, #32]
-    ldr q_buf0, [buf], #40
+===END===
+
+===ISSUE===
+FILE: crypto/mldsa/CMakeLists.txt
+LINE: 28
+SEVERITY: low
+TITLE: Header file incorrectly added as source file
+PROBLEM: Header file export_ml_dsa_armv8.h is added to _mldsa_sources. Header files should not be listed as sources in CMake.
+CODE:
+```cmake
+list(APPEND _mldsa_sources ${CMAKE_CURRENT_SOURCE_DIR}/src/asm/export_ml_dsa_armv8.h)
 ```
-Note: The current code loads 8 bytes into d2 (lower half of v2), but changing to ldr q_buf2 would load 16 bytes. The fix requires changing the load to ldr d_buf2 or keeping the current approach with proper comments explaining the partial register load.
+FIX:
+```cmake
+# Remove this line - header files should not be in source lists
+```
+===END===
+
+===ISSUE===
+FILE: cmake/hitls_define_dependencies.cmake
+LINE: 420-424
+SEVERITY: high
+TITLE: Missing HITLS_CRYPTO_MLDSA_ARMV8 dependency definition
+PROBLEM: HITLS_CRYPTO_MLDSA_ARMV8 is not defined in hitls_define_dependencies.cmake, unlike all other *_ARMV8 features. This means there's no automatic validation that HITLS_ASM_ARMV8 is enabled when HITLS_CRYPTO_MLDSA_ARMV8 is ON. Other ARMV8 features (like HITLS_CRYPTO_BN_ARMV8, HITLS_CRYPTO_AES_ARMV8) have proper dependency definitions.
+CODE:
+```cmake
+hitls_define_dependency(HITLS_CRYPTO_MLDSA
+    DEPS HITLS_CRYPTO_PKEY
+        HITLS_CRYPTO_PKEY_SIGN HITLS_CRYPTO_SHA3 HITLS_BSL_PARAMS HITLS_BSL_OBJ_DEFAULT
+    CHILDREN HITLS_CRYPTO_MLDSA_CHECK
+)
+```
+FIX:
+```cmake
+hitls_define_dependency(HITLS_CRYPTO_MLDSA
+    DEPS HITLS_CRYPTO_PKEY
+        HITLS_CRYPTO_PKEY_SIGN HITLS_CRYPTO_SHA3 HITLS_BSL_PARAMS HITLS_BSL_OBJ_DEFAULT
+    CHILDREN HITLS_CRYPTO_MLDSA_CHECK HITLS_CRYPTO_MLDSA_ARMV8
+)
+hitls_define_dependency(HITLS_CRYPTO_MLDSA_ARMV8 DEPS HITLS_CRYPTO_MLDSA)
+```
+===END===
+
+===ISSUE===
+FILE: cmake/hitls_config_check.cmake
+LINE: 113-117
+SEVERITY: high
+TITLE: HITLS_CRYPTO_MLDSA_ARMV8 bypasses ASM architecture validation
+PROBLEM: The config check validates that all other *_ARMV8 features require HITLS_ASM_ARMV8, but HITLS_CRYPTO_MLDSA_ARMV8 is not included in this check because it's not in the dependency system. The pattern matching regex "^HITLS_CRYPTO_.*_ARMV8$" should match MLDSA_ARMV8 but the feature isn't properly registered.
+CODE:
+```cmake
+if(_var MATCHES "^HITLS_CRYPTO_.*_ARMV8$")
+    if(NOT HITLS_ASM_ARMV8)
+```
+FIX:
+Add HITLS_CRYPTO_MLDSA_ARMV8 to the dependency system as described above.
 ===END===

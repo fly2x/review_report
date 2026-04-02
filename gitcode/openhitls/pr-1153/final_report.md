@@ -14,56 +14,86 @@
 
 ## High
 
-### AArch64 rejection sampler incorrectly rejects the valid value q-1
-`crypto/mldsa/src/asm/rej_uniform_armv8.S:103-106`
+### Secret-dependent early returns leak signing state via timing side channel
+`crypto/mldsa/src/ml_dsa_core.c:614-633`
 **Reviewers**: CODEX | **置信度**: 可信
 ```
-// load q = 8380417 - 1
-    movz wtmp, #0xE000
-    movk wtmp, #0x7F, lsl #16    // 8380417 = 0x7FE001
-    dup mldsa_q.4s, wtmp
-...
-        cmhi tmp0.4s, mldsa_q.4s, val0.4s
-        cmhi tmp1.4s, mldsa_q.4s, val1.4s
-        cmhi tmp2.4s, mldsa_q.4s, val2.4s
-        cmhi tmp3.4s, mldsa_q.4s, val3.4s
+static bool ValidityChecksL(const CRYPT_ML_DSA_Ctx *ctx, int32_t *const z[MLDSA_L_MAX], uint32_t t)
+{
+    bool valid = true;
+    for (uint8_t i = 0; i < ctx->info->l; i++) {
+        if (MLDSA_ValidityChecks(z[i], t) == false) {
+            return false;  // EARLY RETURN LEAKS WHICH INDEX FAILS
+        }
+    }
+    return valid;
+}
 ```
-**Issue**: The sampler loads `8380417 - 1` (q-1 = 0x7FE000) into `mldsa_q` and uses `cmhi` for unsigned greater-than comparison. This accepts only values `< q - 1`, so the valid coefficient `8380416` is rejected in both the main loop and the 24-byte tail path. The C version in `export_mldsa_c.c` correctly uses `(MLDSA_Q - 1 - t0) >> 31` which accepts values `<= 8380416`. This biases the rejection sampler on every armv8 build and makes the generated ML-DSA matrices diverge from the spec.
+**Issue**: The ValidityChecksL and ValidityChecksK functions use early-return on the first failing vector check. These functions are called in the signing rejection sampling loop on secret-dependent data (z, r0, ct0). The early return reveals which vector index fails first through timing, potentially leaking information about the secret key. The git diff shows the code was changed from accumulating results (valid &=) to early-return pattern.
 **Fix**:
 ```
-// load q = 8380417
-    movz wtmp, #0xE001
-    movk wtmp, #0x7F, lsl #16
-    dup mldsa_q.4s, wtmp
+static bool ValidityChecksL(const CRYPT_ML_DSA_Ctx *ctx, int32_t *const z[MLDSA_L_MAX], uint32_t t)
+{
+    bool valid = true;
+    for (uint8_t i = 0; i < ctx->info->l; i++) {
+        valid &= MLDSA_ValidityChecks(z[i], t);
+    }
+    return valid;
+}
 ```
 
 ---
 
-### Missing negative value correction in MLDSA_Batch_Decompose
-`crypto/mldsa/src/noasm/export_mldsa_c.c:75-82`
-**Reviewers**: GEMINI | **置信度**: 可信
+### ARMv8 bound check short-circuits on first failing chunk, worsening timing leak
+`crypto/mldsa/src/asm/validity_check_armv8.S:100-105`
+**Reviewers**: CODEX | **置信度**: 可信
 ```
-void MLDSA_Batch_Decompose(const CRYPT_ML_DSA_Ctx *ctx, int32_t a[MLDSA_N], int32_t r1[MLDSA_N])
-{
-    for (uint32_t i = 0; i < MLDSA_N; i++) {
-        int32_t r0;
-        MLDSA_Decompose(ctx, a[i], &r1[i], &r0);
-        a[i] = r0;
-    }
-}
+check_loop:
+    load_data
+    check_one_line data0, mask_final
+    check_one_line data1, mask_tmp
+    ORR mask_final.16b, mask_final.16b, mask_tmp.16b
+    check_one_line data2, mask_tmp
+    ORR mask_final.16b, mask_final.16b, mask_tmp.16b
+    ... (more checks with ORR accumulation)
+
+    UMAXV s30, mask_final.4s
+    umov w3, v30.s[0]
+    cbnz w3, done  # EXITS ON FIRST FAILING CHUNK
+
+    subs count, count, #1
+    cbnz count, check_loop
 ```
-**Issue**: In the original `ml_dsa_core.c`, `ComputesW` correctly added `MLDSA_Q` to negative values before calling `Decompose()`: `w[i][j] = w[i][j] + (MLDSA_Q & (w[i][j] >> 31))`. The refactored code extracts this loop into `MLDSA_Batch_Decompose()`. The assembly version (`BatchDecompose88`/`32`) includes this correction via the `finit` macro, but the C fallback version omits it. Since `MLDSA_ComputesINVNTT()` can yield negative values, passing a negative `int32_t` directly to `MLDSA_Decompose()` causes the cast to `uint32_t` to produce a huge number, breaking the decomposition logic.
+**Issue**: The ARMv8 validity check exits the loop as soon as any 32-coefficient chunk fails the bound check (via UMAXV + cbnz). This makes the timing side channel from the above issue much more fine-grained on ARMv8: an attacker can potentially learn which 32-coefficient chunk within each vector fails first, not just which vector fails. The scalar reference implementation processes all 256 coefficients before checking the final accumulated result.
 **Fix**:
 ```
-void MLDSA_Batch_Decompose(const CRYPT_ML_DSA_Ctx *ctx, int32_t a[MLDSA_N], int32_t r1[MLDSA_N])
-{
-    for (uint32_t i = 0; i < MLDSA_N; i++) {
-        int32_t r0;
-        a[i] = a[i] + (MLDSA_Q & (a[i] >> 31));
-        MLDSA_Decompose(ctx, a[i], &r1[i], &r0);
-        a[i] = r0;
-    }
-}
+eor tmp.16b, tmp.16b, tmp.16b  # Initialize accumulator
+
+check_loop:
+    load_data
+    check_one_line data0, mask_final
+    
+    check_one_line data1, mask_tmp
+    ORR mask_final.16b, mask_final.16b, mask_tmp.16b
+    check_one_line data2, mask_tmp
+    ORR mask_final.16b, mask_final.16b, mask_tmp.16b
+    check_one_line data3, mask_tmp
+    ORR mask_final.16b, mask_final.16b, mask_tmp.16b
+    check_one_line data4, mask_tmp
+    ORR mask_final.16b, mask_final.16b, mask_tmp.16b
+    check_one_line data5, mask_tmp
+    ORR mask_final.16b, mask_final.16b, mask_tmp.16b
+    check_one_line data6, mask_tmp
+    ORR mask_final.16b, mask_final.16b, mask_tmp.16b
+    check_one_line data7, mask_tmp
+    ORR mask_final.16b, mask_final.16b, mask_tmp.16b
+
+    ORR tmp.16b, tmp.16b, mask_final.16b  # Accumulate across iterations
+    subs count, count, #1
+    cbnz count, check_loop
+
+    UMAXV s29, tmp.4s  # Check final accumulated result
+    umov w3, v29.s[0]
 ```
 
 ---
@@ -71,23 +101,25 @@ void MLDSA_Batch_Decompose(const CRYPT_ML_DSA_Ctx *ctx, int32_t a[MLDSA_N], int3
 
 ## Medium
 
-### In-place HTOLE32 conversion corrupts byte stream for big-endian armv8
-`crypto/mldsa/src/asm/export_ml_dsa_armv8.c:100-104`
-**Reviewers**: CODEX | **置信度**: 可信
+### HITLS_CRYPTO_MLDSA_ARMV8 not defined as child dependency
+`cmake/hitls_define_dependencies.cmake:420-424`
+**Reviewers**: CLAUDE | **置信度**: 较可信
 ```
-GOTO_ERR_IF(hashMethod->squeeze(mdCtx, (uint8_t *)buf, outlen), ret);
-for (uint32_t i = 0; i < buflen; i++) {
-    buf[i] = CRYPT_HTOLE32(buf[i]);
-}
-uint32_t gensize = 0;
-gensize = MldRejUniformAsm(a, (uint8_t *) buf, outlen, MLD_REJ_UNIFORM_TABLE);
+hitls_define_dependency(HITLS_CRYPTO_MLDSA
+    DEPS HITLS_CRYPTO_PKEY
+        HITLS_CRYPTO_PKEY_SIGN HITLS_CRYPTO_SHA3 HITLS_BSL_PARAMS HITLS_BSL_OBJ_DEFAULT
+    CHILDREN HITLS_CRYPTO_MLDSA_CHECK
+)
 ```
-**Issue**: `MldRejUniformAsm` consumes the SHAKE output as raw bytes, not as 32-bit words. The loop swaps every `uint32_t` in `buf` before passing it to the assembly routine. On big-endian AArch64 builds, this reverses the byte order inside each 4-byte chunk, causing the assembly to derive a different public matrix than the portable implementation. The project has big-endian support paths, so this breaks cross-platform consistency.
+**Issue**: HITLS_CRYPTO_MLDSA does not list HITLS_CRYPTO_MLDSA_ARMV8 as a CHILDREN in the dependency system. All other *_ARMV8 features (like HITLS_CRYPTO_SHA2_ARMV8 which lists HITLS_CRYPTO_SHA256_ARMV8 and HITLS_CRYPTO_SHA512_ARMV8 as children) follow this pattern. While the automatic regex check in hitls_config_check.cmake will validate that HITLS_ASM_ARMV8 is enabled, the missing CHILDREN relationship is inconsistent with the established architecture pattern.
 **Fix**:
 ```
-GOTO_ERR_IF(hashMethod->squeeze(mdCtx, (uint8_t *)buf, outlen), ret);
-uint32_t gensize = 0;
-gensize = MldRejUniformAsm(a, (const uint8_t *)buf, outlen, MLD_REJ_UNIFORM_TABLE);
+hitls_define_dependency(HITLS_CRYPTO_MLDSA
+    DEPS HITLS_CRYPTO_PKEY
+        HITLS_CRYPTO_PKEY_SIGN HITLS_CRYPTO_SHA3 HITLS_BSL_PARAMS HITLS_BSL_OBJ_DEFAULT
+    CHILDREN HITLS_CRYPTO_MLDSA_CHECK HITLS_CRYPTO_MLDSA_ARMV8
+)
+hitls_define_dependency(HITLS_CRYPTO_MLDSA_ARMV8 DEPS HITLS_CRYPTO_MLDSA)
 ```
 
 ---
@@ -95,22 +127,39 @@ gensize = MldRejUniformAsm(a, (const uint8_t *)buf, outlen, MLD_REJ_UNIFORM_TABL
 
 ## Low
 
-### Inconsistent register naming in PolyzUnpack19Asm
-`crypto/mldsa/src/asm/polyz_unpack_armv8.S:145-146`
+### Header file incorrectly added to source list
+`crypto/mldsa/CMakeLists.txt:32`
 **Reviewers**: CLAUDE | **置信度**: 较可信
 ```
-polyz_unpack_19_loop:
-    ldr q_buf1, [buf, #16]
-    ldr d2, [buf, #32]
-    ldr q0, [buf], #40
+if(HITLS_CRYPTO_MLDSA_ARMV8)
+    ...
+    list(APPEND _mldsa_sources ${CMAKE_CURRENT_SOURCE_DIR}/src/asm/export_ml_dsa_armv8.h)
+    ...
+endif()
 ```
-**Issue**: The `PolyzUnpack19Asm` function uses raw register names (`d2`, `q0`) instead of the defined aliases (`s_buf2`, `q_buf0`) used elsewhere in the code. In contrast, `PolyzUnpack17Asm` consistently uses the aliases (`q_buf1`, `s_buf2`, `q_buf0`). This inconsistency could cause confusion during maintenance. The code is functionally correct because `d2` is the lower 64 bits of `v2`, and the index table only accesses bytes 0-7.
+**Issue**: The header file export_ml_dsa_armv8.h is added to _mldsa_sources. In CMake, header files should typically not be listed as sources - they are handled by target_include_directories() and discovered automatically. While this won't cause a build error, it's not best practice.
 **Fix**:
 ```
-polyz_unpack_19_loop:
-    ldr q_buf1, [buf, #16]
-    ldr q_buf2, [buf, #32]
-    ldr q_buf0, [buf], #40
+if(HITLS_CRYPTO_MLDSA_ARMV8)
+    list(APPEND _mldsa_sources ${CMAKE_CURRENT_SOURCE_DIR}/src/asm/decompose_armv8.S)
+    list(APPEND _mldsa_sources ${CMAKE_CURRENT_SOURCE_DIR}/src/asm/intt_armv8.S)
+    list(APPEND _mldsa_sources ${CMAKE_CURRENT_SOURCE_DIR}/src/asm/ntt_armv8.S)
+    list(APPEND _mldsa_sources ${CMAKE_CURRENT_SOURCE_DIR}/src/asm/pointwise_acc_montgomery_armv8.S)
+    list(APPEND _mldsa_sources ${CMAKE_CURRENT_SOURCE_DIR}/src/asm/pointwise_montgomery_armv8.S)
+    list(APPEND _mldsa_sources ${CMAKE_CURRENT_SOURCE_DIR}/src/asm/polyz_unpack_armv8.S)
+    list(APPEND _mldsa_sources ${CMAKE_CURRENT_SOURCE_DIR}/src/asm/power2round_armv8.S)
+    list(APPEND _mldsa_sources ${CMAKE_CURRENT_SOURCE_DIR}/src/asm/rej_uniform_armv8.S)
+    list(APPEND _mldsa_sources ${CMAKE_CURRENT_SOURCE_DIR}/src/asm/rej_uniform_eta2_armv8.S)
+    list(APPEND _mldsa_sources ${CMAKE_CURRENT_SOURCE_DIR}/src/asm/rej_uniform_eta4_armv8.S)
+    list(APPEND _mldsa_sources ${CMAKE_CURRENT_SOURCE_DIR}/src/asm/usehint_armv8.S)
+    list(APPEND _mldsa_sources ${CMAKE_CURRENT_SOURCE_DIR}/src/asm/validity_check_armv8.S)
+    list(APPEND _mldsa_sources ${CMAKE_CURRENT_SOURCE_DIR}/src/asm/vec_opts_x8_armv8.S)
+    list(APPEND _mldsa_sources ${CMAKE_CURRENT_SOURCE_DIR}/src/asm/export_ml_dsa_armv8.c)
+    # Remove export_ml_dsa_armv8.h from sources - headers are handled by target_include_directories
+    list(APPEND _mldsa_sources ${CMAKE_CURRENT_SOURCE_DIR}/src/asm/aarch64_zeta_table.c)
+    list(APPEND _mldsa_sources ${CMAKE_CURRENT_SOURCE_DIR}/src/asm/polyz_unpack_table.c)
+    list(APPEND _mldsa_sources ${CMAKE_CURRENT_SOURCE_DIR}/src/asm/rej_uniform_table.c)
+endif()
 ```
 
 ---
