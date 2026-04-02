@@ -4,112 +4,61 @@
 
 ## High
 
-### RSA support is silently disabled while RSA callbacks remain exposed
+### RSA provider support is registered but its SDF symbols are never loaded
 `src/common/sdf_dl.c:183-193`
 ```
 /*
-     * RSA internal key operations are loaded on demand when an internal RSA
-     * key index is configured (not all SDF devices support them).
-     */
-    /* LOAD_SYM(genKeyPairRsa,           SDF_GenerateKeyPair_RSA); */
-    /* LOAD_SYM(exportSignPubKeyRsa,     SDF_ExportSignPublicKey_RSA); */
-    /* LOAD_SYM(exportEncPubKeyRsa,      SDF_ExportEncPublicKey_RSA); */
-    /* LOAD_SYM(intPubKeyOpRsa,          SDF_InternalPublicKeyOperation_RSA); */
-    /* LOAD_SYM(intPrivKeyOpRsa,         SDF_InternalPrivateKeyOperation_RSA); */
-    /* LOAD_SYM(extPubKeyOpRsa,          SDF_ExternalPublicKeyOperation_RSA); */
-    /* LOAD_SYM(extPrivKeyOpRsa,         SDF_ExternalPrivateKeyOperation_RSA); */
+ * RSA internal key operations are loaded on demand when an internal RSA
+ * key index is configured (not all SDF devices support them).
+ */
+/* LOAD_SYM(genKeyPairRsa,           SDF_GenerateKeyPair_RSA); */
+/* LOAD_SYM(exportSignPubKeyRsa,     SDF_ExportSignPublicKey_RSA); */
+/* LOAD_SYM(exportEncPubKeyRsa,      SDF_ExportEncPublicKey_RSA); */
+/* LOAD_SYM(intPubKeyOpRsa,          SDF_InternalPublicKeyOperation_RSA); */
+/* LOAD_SYM(intPrivKeyOpRsa,         SDF_InternalPrivateKeyOperation_RSA); */
+/* LOAD_SYM(extPubKeyOpRsa,          SDF_ExternalPublicKeyOperation_RSA); */
+/* LOAD_SYM(extPrivKeyOpRsa,         SDF_ExternalPrivateKeyOperation_RSA); */
 ```
-**Issue**: The loader no longer resolves any RSA symbols, but the provider still registers RSA keymgmt/sign/asymcipher callbacks. Every RSA path now reaches wrappers whose function pointers are still NULL and fails with `SDFP_ERR_NOT_LOADED` at runtime.
+**Issue**: The provider still advertises RSA key management, signing, and asymmetric cipher support, but `SDF_DL_Load()` no longer resolves any RSA entry points. Every RSA wrapper in `src/rsa/` then hits a NULL function pointer and returns `SDFP_ERR_NOT_LOADED`, so all RSA operations fail at runtime.
 **Fix**:
 ```
 LOAD_SYM(genKeyPairRsa,           SDF_GenerateKeyPair_RSA);
-    LOAD_SYM(exportSignPubKeyRsa,     SDF_ExportSignPublicKey_RSA);
-    LOAD_SYM(exportEncPubKeyRsa,      SDF_ExportEncPublicKey_RSA);
-    LOAD_SYM(intPubKeyOpRsa,          SDF_InternalPublicKeyOperation_RSA);
-    LOAD_SYM(intPrivKeyOpRsa,         SDF_InternalPrivateKeyOperation_RSA);
-    LOAD_SYM(extPubKeyOpRsa,          SDF_ExternalPublicKeyOperation_RSA);
-    LOAD_SYM(extPrivKeyOpRsa,         SDF_ExternalPrivateKeyOperation_RSA);
+LOAD_SYM(exportSignPubKeyRsa,     SDF_ExportSignPublicKey_RSA);
+LOAD_SYM(exportEncPubKeyRsa,      SDF_ExportEncPublicKey_RSA);
+LOAD_SYM(intPubKeyOpRsa,          SDF_InternalPublicKeyOperation_RSA);
+LOAD_SYM(intPrivKeyOpRsa,         SDF_InternalPrivateKeyOperation_RSA);
+LOAD_SYM(extPubKeyOpRsa,          SDF_ExternalPublicKeyOperation_RSA);
+LOAD_SYM(extPrivKeyOpRsa,         SDF_ExternalPrivateKeyOperation_RSA);
 ```
 
 ---
 
-### SM4-GCM tag handling no longer matches the AEAD provider contract
-`src/sm4/sm4_gcm.c:200-307`
+### GCM `Final` now appends the tag and breaks the existing AEAD API
+`src/sm4/sm4_gcm.c:219-233`
 ```
 if (ctx->enc) {
-        unsigned int tagOutLen = SM4_GCM_TAG_MAX;
-        ret = SDF_DL_AuthEncFinal(ctx->hSessionHandle, out, &tmpLen, ctx->tag, &tagOutLen);
-        if (ret == SDR_OK) {
-            ctx->tagLen = tagOutLen;
-            memcpy(out + tmpLen, ctx->tag, tagOutLen);
-            tmpLen += tagOutLen;
-        }
-    } else {
-        ret = SDF_DL_AuthDecFinal(ctx->hSessionHandle, out, &tmpLen);
+    unsigned int tagOutLen = SM4_GCM_TAG_MAX;
+    if (*outLen < tagOutLen) {
+        SDFP_LOG(CRYPT_INVALID_ARG);
+        return CRYPT_INVALID_ARG;
     }
-
-    ...
-
-        case CRYPT_CTRL_GET_TAG:
-            if (val == NULL || valLen == 0 || valLen > SM4_GCM_TAG_MAX || !ctx->enc) {
-                return CRYPT_INVALID_ARG;
-            }
-            uint32_t copyLen = (valLen < ctx->tagLen) ? valLen : ctx->tagLen;
-            memcpy(val, ctx->tag, copyLen);
-            return CRYPT_SUCCESS;
-
-        case 112:
-            if (val == NULL || valLen == 0 || valLen > SM4_GCM_TAG_MAX) {
-                return CRYPT_INVALID_ARG;
-            }
-            memcpy(ctx->tag, val, valLen);
-            ctx->tagLen = valLen;
-            return CRYPT_SUCCESS;
+    ret = SDF_DL_AuthEncFinal(ctx->hSessionHandle, out, &tmpLen, ctx->tag, &tagOutLen);
+    if (ret == SDR_OK) {
+        ctx->tagLen = tagOutLen;
+        memcpy(out + tmpLen, ctx->tag, tagOutLen);
+        tmpLen += tagOutLen;
+    }
+}
 ```
-**Issue**: The implementation only computes/stores the authentication tag in `SDFP_SM4_GCM_Final()` and appends it to the ciphertext buffer there, while `CRYPT_CTRL_GET_TAG` merely copies `ctx->tag`. Any caller that uses the normal AEAD flow of `Update` followed by `GET_TAG` gets a zero/stale tag. Decryption is also tied to a provider-private `112` control instead of the public tag flow, so the provider is no longer drop-in compatible with generic AEAD callers.
+**Issue**: Before this PR, and in the current README, callers finish encryption with `Final` and then fetch the tag with `CRYPT_CTRL_GET_TAG`. This change makes `Final` require at least 16 extra output bytes and appends the tag into the ciphertext buffer. Existing callers that sized `Final` for ciphertext tail only will now fail with `CRYPT_INVALID_ARG` or have to adopt a non-standard buffer contract.
 **Fix**:
 ```
-/* Add a finalized flag in SDFP_SM4_GCM_Ctx and finalize AEAD from GET_TAG. */
-static int32_t SDFP_SM4_GCM_Final(void *c, uint8_t *out, uint32_t *outLen)
-{
-    (void)c;
-    if (out == NULL || outLen == NULL) {
-        return CRYPT_NULL_INPUT;
-    }
-    *outLen = 0; /* AEAD tag is returned via GET_TAG, not appended here */
-    return CRYPT_SUCCESS;
-}
-
-case CRYPT_CTRL_SET_TAG:
-    if (val == NULL || valLen == 0 || valLen > SM4_GCM_TAG_MAX) {
-        return CRYPT_INVALID_ARG;
-    }
-    memcpy(ctx->tag, val, valLen);
-    ctx->tagLen = valLen;
-    return CRYPT_SUCCESS;
-
-case CRYPT_CTRL_GET_TAG: {
-    if (val == NULL || valLen == 0 || valLen > SM4_GCM_TAG_MAX) {
-        return CRYPT_INVALID_ARG;
-    }
-    if (!ctx->started) {
-        int32_t initRet = SDFP_SM4_GCM_SdfInit(ctx);
-        if (initRet != CRYPT_SUCCESS) {
-            return initRet;
-        }
-    }
-    if (!ctx->finalized) {
-        unsigned int lastLen = 0;
-        unsigned int tagOutLen = ctx->tagLen;
-        int ret = SDF_DL_AuthEncFinal(ctx->hSessionHandle, NULL, &lastLen, ctx->tag, &tagOutLen);
-        if (ret != SDR_OK || lastLen != 0) {
-            return SDFP_ERR_ENCRYPT;
-        }
+if (ctx->enc) {
+    unsigned int tagOutLen = ctx->tagLen;
+    ret = SDF_DL_AuthEncFinal(ctx->hSessionHandle, out, &tmpLen, ctx->tag, &tagOutLen);
+    if (ret == SDR_OK) {
         ctx->tagLen = tagOutLen;
-        ctx->finalized = true;
     }
-    memcpy(val, ctx->tag, ctx->tagLen);
-    return CRYPT_SUCCESS;
 }
 ```
 
@@ -118,137 +67,87 @@ case CRYPT_CTRL_GET_TAG: {
 
 ## Medium
 
-### Provider unload tears down the process-global RNG even when it did not create it
-`src/common/provider.c:95`
+### Reusing a GCM context carries the previous AAD and tag into the next operation
+`src/sm4/sm4_gcm.c:148-160`
 ```
-CRYPT_EAL_RandDeinit();
-
-    ...
-
-    ret = CRYPT_EAL_RandInit(CRYPT_RAND_AES256_CTR, NULL, NULL, NULL, 0);
-    if (ret != CRYPT_SUCCESS) {
-        /* RNG may already be initialized by the application probe it */
-        uint8_t probe[4];
-        if (CRYPT_EAL_Randbytes(probe, sizeof(probe)) != CRYPT_SUCCESS) {
-            BSL_SAL_Free(temp->sdfLibPath);
-            BSL_SAL_Free(temp);
-            SDF_DL_Unload();
-            return SDFP_ERR_OPEN_DEVICE;
-        }
-    }
-```
-**Issue**: `ProviderInit` now explicitly tolerates `CRYPT_EAL_RandInit()` failing because some other component already initialized the global RNG, but `CRYPT_EAL_ProvFree()` always calls `CRYPT_EAL_RandDeinit()` anyway. Unloading the provider can therefore deinitialize RNG state that belongs to the application or another provider instance.
-**Fix**:
-```
-/* Add a bool ownsRand to CRYPT_EAL_ProvCtx and only deinit when we created it. */
-ret = CRYPT_EAL_RandInit(CRYPT_RAND_AES256_CTR, NULL, NULL, NULL, 0);
-if (ret == CRYPT_SUCCESS) {
-    temp->ownsRand = true;
-} else {
-    uint8_t probe[4];
-    if (CRYPT_EAL_Randbytes(probe, sizeof(probe)) != CRYPT_SUCCESS) {
-        BSL_SAL_Free(temp->sdfLibPath);
-        BSL_SAL_Free(temp);
-        SDF_DL_Unload();
-        return SDFP_ERR_OPEN_DEVICE;
-    }
-}
-
+ret = SDF_DL_AuthEncInit(ctx->hSessionHandle, ctx->hKeyHandle, SGD_SM4_GCM,
+    ctx->iv, ctx->ivLen,
+    ctx->aadLen > 0 ? ctx->aad : NULL, ctx->aadLen,
+    0);
 ...
+ret = SDF_DL_AuthDecInit(ctx->hSessionHandle, ctx->hKeyHandle, SGD_SM4_GCM,
+    ctx->iv, ctx->ivLen,
+    ctx->aadLen > 0 ? ctx->aad : NULL, ctx->aadLen,
+    ctx->tag, ctx->tagLen,
+    0);
 
-if (ctx->ownsRand) {
-    CRYPT_EAL_RandDeinit();
+static int32_t SDFP_SM4_GCM_DeinitCtx(void *c)
+{
+    /* Method A: only destroy key handle; session + config preserved. */
+    SDFP_SM4_GCM_CleanKey((SDFP_SM4_GCM_Ctx *)c);
+    return CRYPT_SUCCESS;
+}
+```
+**Issue**: `SDFP_SM4_GCM_DeinitCtx()` now preserves all per-message AEAD state, but `SDFP_SM4_GCM_SdfInit()` still consumes `ctx->aadLen`, `ctx->aad`, `ctx->tag`, and `ctx->tagLen` on the next `Init/Update`. Reusing a cipher context without explicitly resetting AAD/tag will silently authenticate the next message with stale values from the previous operation.
+**Fix**:
+```
+static int32_t SDFP_SM4_GCM_DeinitCtx(void *c)
+{
+    SDFP_SM4_GCM_Ctx *ctx = (SDFP_SM4_GCM_Ctx *)c;
+    if (ctx == NULL) {
+        return CRYPT_SUCCESS;
+    }
+    SDFP_SM4_GCM_CleanKey(ctx);
+    BSL_SAL_CleanseData(ctx->iv, sizeof(ctx->iv));
+    BSL_SAL_CleanseData(ctx->aad, sizeof(ctx->aad));
+    BSL_SAL_CleanseData(ctx->tag, sizeof(ctx->tag));
+    ctx->ivLen = 0;
+    ctx->aadLen = 0;
+    ctx->tagLen = SM4_GCM_TAG_MAX;
+    ctx->started = false;
+    return CRYPT_SUCCESS;
 }
 ```
 
 ---
 
-### SM2 signing no longer works for imported internal key indices
-`src/sm2/sm2_sign.c:151-157`
+### The build ignores `HITLS_LIB_DIR` and hard-codes the openHiTLS build tree
+`CMakeLists.txt:35-50`
 ```
-if (ctx->privateKey == NULL) {
-        return CRYPT_SM2_NO_PRVKEY;
-    }
-    ECCrefPrivateKey sdfPrv = {0};
-    EccPrvKeyToSdf(ctx->privateKey, &sdfPrv);
-    ret = SDF_DL_ExternalSign_ECC(ctx->hSessionHandle, SGD_SM2_1, &sdfPrv,
-            (unsigned char *)data, dataLen, &pucSignature);
+if(NOT DEFINED HITLS_LIB_DIR)
+    set(HITLS_LIB_DIR ${HITLS_DIR}/lib)
+endif()
 
-    ...
+find_library(HITLS_BSL_LIB libhitls_bsl.so
+    PATHS ${HITLS_DIR}/build
+    REQUIRED
+)
 
-    if (ctx->privateKey == NULL) {
-        return CRYPT_SM2_NO_PRVKEY;
-    }
+find_library(HITLS_CRYPTO_LIB libhitls_crypto.a
+    PATHS ${HITLS_DIR}/build
+    REQUIRED
+)
+
+find_library(HITLS_BSL_SO libhitls_bsl.so
+    PATHS ${HITLS_DIR}/build
+    REQUIRED
+)
 ```
-**Issue**: The refactor removed the `keyIndex` path from signing and now hard-requires an external private key object. That breaks contexts imported through `CRYPT_CTRL_KEY_INDEX`, even though `sm2_keymgmt.c` still accepts and exports those internal-key parameters.
+**Issue**: `HITLS_LIB_DIR` is still configurable, but the new `find_library()` calls never use it and search only `${HITLS_DIR}/build`. That breaks the documented `HITLS_DIR/include + HITLS_DIR/lib` layout and makes configured installed-library paths ineffective.
 **Fix**:
 ```
-if (ctx->keyIndex >= 0) {
-        ret = SDF_DL_GetPrivateKeyAccessRight(ctx->hSessionHandle, ctx->keyIndex,
-            ctx->pass != NULL ? ctx->pass : (unsigned char *)DEFAULT_PASS,
-            ctx->pass != NULL ? ctx->passLen : DEFAULT_PASS_LEN);
-        if (ret != SDR_OK) {
-            return SDFP_ERR_GET_PRIV_ACCESS;
-        }
-        ret = SDF_DL_InternalSign_ECC(ctx->hSessionHandle, ctx->keyIndex,
-            (unsigned char *)data, dataLen, &pucSignature);
-        (void)SDF_DL_ReleasePrivateKeyAccessRight(ctx->hSessionHandle, ctx->keyIndex);
-        if (ret != SDR_OK) {
-            return SDFP_ERR_SIGN;
-        }
-    } else {
-        if (ctx->privateKey == NULL) {
-            return CRYPT_SM2_NO_PRVKEY;
-        }
-        ECCrefPrivateKey sdfPrv = {0};
-        EccPrvKeyToSdf(ctx->privateKey, &sdfPrv);
-        ret = SDF_DL_ExternalSign_ECC(ctx->hSessionHandle, SGD_SM2_1, &sdfPrv,
-            (unsigned char *)data, dataLen, &pucSignature);
-        (void)memset(&sdfPrv, 0, sizeof(sdfPrv));
-        if (ret != SDR_OK) {
-            return SDFP_ERR_SIGN;
-        }
-    }
-```
-
----
-
-### Private-key-only signing now produces a non-standard SM2 hash
-`src/sm2/sm2_sign.c:235-253`
-```
-} else {
-        /* For external keys without public key, we can't compute Z = SM3(ID || PubKey).
-         * Use simple SM3 hash of message instead. This is compatible with the SDF
-         * library's ExternalSign_ECC which expects a pre-computed 32-byte hash. */
-        ret = SDF_DL_HashInit(ctx->hSessionHandle, SGD_SM3, NULL, ctx->userId, ctx->userIdLen);
-        if (ret != SDR_OK) {
-            SDFP_LOG(ret);
-            return SDFP_ERR_HASH;
-        }
-        ret = SDF_DL_HashUpdate(ctx->hSessionHandle, (unsigned char *)data, dataLen);
-        if (ret != SDR_OK) {
-            SDFP_LOG(ret);
-            return SDFP_ERR_HASH;
-        }
-        ret = SDF_DL_HashFinal(ctx->hSessionHandle, tbs, &tbsLen);
-        if (ret != SDR_OK) {
-            SDFP_LOG(ret);
-            return SDFP_ERR_HASH;
-        }
-    }
-```
-**Issue**: When no public key is present, the new fallback signs `SM3(msg)` instead of the SM2-required `SM3(Z || msg)`. That silently produces signatures that a compliant SM2 verifier will reject, instead of returning the previous `CRYPT_SM2_NO_PUBKEY` error or deriving the public key first.
-**Fix**:
-```
-if (ctx->publicKey == NULL) {
-        return CRYPT_SM2_NO_PUBKEY;
-    }
-
-    ret = Sm2ComputeMsgHash(ctx, ctx->publicKey, data, dataLen, tbs, &tbsLen);
-    if (ret != CRYPT_SUCCESS) {
-        SDFP_LOG(ret);
-        return ret;
-    }
+find_library(HITLS_BSL_LIB NAMES hitls_bsl libhitls_bsl.so libhitls_bsl.a
+    PATHS ${HITLS_LIB_DIR} ${HITLS_DIR}/build
+    REQUIRED
+)
+find_library(HITLS_CRYPTO_LIB NAMES hitls_crypto libhitls_crypto.so libhitls_crypto.a
+    PATHS ${HITLS_LIB_DIR} ${HITLS_DIR}/build
+    REQUIRED
+)
+find_library(HITLS_BSL_SO NAMES hitls_bsl libhitls_bsl.so
+    PATHS ${HITLS_LIB_DIR} ${HITLS_DIR}/build
+    REQUIRED
+)
 ```
 
 ---

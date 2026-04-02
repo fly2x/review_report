@@ -2,21 +2,101 @@
   {
     "source": "claude",
     "file": "src/rsa/rsa_sign.c",
-    "line": "117-119",
+    "line": "305-340",
     "severity": "high",
-    "title": "String literal passed as non-const pointer may cause undefined behavior",
-    "problem": "When ctx->pass == NULL, the code passes (unsigned char *)DEFAULT_PASS to SDF_DL_GetPrivateKeyAccessRight. DEFAULT_PASS is a string literal defined in provider.h as \"#define DEFAULT_PASS \"12345678\"\", which is stored in read-only memory. The cast to unsigned char * removes the const qualifier. If the SDF SDK modifies the password buffer, it will cause undefined behavior (segmentation fault or memory corruption).\n\nThis is inconsistent with provider.c which properly allocates a heap buffer and copies the default password (lines 209-220).",
-    "code": "ret = SDF_DL_GetPrivateKeyAccessRight(ctx->hSessionHandle, ctx->keyIndex,\n        ctx->pass != NULL ? ctx->pass : (unsigned char *)DEFAULT_PASS,\n        ctx->pass != NULL ? ctx->passLen : DEFAULT_PASS_LEN);",
-    "fix": "/* Use a static writable buffer for the default password */\nstatic uint8_t g_defaultPassBuffer[] = \"12345678\";\nret = SDF_DL_GetPrivateKeyAccessRight(ctx->hSessionHandle, ctx->keyIndex,\n        ctx->pass != NULL ? ctx->pass : g_defaultPassBuffer,\n        ctx->pass != NULL ? ctx->passLen : sizeof(g_defaultPassBuffer) - 1);"
+    "title": "RSA PKCS#1 v1.5 padding removal is not constant-time",
+    "problem": "The CRYPT_RSA_UnPackPkcsV15Type1_ex function validates padding using non-constant-time operations (while loop, memcmp-like checks). This creates a timing side-channel that could be exploited in Bleichenbacher-style attacks. The function is used in CRYPT_RSA_Recover for signature verification.",
+    "code": "uint32_t padNum = 0;\nwhile (*index == 0xff) {\n    index++;\n    tmpLen--;\n    padNum++;\n}\nif (padNum < 8) { // The PS padding is at least 8.\n    return CRYPT_RSA_ERR_PAD_NUM;\n}\nif (tmpLen == 0 || *index != 0x0) {\n    return CRYPT_RSA_ERR_INPUT_VALUE;\n}",
+    "fix": "/* Use constant-time padding validation similar to CRYPT_RSA_VerifyPkcsV15Type2_ex */\nuint32_t padNum = 0;\nuint32_t index = ~(0);\nuint32_t firstByte = Uint32ConstTimeEqual(data[0], 0x00);\nuint32_t secondByte = Uint32ConstTimeEqual(data[1], 0x01);\n\nfor (uint32_t i = 2; i < dataLen; i++) {\n    uint32_t isFF = Uint32ConstTimeEqual(data[i], 0xff);\n    padNum = Uint32ConstTimeSelect(isFF & ~index, padNum + 1, padNum);\n    index = Uint32ConstTimeSelect(isFF, index, i);\n}\n\nuint32_t valid = firstByte & secondByte & (~index);\nvalid &= Uint32ConstTimeGe(padNum, 8);\n\n/* Find zero separator and validate in constant-time */\nuint32_t zeroPos = ~(0);\nfor (uint32_t i = 2 + padNum; i < dataLen; i++) {\n    uint32_t isZero = Uint32ConstTimeIsZero(data[i]);\n    zeroPos = Uint32ConstTimeSelect(isZero & ~zeroPos, i, zeroPos);\n}\n\nvalid &= ~Uint32ConstTimeEqual(zeroPos, ~(0));\nif (valid == 0) {\n    return CRYPT_RSA_ERR_PAD_NUM;\n}\n\n/* Copy result in constant-time */\nzeroPos++;\nif (dataLen - zeroPos > *outLen) {\n    return CRYPT_RSA_BUFF_LEN_NOT_ENOUGH;\n}\nfor (uint32_t i = 0; i < dataLen - zeroPos; i++) {\n    out[i] = Uint8ConstTimeSelect(valid, data[zeroPos + i], 0);\n}\n*outLen = dataLen - zeroPos;\nreturn CRYPT_SUCCESS;"
   },
   {
     "source": "claude",
-    "file": "src/rsa/rsa_pkeycipher.c",
-    "line": "159-160",
-    "severity": "high",
-    "title": "String literal passed as non-const pointer may cause undefined behavior",
-    "problem": "When ctx->pass == NULL, the code passes (unsigned char *)DEFAULT_PASS to SDF_DL_GetPrivateKeyAccessRight. DEFAULT_PASS is a string literal stored in read-only memory. The cast to unsigned char * removes the const qualifier. If the SDF SDK modifies the password buffer, it will cause undefined behavior.",
-    "code": "ret = SDF_DL_GetPrivateKeyAccessRight(ctx->hSessionHandle, ctx->keyIndex,\n        ctx->pass != NULL ? ctx->pass : (unsigned char *)DEFAULT_PASS,\n        ctx->pass != NULL ? ctx->passLen : DEFAULT_PASS_LEN);",
-    "fix": "/* Use a static writable buffer for the default password */\nstatic uint8_t g_defaultPassBuffer[] = \"12345678\";\nret = SDF_DL_GetPrivateKeyAccessRight(ctx->hSessionHandle, ctx->keyIndex,\n        ctx->pass != NULL ? ctx->pass : g_defaultPassBuffer,\n        ctx->pass != NULL ? ctx->passLen : sizeof(g_defaultPassBuffer) - 1);"
+    "file": "src/common/sdf_dl.c",
+    "line": "70-71",
+    "severity": "medium",
+    "title": "Race condition in SDF library loading",
+    "problem": "The check for g_sdfLibHandle != NULL and the subsequent dlopen call are not atomic. If two threads call SDF_DL_Load simultaneously, both may see NULL and proceed to load the library, causing a resource leak or undefined behavior.",
+    "code": "if (g_sdfLibHandle != NULL) {\n    return SDFP_SUCCESS;\n}\n\ng_sdfLibHandle = dlopen(libPath, RTLD_NOW | RTLD_GLOBAL);",
+    "fix": "/* Use pthread_once or a similar mechanism for thread-safe initialization */\nstatic pthread_once_t g_loadOnce = PTHREAD_ONCE_INIT;\nstatic int g_loadResult = SDFP_SUCCESS;\n\nstatic void LoadSdfLib(void) {\n    g_loadResult = SDFP_ERR_LOAD_FAILED;\n    g_sdfLibHandle = dlopen(libPath, RTLD_NOW | RTLD_GLOBAL);\n    if (g_sdfLibHandle == NULL) {\n        SDFP_LOG(SDFP_ERR_LOAD_FAILED);\n        return;\n    }\n    /* Load symbols here... */\n    g_loadResult = SDFP_SUCCESS;\n}\n\nint32_t SDF_DL_Load(const char *libPath) {\n    if (libPath == NULL) {\n        SDFP_LOG(SDFP_ERR_NULL_INPUT);\n        return SDFP_ERR_NULL_INPUT;\n    }\n    int ret = pthread_once(&g_loadOnce, LoadSdfLib);\n    if (ret != 0) {\n        return SDFP_ERR_LOAD_FAILED;\n    }\n    return g_loadResult;\n}"
+  },
+  {
+    "source": "claude",
+    "file": "src/rsa/rsa_sign.c",
+    "line": "57-71",
+    "severity": "medium",
+    "title": "Stack-allocated hash buffer not zeroized after signing",
+    "problem": "The hash buffer in CRYPT_RSA_Sign contains the message digest which could be sensitive. While it's on the stack and has limited lifetime, explicit zeroization would be more secure for a cryptographic library handling sensitive operations.",
+    "code": "static int32_t CRYPT_RSA_Sign(SDFP_RSA_Ctx *ctx, int32_t algId, const uint8_t *data, uint32_t dataLen,\n    uint8_t *sign, uint32_t *signLen)\n{\n    uint8_t hash[64]; // 64 is max hash len\n    uint32_t hashLen = sizeof(hash) / sizeof(hash[0]);\n    if (ctx == NULL) {\n        return CRYPT_NULL_INPUT;\n    }\n    int32_t ret = EAL_Md(algId, data, dataLen, hash, &hashLen);\n    if (ret != CRYPT_SUCCESS) {\n        return ret;\n    }\n    return CRYPT_RSA_SignData(ctx, hash, hashLen, sign, signLen);\n}",
+    "fix": "static int32_t CRYPT_RSA_Sign(SDFP_RSA_Ctx *ctx, int32_t algId, const uint8_t *data, uint32_t dataLen,\n    uint8_t *sign, uint32_t *signLen)\n{\n    uint8_t hash[64]; // 64 is max hash len\n    uint32_t hashLen = sizeof(hash) / sizeof(hash[0]);\n    if (ctx == NULL) {\n        return CRYPT_NULL_INPUT;\n    }\n    int32_t ret = EAL_Md(algId, data, dataLen, hash, &hashLen);\n    if (ret != CRYPT_SUCCESS) {\n        (void)memset(hash, 0, sizeof(hash));\n        return ret;\n    }\n    ret = CRYPT_RSA_SignData(ctx, hash, hashLen, sign, signLen);\n    (void)memset(hash, 0, sizeof(hash));\n    return ret;\n}"
+  },
+  {
+    "source": "claude",
+    "file": "src/rsa/rsa_sign.c",
+    "line": "122-128",
+    "severity": "medium",
+    "title": "memset may be optimized out by compiler",
+    "problem": "The (void)memset pattern used to zeroize sensitive data may be optimized out by the compiler. The cast to void does not prevent dead store elimination in modern compilers with optimization enabled.",
+    "code": "EXIT:\n    (void)memset(pad, 0, padLen);\n    BSL_SAL_FREE(pad);\n    return ret;",
+    "fix": "EXIT:\n    /* Use compiler-resistant zeroization */\n    BSL_SAL_CleanseData(pad, padLen);\n    BSL_SAL_FREE(pad);\n    return ret;"
+  },
+  {
+    "source": "claude",
+    "file": "src/common/provider.c",
+    "line": "23-24",
+    "severity": "low",
+    "title": "Hardcoded default password \"12345678\" is weak",
+    "problem": "The default SDF device password \"12345678\" is a weak, predictable value. While it's documented and can be overridden, using such a weak default could lead to security issues if users don't change it.",
+    "code": "static const char   g_defaultPass[]  = \"12345678\";\nstatic const uint32_t g_defaultPassLen = 8;",
+    "fix": "/* Do NOT use a hardcoded default password. Require explicit password configuration. */\nstatic const char   g_defaultPass[]  = \"\";\nstatic const uint32_t g_defaultPassLen = 0;\n\n/* In CRYPT_EAL_ProviderInit, return error if password not provided: */\nif (provCtx->pass == NULL || provCtx->passLen == 0) {\n    SDFP_LOG(SDFP_ERR_NULL_INPUT);\n    BSL_SAL_Free(sdfLibPath);\n    return SDFP_ERR_NULL_INPUT;\n}"
+  },
+  {
+    "source": "claude",
+    "file": "src/sm2/sm2_keyexch.c",
+    "line": "35-36",
+    "severity": "low",
+    "title": "Key handle directly exposed through output parameter",
+    "problem": "The CRYPT_SM2_KapComputeKey function directly copies the key handle pointer to the output buffer. This breaks encapsulation and could lead to use-after-free bugs if the session is closed.",
+    "code": "memcpy(out, &hKeyHandle, sizeof(void *));\n*outlen = sizeof(void *);",
+    "fix": "/* Store the key handle in the context instead of returning it directly */\nselfCtx->hKeyHandle = hKeyHandle;\n/* Return an opaque identifier or handle reference */\n*(uint32_t*)out = 1; /* Return success indicator, caller uses ctx->hKeyHandle */\n*outlen = sizeof(uint32_t);"
+  },
+  {
+    "source": "claude",
+    "file": "src/sm2/sm2_sign.c",
+    "line": "243-252",
+    "severity": "low",
+    "title": "Derived public key not validated to be on curve",
+    "problem": "The DeriveSm2PublicKey function computes a public key from a private key but doesn't validate that the resulting point is actually on the SM2 curve. While the built-in SM2 implementation should be correct, explicit validation would be defense-in-depth.",
+    "code": "/* Generate the public key using CRYPT_CTRL_GEN_ECC_PUBLICKEY */\nret = CRYPT_EAL_PkeyCtrl(sm2Ctx, CRYPT_CTRL_GEN_ECC_PUBLICKEY, NULL, 0);\nif (ret != CRYPT_SUCCESS) {\n    SDFP_LOG(ret);\n    CRYPT_EAL_PkeyFreeCtx(sm2Ctx);\n    return ret;\n}",
+    "fix": "/* Generate the public key using CRYPT_CTRL_GEN_ECC_PUBLICKEY */\nret = CRYPT_EAL_PkeyCtrl(sm2Ctx, CRYPT_CTRL_GEN_ECC_PUBLICKEY, NULL, 0);\nif (ret != CRYPT_SUCCESS) {\n    SDFP_LOG(ret);\n    CRYPT_EAL_PkeyFreeCtx(sm2Ctx);\n    return ret;\n}\n\n/* Validate the generated public key is on the curve */\nret = CRYPT_EAL_PkeyCtrl(sm2Ctx, CRYPT_EAL_PKEY_CHECK, NULL, 0);\nif (ret != CRYPT_SUCCESS) {\n    SDFP_LOG(ret);\n    CRYPT_EAL_PkeyFreeCtx(sm2Ctx);\n    return CRYPT_ECC_PKEY_ERR_NOT_VALID_KEY;\n}"
+  },
+  {
+    "source": "claude",
+    "file": "src/sm4/sm4_gcm.c",
+    "line": "39-51",
+    "severity": "low",
+    "title": "Tag buffer not explicitly zeroized in SDFP_SM4_GCM_CleanCtx",
+    "problem": "The SDFP_SM4_GCM_CleanCtx function calls BSL_SAL_CleanseData on iv, aad, and tag buffers, but the tag buffer contains sensitive authentication data that should be explicitly zeroized. While BSL_SAL_CleanseData should handle this, the implementation should be verified.",
+    "code": "static void SDFP_SM4_GCM_CleanCtx(SDFP_SM4_GCM_Ctx *ctx)\n{\n    if (ctx == NULL) {\n        return;\n    }\n    SDFP_SM4_GCM_CleanKey(ctx);\n    if (ctx->hSessionHandle != NULL) {\n        (void)SDF_DL_CloseSession(ctx->hSessionHandle);\n        ctx->hSessionHandle = NULL;\n    }\n    BSL_SAL_CleanseData(ctx->iv, sizeof(ctx->iv));\n    BSL_SAL_CleanseData(ctx->aad, sizeof(ctx->aad));\n    BSL_SAL_CleanseData(ctx->tag, sizeof(ctx->tag));",
+    "fix": "/* Verify BSL_SAL_CleanseData implementation uses memset_s or equivalent */\n/* If BSL_SAL_CleanseData is not guaranteed to be compiler-resistant: */\nstatic void SDFP_SM4_GCM_CleanCtx(SDFP_SM4_GCM_Ctx *ctx)\n{\n    if (ctx == NULL) {\n        return;\n    }\n    SDFP_SM4_GCM_CleanKey(ctx);\n    if (ctx->hSessionHandle != NULL) {\n        (void)SDF_DL_CloseSession(ctx->hSessionHandle);\n        ctx->hSessionHandle = NULL;\n    }\n    /* Explicitly zeroize sensitive data using compiler-resistant method */\n    (void)explicit_bzero(ctx->iv, sizeof(ctx->iv));\n    (void)explicit_bzero(ctx->aad, sizeof(ctx->aad));\n    (void)explicit_bzero(ctx->tag, sizeof(ctx->tag));"
+  },
+  {
+    "source": "claude",
+    "file": "src/rsa/rsa_keymgmt.c",
+    "line": "59-61",
+    "severity": "low",
+    "title": "No validation that RSA public exponent e is odd or within safe range",
+    "problem": "The ValidateRsaParams function only checks that eLen <= bits, but doesn't validate that the public exponent e is odd (required for RSA) or within commonly accepted secure ranges (e.g., 65537 or 3).",
+    "code": "static int32_t ValidateRsaParams(uint32_t eLen, uint32_t bits)\n{\n    /* the length of e cannot be greater than bits */\n    if (eLen > BN_BITS_TO_BYTES(bits)) {\n        return CRYPT_RSA_ERR_KEY_BITS;\n    }\n    return CRYPT_SUCCESS;\n}",
+    "fix": "static int32_t ValidateRsaParams(const uint8_t *e, uint32_t eLen, uint32_t bits)\n{\n    /* the length of e cannot be greater than bits */\n    if (eLen > BN_BITS_TO_BYTES(bits) || eLen == 0) {\n        return CRYPT_RSA_ERR_KEY_BITS;\n    }\n    /* Public exponent must be odd (least significant bit = 1) */\n    if ((e[eLen - 1] & 0x01) == 0) {\n        return CRYPT_RSA_ERR_KEY_BITS;\n    }\n    /* Recommend minimum exponent value (avoid e=1 which is insecure) */\n    if (eLen == 1 && e[0] < 3) {\n        return CRYPT_RSA_ERR_KEY_BITS;\n    }\n    return CRYPT_SUCCESS;\n}"
+  },
+  {
+    "source": "claude",
+    "file": "src/sm2/sm2_sign.c",
+    "line": "280-284",
+    "severity": "low",
+    "title": "Dead code - unreachable condition in CRYPT_SM2_Sign",
+    "problem": "The code checks `if (ctx->publicKey != NULL)` and has an `else` block, but the condition before it only checks `if (ctx->publicKey == NULL)` and calls `DeriveSm2PublicKey` in that case. This creates confusion about control flow.",
+    "code": "/* Compute the message hash */\nEccPubKey *pubKeyForHash = ctx->publicKey;\nEccPubKey derivedPubKey = {0};\n\nif (ctx->publicKey != NULL) {\n    /* Use existing public key for Z computation */\n} else {\n    /* Derive public key from private key for proper Z computation */\n    ret = DeriveSm2PublicKey(ctx, &derivedPubKey);",
+    "fix": "/* Compute the message hash */\nEccPubKey *pubKeyForHash = NULL;\nEccPubKey derivedPubKey = {0};\nbool needFree = false;\n\nif (ctx->publicKey != NULL) {\n    /* Use existing public key for Z computation */\n    pubKeyForHash = ctx->publicKey;\n} else {\n    /* Derive public key from private key for proper Z computation */\n    ret = DeriveSm2PublicKey(ctx, &derivedPubKey);\n    if (ret != CRYPT_SUCCESS) {\n        SDFP_LOG(ret);\n        return ret;\n    }\n    pubKeyForHash = &derivedPubKey;\n    needFree = true;\n}\n\nret = Sm2ComputeMsgHash(ctx, pubKeyForHash, data, dataLen, tbs, &tbsLen);\nif (needFree) {\n    (void)memset(&derivedPubKey, 0, sizeof(derivedPubKey));\n}"
   }
 ]

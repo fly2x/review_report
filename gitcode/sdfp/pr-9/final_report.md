@@ -2,110 +2,69 @@
 ## openHiTLS/sdfp - PR #9
 
 ### Summary
-- **Total Issues**: 7
-- **Critical**: 1
-- **High**: 5
-- **Medium**: 1
-- **Low**: 0
+- **Total Issues**: 12
+- **Critical**: 0
+- **High**: 3
+- **Medium**: 4
+- **Low**: 5
 - **Reviewers**: claude, gemini, codex
-
----
-
-
-## Critical
-
-### Buffer overflow in SM4-GCM encryption finalization
-`src/sm4/sm4_gcm.c:213-228`
-**Reviewers**: GEMINI | **置信度**: 可信
-```
-unsigned int tmpLen = *outLen;
-int ret;
-if (ctx->enc) {
-    unsigned int tagOutLen = SM4_GCM_TAG_MAX;
-    /* Pre-check: ensure the output buffer can hold both ciphertext tail and tag
-     * before calling AuthEncFinal, which would write partial data irreversibly. */
-    if (*outLen < tagOutLen) {
-        return CRYPT_INVALID_ARG;
-    }
-    /* AuthEncFinal outputs remaining ciphertext bytes into [out, tmpLen) */
-    ret = SDF_DL_AuthEncFinal(ctx->hSessionHandle, out, &tmpLen, ctx->tag, &tagOutLen);
-    if (ret == SDR_OK) {
-        ctx->tagLen = tagOutLen;
-        memcpy(out + tmpLen, ctx->tag, tagOutLen);
-        tmpLen += tagOutLen;
-    }
-```
-**Issue**: When calling SDF_DL_AuthEncFinal, tmpLen is initialized to the full buffer capacity (*outLen). The hardware might write up to tmpLen bytes into the out buffer. The code then appends tagOutLen bytes (the GCM authentication tag) starting at out + tmpLen. If the total written length plus the tag length exceeds *outLen, a buffer overflow occurs. The available capacity for AuthEncFinal must be reduced by tagOutLen.
-**Fix**:
-```
-unsigned int tmpLen;
-int ret;
-if (ctx->enc) {
-    unsigned int tagOutLen = SM4_GCM_TAG_MAX;
-    /* Pre-check: ensure the output buffer can hold both ciphertext tail and tag
-     * before calling AuthEncFinal, which would write partial data irreversibly. */
-    if (*outLen < tagOutLen) {
-        return CRYPT_INVALID_ARG;
-    }
-    tmpLen = *outLen - tagOutLen;  /* Reserve space for the tag */
-    /* AuthEncFinal outputs remaining ciphertext bytes into [out, tmpLen) */
-    ret = SDF_DL_AuthEncFinal(ctx->hSessionHandle, out, &tmpLen, ctx->tag, &tagOutLen);
-    if (ret == SDR_OK) {
-        ctx->tagLen = tagOutLen;
-        memcpy(out + tmpLen, ctx->tag, tagOutLen);
-        tmpLen += tagOutLen;
-    }
-```
 
 ---
 
 
 ## High
 
-### String literal passed as non-const pointer may cause undefined behavior
-`src/rsa/rsa_sign.c:117-119`
-**Reviewers**: CLAUDE | **置信度**: 可信
+### RSA PKCS#1 v1.5 padding removal is not constant-time
+`src/rsa/rsa_sign.c:304-340`
+**Reviewers**: CLAUDE | **置信度**: 较可信
 ```
-ret = SDF_DL_GetPrivateKeyAccessRight(ctx->hSessionHandle, ctx->keyIndex,
-        ctx->pass != NULL ? ctx->pass : (unsigned char *)DEFAULT_PASS,
-        ctx->pass != NULL ? ctx->passLen : DEFAULT_PASS_LEN);
+uint32_t padNum = 0;
+while (*index == 0xff) {
+    index++;
+    tmpLen--;
+    padNum++;
+}
+if (padNum < 8) { // The PS padding is at least 8.
+    return CRYPT_RSA_ERR_PAD_NUM;
+}
+if (tmpLen == 0 || *index != 0x0) {
+    return CRYPT_RSA_ERR_INPUT_VALUE;
+}
 ```
-**Issue**: When ctx->pass == NULL, the code passes (unsigned char *)DEFAULT_PASS to SDF_DL_GetPrivateKeyAccessRight. DEFAULT_PASS is a string literal defined in provider.h as "#define DEFAULT_PASS \"12345678\"", which is stored in read-only memory. The cast to unsigned char * removes the const qualifier. If the SDF SDK modifies the password buffer, it will cause undefined behavior (segmentation fault or memory corruption).
-
-This is inconsistent with provider.c which properly allocates a heap buffer and copies the default password (lines 209-220).
+**Issue**: The CRYPT_RSA_UnPackPkcsV15Type1_ex function validates padding using non-constant-time operations (while loop, direct pointer comparisons, conditional checks). This creates a timing side-channel that could be exploited in Bleichenbacher-style attacks against RSA PKCS#1 v1.5. The function is used in CRYPT_RSA_Recover for signature verification and decryption.
 **Fix**:
 ```
-/* Use a static writable buffer for the default password */
-static uint8_t g_defaultPassBuffer[] = "12345678";
-ret = SDF_DL_GetPrivateKeyAccessRight(ctx->hSessionHandle, ctx->keyIndex,
-        ctx->pass != NULL ? ctx->pass : g_defaultPassBuffer,
-        ctx->pass != NULL ? ctx->passLen : sizeof(g_defaultPassBuffer) - 1);
+/* Use constant-time padding validation to prevent timing attacks */
+uint32_t valid = 1;
+uint32_t padNum = 0;
+uint8_t foundZero = 0;
+
+/* Verify first two bytes in constant-time */
+valid &= (data[0] == 0x00);
+valid &= (data[1] == 0x01);
+
+/* Count 0xFF bytes and find zero separator in constant-time */
+for (uint32_t i = 2; i < dataLen; i++) {
+    uint8_t isFF = (data[i] == 0xff);
+    uint8_t isZero = (data[i] == 0x00);
+    padNum += (isFF & ~foundZero);
+    foundZero |= (isZero & ~foundZero);
+}
+
+/* Validate minimum padding and found separator */
+valid &= (padNum >= 8);
+valid &= foundZero;
+
+/* Copy result using constant-time select */
+if (!valid) {
+    return CRYPT_RSA_ERR_PAD_NUM;
+}
 ```
 
 ---
 
-### String literal passed as non-const pointer may cause undefined behavior
-`src/rsa/rsa_pkeycipher.c:158-160`
-**Reviewers**: CLAUDE | **置信度**: 可信
-```
-ret = SDF_DL_GetPrivateKeyAccessRight(ctx->hSessionHandle, ctx->keyIndex,
-        ctx->pass != NULL ? ctx->pass : (unsigned char *)DEFAULT_PASS,
-        ctx->pass != NULL ? ctx->passLen : DEFAULT_PASS_LEN);
-```
-**Issue**: When ctx->pass == NULL, the code passes (unsigned char *)DEFAULT_PASS to SDF_DL_GetPrivateKeyAccessRight. DEFAULT_PASS is a string literal stored in read-only memory. The cast to unsigned char * removes the const qualifier. If the SDF SDK modifies the password buffer, it will cause undefined behavior.
-**Fix**:
-```
-/* Use a static writable buffer for the default password */
-static uint8_t g_defaultPassBuffer[] = "12345678";
-ret = SDF_DL_GetPrivateKeyAccessRight(ctx->hSessionHandle, ctx->keyIndex,
-        ctx->pass != NULL ? ctx->pass : g_defaultPassBuffer,
-        ctx->pass != NULL ? ctx->passLen : sizeof(g_defaultPassBuffer) - 1);
-```
-
----
-
-### RSA support is silently disabled while RSA callbacks remain exposed
-`src/common/sdf_dl.c:183-193`
+### RSA provider support is registered but SDF symbols are not loaded
+`src/common/sdf_dl.c:141-156`
 **Reviewers**: CODEX | **置信度**: 可信
 ```
 /*
@@ -120,9 +79,10 @@ ret = SDF_DL_GetPrivateKeyAccessRight(ctx->hSessionHandle, ctx->keyIndex,
 /* LOAD_SYM(extPubKeyOpRsa,          SDF_ExternalPublicKeyOperation_RSA); */
 /* LOAD_SYM(extPrivKeyOpRsa,         SDF_ExternalPrivateKeyOperation_RSA); */
 ```
-**Issue**: The loader no longer resolves any RSA symbols (all commented out), but the provider still registers RSA keymgmt/sign/asymcipher callbacks. Every RSA path now reaches wrappers whose function pointers are still NULL and fails with SDFP_ERR_NOT_LOADED at runtime. This creates silent runtime failures for users attempting to use RSA functionality.
+**Issue**: The provider advertises RSA key management, signing, and asymmetric cipher support in provider.c, but SDF_DL_Load() comments out all RSA symbol loading (lines 187-193). Every RSA wrapper call hits a NULL function pointer and returns SDFP_ERR_NOT_LOADED, causing all RSA operations to fail at runtime. The comment claims "on demand loading" but there is no mechanism to trigger such loading later.
 **Fix**:
 ```
+/* Load all RSA symbols if supported by SDF device */
 LOAD_SYM(genKeyPairRsa,           SDF_GenerateKeyPair_RSA);
 LOAD_SYM(exportSignPubKeyRsa,     SDF_ExportSignPublicKey_RSA);
 LOAD_SYM(exportEncPubKeyRsa,      SDF_ExportEncPublicKey_RSA);
@@ -134,92 +94,36 @@ LOAD_SYM(extPrivKeyOpRsa,         SDF_ExternalPrivateKeyOperation_RSA);
 
 ---
 
-### Provider unload tears down the process-global RNG even when it did not create it
-`src/common/provider.c:95`
+### GCM Final now appends tag and breaks existing AEAD API contract
+`src/sm4/sm4_gcm.c:219-233`
 **Reviewers**: CODEX | **置信度**: 可信
 ```
-ret = CRYPT_EAL_RandInit(CRYPT_RAND_AES256_CTR, NULL, NULL, NULL, 0);
-if (ret != CRYPT_SUCCESS) {
-    /* RNG may already be initialized by the application probe it */
-    uint8_t probe[4];
-    if (CRYPT_EAL_Randbytes(probe, sizeof(probe)) != CRYPT_SUCCESS) {
-        BSL_SAL_Free(temp->sdfLibPath);
-        BSL_SAL_Free(temp);
-        SDF_DL_Unload();
-        return SDFP_ERR_OPEN_DEVICE;
+if (ctx->enc) {
+    unsigned int tagOutLen = SM4_GCM_TAG_MAX;
+    /* Pre-check: ensure the output buffer can hold both ciphertext tail and tag */
+    if (*outLen < tagOutLen) {
+        SDFP_LOG(CRYPT_INVALID_ARG);
+        return CRYPT_INVALID_ARG;
+    }
+    ret = SDF_DL_AuthEncFinal(ctx->hSessionHandle, out, &tmpLen, ctx->tag, &tagOutLen);
+    if (ret == SDR_OK) {
+        ctx->tagLen = tagOutLen;
+        memcpy(out + tmpLen, ctx->tag, tagOutLen);
+        tmpLen += tagOutLen;
     }
 }
-
-...
-
-static void CRYPT_EAL_ProvFree(void *provCtx)
-{
-    ...
-    CRYPT_EAL_RandDeinit();
-    ...
-}
 ```
-**Issue**: ProviderInit explicitly tolerates CRYPT_EAL_RandInit() failing because some other component already initialized the global RNG (lines 170-180), but CRYPT_EAL_ProvFree() always calls CRYPT_EAL_RandDeinit() anyway at line 95. Unloading the provider can therefore deinitialize RNG state that belongs to the application or another provider instance, causing undefined behavior in components that still expect the RNG to be initialized.
+**Issue**: The SDFP_SM4_GCM_Final function now requires the output buffer to be at least 16 bytes larger than the ciphertext tail and appends the authentication tag directly into the ciphertext buffer. This breaks the standard openHiTLS AEAD API where callers fetch the tag separately via CRYPT_CTRL_GET_TAG after Final. Existing callers sized for ciphertext-only will fail with CRYPT_INVALID_ARG.
 **Fix**:
 ```
-/* Add a bool ownsRand to CRYPT_EAL_ProvCtx and only deinit when we created it */
-ret = CRYPT_EAL_RandInit(CRYPT_RAND_AES256_CTR, NULL, NULL, NULL, 0);
-if (ret == CRYPT_SUCCESS) {
-    temp->ownsRand = true;
-} else {
-    uint8_t probe[4];
-    if (CRYPT_EAL_Randbytes(probe, sizeof(probe)) != CRYPT_SUCCESS) {
-        BSL_SAL_Free(temp->sdfLibPath);
-        BSL_SAL_Free(temp);
-        SDF_DL_Unload();
-        return SDFP_ERR_OPEN_DEVICE;
+if (ctx->enc) {
+    unsigned int tagOutLen = SM4_GCM_TAG_MAX;
+    /* AuthEncFinal outputs remaining ciphertext only; tag retrieved via GET_TAG */
+    ret = SDF_DL_AuthEncFinal(ctx->hSessionHandle, out, &tmpLen, ctx->tag, &tagOutLen);
+    if (ret == SDR_OK) {
+        ctx->tagLen = tagOutLen;
+        /* Do NOT append tag to output - use CRYPT_CTRL_GET_TAG instead */
     }
-}
-
-/* In CRYPT_EAL_ProvFree: */
-if (ctx->ownsRand) {
-    CRYPT_EAL_RandDeinit();
-}
-```
-
----
-
-### Private-key-only signing produces non-standard SM2 hash
-`src/sm2/sm2_sign.c:235-253`
-**Reviewers**: CODEX | **置信度**: 可信
-```
-} else {
-    /* For external keys without public key, we can't compute Z = SM3(ID || PubKey).
-     * Use simple SM3 hash of message instead. This is compatible with the SDF
-     * library's ExternalSign_ECC which expects a pre-computed 32-byte hash. */
-    ret = SDF_DL_HashInit(ctx->hSessionHandle, SGD_SM3, NULL, ctx->userId, ctx->userIdLen);
-    if (ret != SDR_OK) {
-        SDFP_LOG(ret);
-        return SDFP_ERR_HASH;
-    }
-    ret = SDF_DL_HashUpdate(ctx->hSessionHandle, (unsigned char *)data, dataLen);
-    if (ret != SDR_OK) {
-        SDFP_LOG(ret);
-        return SDFP_ERR_HASH;
-    }
-    ret = SDF_DL_HashFinal(ctx->hSessionHandle, tbs, &tbsLen);
-    if (ret != SDR_OK) {
-        SDFP_LOG(ret);
-        return SDFP_ERR_HASH;
-    }
-}
-```
-**Issue**: When no public key is present, the fallback signs SM3(msg) instead of the SM2-required SM3(Z || msg) where Z = SM3(ID || PubKey). This silently produces signatures that a compliant SM2 verifier will reject, as the SM2 standard specifically requires computing Z from the public key. The code should either return CRYPT_SM2_NO_PUBKEY error or derive the public key from the private key first.
-**Fix**:
-```
-if (ctx->publicKey == NULL) {
-    return CRYPT_SM2_NO_PUBKEY;
-}
-
-ret = Sm2ComputeMsgHash(ctx, ctx->publicKey, data, dataLen, tbs, &tbsLen);
-if (ret != CRYPT_SUCCESS) {
-    SDFP_LOG(ret);
-    return ret;
 }
 ```
 
@@ -228,25 +132,309 @@ if (ret != CRYPT_SUCCESS) {
 
 ## Medium
 
-### Resource leak of temporary key handle during DEK generation
-`src/sm4/sm4_cipher.c:285-292`
-**Reviewers**: GEMINI | **置信度**: 可信
+### Reusing GCM context carries previous AAD and tag into next operation
+`src/sm4/sm4_gcm.c:246-251`
+**Reviewers**: CODEX | **置信度**: 可信
 ```
-void *hTmpKey = NULL;
-ret = SDF_DL_GenerateKeyWithKEK(hTmpSession, 128, SGD_SM4_ECB,
-    ctx->kekIndex, wrapBuf, &wrapLen, &hTmpKey);
-(void)SDF_DL_CloseSession(hTmpSession);
+static int32_t SDFP_SM4_GCM_DeinitCtx(void *c)
+{
+    /* Method A: only destroy key handle; session + config preserved. */
+    SDFP_SM4_GCM_CleanKey((SDFP_SM4_GCM_Ctx *)c);
+    return CRYPT_SUCCESS;
+}
 ```
-**Issue**: The code calls SDF_DL_GenerateKeyWithKEK to create a new session key, which yields a hardware key handle (hTmpKey). It then immediately closes hTmpSession without explicitly destroying the generated key handle via SDF_DL_DestroyKey. Although closing the session might implicitly drop session resources in some implementations, it can cause memory or resource leaks inside the HSM or driver on strict SDF device implementations. The key handle must be destroyed properly.
+**Issue**: SDFP_SM4_GCM_DeinitCtx only destroys the key handle but preserves iv, aad, tag, ivLen, aadLen, and tagLen. When SDFP_SM4_GCM_SdfInit is called on the next operation, it consumes the stale AAD/tag values from the previous operation. This causes silent authentication failures or incorrect encryption when reusing a cipher context without explicitly resetting all state.
 **Fix**:
 ```
-void *hTmpKey = NULL;
-ret = SDF_DL_GenerateKeyWithKEK(hTmpSession, 128, SGD_SM4_ECB,
-    ctx->kekIndex, wrapBuf, &wrapLen, &hTmpKey);
-if (ret == SDR_OK && hTmpKey != NULL) {
-    (void)SDF_DL_DestroyKey(hTmpSession, hTmpKey);
+static int32_t SDFP_SM4_GCM_DeinitCtx(void *c)
+{
+    SDFP_SM4_GCM_Ctx *ctx = (SDFP_SM4_GCM_Ctx *)c;
+    if (ctx == NULL) {
+        return CRYPT_SUCCESS;
+    }
+    SDFP_SM4_GCM_CleanKey(ctx);
+    /* Reset all per-message AEAD state to prevent cross-contamination */
+    BSL_SAL_CleanseData(ctx->iv, sizeof(ctx->iv));
+    BSL_SAL_CleanseData(ctx->aad, sizeof(ctx->aad));
+    BSL_SAL_CleanseData(ctx->tag, sizeof(ctx->tag));
+    ctx->ivLen = 0;
+    ctx->aadLen = 0;
+    ctx->tagLen = SM4_GCM_TAG_MAX;
+    ctx->started = false;
+    return CRYPT_SUCCESS;
 }
-(void)SDF_DL_CloseSession(hTmpSession);
+```
+
+---
+
+### Race condition in SDF library loading
+`src/common/sdf_dl.c:141-156`
+**Reviewers**: CLAUDE | **置信度**: 较可信
+```
+if (g_sdfLibHandle != NULL) {
+    return SDFP_SUCCESS;
+}
+
+g_sdfLibHandle = dlopen(libPath, RTLD_NOW | RTLD_GLOBAL);
+```
+**Issue**: The check for g_sdfLibHandle != NULL and the subsequent dlopen call are not atomic. If two threads call SDF_DL_Load simultaneously, both may see NULL and proceed to load the library, causing a resource leak (first handle is lost) or undefined behavior.
+**Fix**:
+```
+/* Use pthread_once for thread-safe one-time initialization */
+static pthread_once_t g_loadOnce = PTHREAD_ONCE_INIT;
+static int g_loadResult = SDFP_SUCCESS;
+static char *g_libPath = NULL;
+
+static void LoadSdfLib(void) {
+    g_loadResult = SDFP_ERR_LOAD_FAILED;
+    g_sdfLibHandle = dlopen(g_libPath, RTLD_NOW | RTLD_GLOBAL);
+    if (g_sdfLibHandle == NULL) {
+        SDFP_LOG(SDFP_ERR_LOAD_FAILED);
+        return;
+    }
+    /* Load symbols here... */
+    g_loadResult = SDFP_SUCCESS;
+}
+
+int32_t SDF_DL_Load(const char *libPath) {
+    if (libPath == NULL) {
+        SDFP_LOG(SDFP_ERR_NULL_INPUT);
+        return SDFP_ERR_NULL_INPUT;
+    }
+    /* Store path for once callback */
+    if (g_libPath == NULL) {
+        g_libPath = strdup(libPath);
+        if (g_libPath == NULL) return SDFP_ERR_LOAD_FAILED;
+    }
+    int ret = pthread_once(&g_loadOnce, LoadSdfLib);
+    if (ret != 0) {
+        return SDFP_ERR_LOAD_FAILED;
+    }
+    return g_loadResult;
+}
+```
+
+---
+
+### Stack-allocated hash buffer not zeroized after signing
+`src/rsa/rsa_sign.c:195-208`
+**Reviewers**: CLAUDE | **置信度**: 较可信
+```
+static int32_t CRYPT_RSA_Sign(SDFP_RSA_Ctx *ctx, int32_t algId, const uint8_t *data, uint32_t dataLen,
+    uint8_t *sign, uint32_t *signLen)
+{
+    uint8_t hash[64]; // 64 is max hash len
+    uint32_t hashLen = sizeof(hash) / sizeof(hash[0]);
+    if (ctx == NULL) {
+        return CRYPT_NULL_INPUT;
+    }
+    int32_t ret = EAL_Md(algId, data, dataLen, hash, &hashLen);
+    if (ret != CRYPT_SUCCESS) {
+        return ret;
+    }
+    return CRYPT_RSA_SignData(ctx, hash, hashLen, sign, signLen);
+}
+```
+**Issue**: The hash buffer in CRYPT_RSA_Sign contains the message digest which could be sensitive cryptographically. While it's on the stack and has limited lifetime, explicit zeroization would be more secure for a cryptographic library handling sensitive operations.
+**Fix**:
+```
+static int32_t CRYPT_RSA_Sign(SDFP_RSA_Ctx *ctx, int32_t algId, const uint8_t *data, uint32_t dataLen,
+    uint8_t *sign, uint32_t *signLen)
+{
+    uint8_t hash[64]; // 64 is max hash len
+    uint32_t hashLen = sizeof(hash) / sizeof(hash[0]);
+    if (ctx == NULL) {
+        return CRYPT_NULL_INPUT;
+    }
+    int32_t ret = EAL_Md(algId, data, dataLen, hash, &hashLen);
+    if (ret != CRYPT_SUCCESS) {
+        (void)memset(hash, 0, sizeof(hash));
+        return ret;
+    }
+    ret = CRYPT_RSA_SignData(ctx, hash, hashLen, sign, signLen);
+    (void)memset(hash, 0, sizeof(hash));
+    return ret;
+}
+```
+
+---
+
+### memset may be optimized out by compiler
+`src/rsa/rsa_sign.c:152-155`
+**Reviewers**: CLAUDE | **置信度**: 较可信
+```
+EXIT:
+    (void)memset(pad, 0, padLen);
+    BSL_SAL_FREE(pad);
+    return ret;
+```
+**Issue**: The (void)memset pattern used to zeroize sensitive data may be optimized out by modern compilers with dead store elimination enabled. The cast to void does not prevent the compiler from removing memset calls on memory that is about to be freed.
+**Fix**:
+```
+EXIT:
+    /* Use compiler-resistant zeroization if available */
+    #ifdef __STDC_LIB_EXT1__
+        memset_s(pad, padLen, 0, padLen);
+    #elif defined(__GLIBC__) && defined(__GLIBC_PREREQ)
+        #if __GLIBC_PREREQ(2, 25)
+            explicit_bzero(pad, padLen);
+        #else
+            (void)memset(pad, 0, padLen);
+            __asm__ __volatile__("" ::: "memory");
+        #endif
+    #else
+        BSL_SAL_CleanseData(pad, padLen);
+    #endif
+    BSL_SAL_FREE(pad);
+    return ret;
+```
+
+---
+
+
+## Low
+
+### Hardcoded default password "12345678" is weak
+`src/common/provider.c:17-18`
+**Reviewers**: CLAUDE | **置信度**: 较可信
+```
+static const char   g_defaultPass[]  = "12345678";
+static const uint32_t g_defaultPassLen = 8;
+```
+**Issue**: The default SDF device password "12345678" is a weak, predictable value. While it's documented and can be overridden via SDFP_PARAM_SDF_PASS, using such a weak default could lead to security issues if users don't change it.
+**Fix**:
+```
+/* Require explicit password configuration - do not use weak default */
+static const char   g_defaultPass[]  = "";
+static const uint32_t g_defaultPassLen = 0;
+
+/* In CRYPT_EAL_ProviderInit, return error if password not provided: */
+if (temp->pass == NULL) {
+    SDFP_LOG(SDFP_ERR_NULL_INPUT);
+    SDF_DL_CloseDevice(temp->hDeviceHandle);
+    BSL_SAL_Free(temp->sdfLibPath);
+    BSL_SAL_Free(temp);
+    SDF_DL_Unload();
+    return SDFP_ERR_NULL_INPUT;
+}
+```
+
+---
+
+### Key handle directly exposed through output parameter
+`src/sm2/sm2_keyexch.c:122-123`
+**Reviewers**: CLAUDE | **置信度**: 较可信
+```
+memcpy(out, &hKeyHandle, sizeof(void *));
+*outlen = sizeof(void *);
+```
+**Issue**: The CRYPT_SM2_KapComputeKey function directly copies the key handle pointer to the output buffer. This breaks encapsulation and could lead to use-after-free bugs if the session is closed. The caller receives a raw pointer that may become invalid.
+**Fix**:
+```
+/* Store the key handle in the context instead of returning raw pointer */
+selfCtx->hKeyHandle = hKeyHandle;
+/* Return success indicator; caller must use context for further operations */
+*(uint32_t*)out = 1; /* Return success/status code */
+*outlen = sizeof(uint32_t);
+```
+
+---
+
+### No validation that RSA public exponent e is odd or within safe range
+`src/rsa/rsa_keymgmt.c:82-89`
+**Reviewers**: CLAUDE | **置信度**: 较可信
+```
+static int32_t ValidateRsaParams(uint32_t eLen, uint32_t bits)
+{
+    /* the length of e cannot be greater than bits */
+    if (eLen > BN_BITS_TO_BYTES(bits)) {
+        return CRYPT_RSA_ERR_KEY_BITS;
+    }
+    return CRYPT_SUCCESS;
+}
+```
+**Issue**: The ValidateRsaParams function only checks that eLen <= bits, but doesn't validate that the public exponent e is odd (required for RSA to work correctly) or within commonly accepted secure ranges. Even exponents like e=2 make RSA insecure or non-functional.
+**Fix**:
+```
+static int32_t ValidateRsaParams(const uint8_t *e, uint32_t eLen, uint32_t bits)
+{
+    /* the length of e cannot be greater than bits */
+    if (eLen > BN_BITS_TO_BYTES(bits) || eLen == 0) {
+        return CRYPT_RSA_ERR_KEY_BITS;
+    }
+    /* Public exponent must be odd (least significant bit = 1) for RSA */
+    if ((e[eLen - 1] & 0x01) == 0) {
+        return CRYPT_RSA_ERR_KEY_BITS;
+    }
+    /* Recommend minimum exponent value (avoid e=1, e=2 which are insecure) */
+    if (eLen == 1 && e[0] < 3) {
+        return CRYPT_RSA_ERR_KEY_BITS;
+    }
+    return CRYPT_SUCCESS;
+}
+```
+
+---
+
+### Derived public key not validated to be on curve
+`src/sm2/sm2_sign.c:62-67`
+**Reviewers**: CLAUDE | **置信度**: 需评估
+```
+/* Generate the public key using CRYPT_CTRL_GEN_ECC_PUBLICKEY */
+ret = CRYPT_EAL_PkeyCtrl(sm2Ctx, CRYPT_CTRL_GEN_ECC_PUBLICKEY, NULL, 0);
+if (ret != CRYPT_SUCCESS) {
+    SDFP_LOG(ret);
+    CRYPT_EAL_PkeyFreeCtx(sm2Ctx);
+    return ret;
+}
+```
+**Issue**: The DeriveSm2PublicKey function computes a public key from a private key using CRYPT_CTRL_GEN_ECC_PUBLICKEY but doesn't validate that the resulting point is actually on the SM2 curve using CRYPT_EAL_PKEY_CHECK. While the built-in SM2 implementation should be correct, explicit validation would be defense-in-depth against faults or attacks.
+**Fix**:
+```
+/* Generate the public key using CRYPT_CTRL_GEN_ECC_PUBLICKEY */
+ret = CRYPT_EAL_PkeyCtrl(sm2Ctx, CRYPT_CTRL_GEN_ECC_PUBLICKEY, NULL, 0);
+if (ret != CRYPT_SUCCESS) {
+    SDFP_LOG(ret);
+    CRYPT_EAL_PkeyFreeCtx(sm2Ctx);
+    return ret;
+}
+
+/* Validate the generated public key is on the curve (defense-in-depth) */
+ret = CRYPT_EAL_PkeyCtrl(sm2Ctx, CRYPT_EAL_PKEY_CHECK, NULL, 0);
+if (ret != CRYPT_SUCCESS) {
+    SDFP_LOG(ret);
+    CRYPT_EAL_PkeyFreeCtx(sm2Ctx);
+    return CRYPT_ECC_PKEY_ERR_NOT_VALID_KEY;
+}
+```
+
+---
+
+### Build ignores HITLS_LIB_DIR and hard-codes openHiTLS build tree
+`CMakeLists.txt:43-50`
+**Reviewers**: CODEX | **置信度**: 较可信
+```
+find_library(HITLS_BSL_LIB libhitls_bsl.so
+    PATHS ${HITLS_DIR}/build
+    REQUIRED
+)
+
+find_library(HITLS_CRYPTO_LIB libhitls_crypto.a
+    PATHS ${HITLS_DIR}/build
+    REQUIRED
+)
+```
+**Issue**: HITLS_LIB_DIR is set at line 35-37 but the find_library calls never use it, searching only ${HITLS_DIR}/build. This breaks the documented HITLS_DIR/include + HITLS_DIR/lib layout and makes configured installed-library paths ineffective.
+**Fix**:
+```
+find_library(HITLS_BSL_LIB NAMES hitls_bsl libhitls_bsl.so libhitls_bsl.a
+    PATHS ${HITLS_LIB_DIR} ${HITLS_DIR}/build
+    REQUIRED
+)
+find_library(HITLS_CRYPTO_LIB NAMES hitls_crypto libhitls_crypto.so libhitls_crypto.a
+    PATHS ${HITLS_LIB_DIR} ${HITLS_DIR}/build
+    REQUIRED
+)
 ```
 
 ---
