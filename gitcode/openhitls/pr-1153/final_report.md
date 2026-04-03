@@ -4,9 +4,9 @@
 ### Summary
 - **Total Issues**: 4
 - **Critical**: 0
-- **High**: 2
+- **High**: 1
 - **Medium**: 1
-- **Low**: 1
+- **Low**: 2
 - **Reviewers**: claude, gemini, codex
 
 ---
@@ -14,86 +14,24 @@
 
 ## High
 
-### Secret-dependent early returns leak signing state via timing side channel
-`crypto/mldsa/src/ml_dsa_core.c:614-633`
-**Reviewers**: CODEX | **置信度**: 可信
+### Pre-swapping SHAKE128 output buffer breaks ML-DSA on big-endian platforms
+`crypto/mldsa/src/asm/export_ml_dsa_armv8.c:100-104`
+**Reviewers**: CODEX, GEMINI | **置信度**: 可信
 ```
-static bool ValidityChecksL(const CRYPT_ML_DSA_Ctx *ctx, int32_t *const z[MLDSA_L_MAX], uint32_t t)
-{
-    bool valid = true;
-    for (uint8_t i = 0; i < ctx->info->l; i++) {
-        if (MLDSA_ValidityChecks(z[i], t) == false) {
-            return false;  // EARLY RETURN LEAKS WHICH INDEX FAILS
-        }
-    }
-    return valid;
+GOTO_ERR_IF(hashMethod->squeeze(mdCtx, (uint8_t *)buf, outlen), ret);
+for (uint32_t i = 0; i < buflen; i++) {
+    buf[i] = CRYPT_HTOLE32(buf[i]);
 }
+uint32_t gensize = 0;
+gensize = MldRejUniformAsm(a, (uint8_t *) buf, outlen, MLD_REJ_UNIFORM_TABLE);
 ```
-**Issue**: The ValidityChecksL and ValidityChecksK functions use early-return on the first failing vector check. These functions are called in the signing rejection sampling loop on secret-dependent data (z, r0, ct0). The early return reveals which vector index fails first through timing, potentially leaking information about the secret key. The git diff shows the code was changed from accumulating results (valid &=) to early-return pattern.
+**Issue**: Lines 100-101 pre-byte-swap the entire SHAKE128 output buffer using `CRYPT_HTOLE32()` before passing it to `MldRejUniformAsm()`. On big-endian AArch64, this reverses every 4-byte chunk, corrupting the byte stream that the assembly function expects to read as raw bytes. The assembly function `MldRejUniformAsm()` consumes the SHAKE output as a raw byte stream (using `ld3` instruction), but the pre-swapping corrupts this data. The C fallback implementation (export_mldsa_c.c) correctly does per-element byte-swapping DURING reading (lines 107-109), not pre-swapping the buffer. This causes incorrect matrix generation in `ExpandA()`, breaking ML-DSA keygen/sign/verify on big-endian builds.
 **Fix**:
 ```
-static bool ValidityChecksL(const CRYPT_ML_DSA_Ctx *ctx, int32_t *const z[MLDSA_L_MAX], uint32_t t)
-{
-    bool valid = true;
-    for (uint8_t i = 0; i < ctx->info->l; i++) {
-        valid &= MLDSA_ValidityChecks(z[i], t);
-    }
-    return valid;
-}
-```
+GOTO_ERR_IF(hashMethod->squeeze(mdCtx, (uint8_t *)buf, outlen), ret);
 
----
-
-### ARMv8 bound check short-circuits on first failing chunk, worsening timing leak
-`crypto/mldsa/src/asm/validity_check_armv8.S:100-105`
-**Reviewers**: CODEX | **置信度**: 可信
-```
-check_loop:
-    load_data
-    check_one_line data0, mask_final
-    check_one_line data1, mask_tmp
-    ORR mask_final.16b, mask_final.16b, mask_tmp.16b
-    check_one_line data2, mask_tmp
-    ORR mask_final.16b, mask_final.16b, mask_tmp.16b
-    ... (more checks with ORR accumulation)
-
-    UMAXV s30, mask_final.4s
-    umov w3, v30.s[0]
-    cbnz w3, done  # EXITS ON FIRST FAILING CHUNK
-
-    subs count, count, #1
-    cbnz count, check_loop
-```
-**Issue**: The ARMv8 validity check exits the loop as soon as any 32-coefficient chunk fails the bound check (via UMAXV + cbnz). This makes the timing side channel from the above issue much more fine-grained on ARMv8: an attacker can potentially learn which 32-coefficient chunk within each vector fails first, not just which vector fails. The scalar reference implementation processes all 256 coefficients before checking the final accumulated result.
-**Fix**:
-```
-eor tmp.16b, tmp.16b, tmp.16b  # Initialize accumulator
-
-check_loop:
-    load_data
-    check_one_line data0, mask_final
-    
-    check_one_line data1, mask_tmp
-    ORR mask_final.16b, mask_final.16b, mask_tmp.16b
-    check_one_line data2, mask_tmp
-    ORR mask_final.16b, mask_final.16b, mask_tmp.16b
-    check_one_line data3, mask_tmp
-    ORR mask_final.16b, mask_final.16b, mask_tmp.16b
-    check_one_line data4, mask_tmp
-    ORR mask_final.16b, mask_final.16b, mask_tmp.16b
-    check_one_line data5, mask_tmp
-    ORR mask_final.16b, mask_final.16b, mask_tmp.16b
-    check_one_line data6, mask_tmp
-    ORR mask_final.16b, mask_final.16b, mask_tmp.16b
-    check_one_line data7, mask_tmp
-    ORR mask_final.16b, mask_final.16b, mask_tmp.16b
-
-    ORR tmp.16b, tmp.16b, mask_final.16b  # Accumulate across iterations
-    subs count, count, #1
-    cbnz count, check_loop
-
-    UMAXV s29, tmp.4s  # Check final accumulated result
-    umov w3, v29.s[0]
+/* MldRejUniformAsm reads raw bytes, so do not byte-swap the buffer in place. */
+uint32_t gensize = MldRejUniformAsm(a, (const uint8_t *)buf, outlen, MLD_REJ_UNIFORM_TABLE);
 ```
 
 ---
@@ -101,25 +39,21 @@ check_loop:
 
 ## Medium
 
-### HITLS_CRYPTO_MLDSA_ARMV8 not defined as child dependency
-`cmake/hitls_define_dependencies.cmake:420-424`
+### MLDSA_ARMV8 option lacks architecture guard
+`cmake/hitls_options.cmake:301`
 **Reviewers**: CLAUDE | **置信度**: 较可信
 ```
-hitls_define_dependency(HITLS_CRYPTO_MLDSA
-    DEPS HITLS_CRYPTO_PKEY
-        HITLS_CRYPTO_PKEY_SIGN HITLS_CRYPTO_SHA3 HITLS_BSL_PARAMS HITLS_BSL_OBJ_DEFAULT
-    CHILDREN HITLS_CRYPTO_MLDSA_CHECK
-)
+option(HITLS_CRYPTO_MLDSA_ARMV8                                "MLDSA ARMv8" OFF)
 ```
-**Issue**: HITLS_CRYPTO_MLDSA does not list HITLS_CRYPTO_MLDSA_ARMV8 as a CHILDREN in the dependency system. All other *_ARMV8 features (like HITLS_CRYPTO_SHA2_ARMV8 which lists HITLS_CRYPTO_SHA256_ARMV8 and HITLS_CRYPTO_SHA512_ARMV8 as children) follow this pattern. While the automatic regex check in hitls_config_check.cmake will validate that HITLS_ASM_ARMV8 is enabled, the missing CHILDREN relationship is inconsistent with the established architecture pattern.
+**Issue**: The HITLS_CRYPTO_MLDSA_ARMV8 option at line 301 has no architecture detection to prevent it from being enabled on non-ARMv8 platforms. If a user enables this option on x86, x86_64, ARMv7, or other architectures, the build will fail with assembler errors since the assembly files are ARMv8-specific.
 **Fix**:
 ```
-hitls_define_dependency(HITLS_CRYPTO_MLDSA
-    DEPS HITLS_CRYPTO_PKEY
-        HITLS_CRYPTO_PKEY_SIGN HITLS_CRYPTO_SHA3 HITLS_BSL_PARAMS HITLS_BSL_OBJ_DEFAULT
-    CHILDREN HITLS_CRYPTO_MLDSA_CHECK HITLS_CRYPTO_MLDSA_ARMV8
-)
-hitls_define_dependency(HITLS_CRYPTO_MLDSA_ARMV8 DEPS HITLS_CRYPTO_MLDSA)
+# Only allow MLDSA_ARMV8 on AArch64
+if(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|ARM64")
+    option(HITLS_CRYPTO_MLDSA_ARMV8                            "MLDSA ARMv8" OFF)
+else()
+    set(HITLS_CRYPTO_MLDSA_ARMV8 OFF CACHE BOOL "MLDSA ARMv8 (not supported on this platform)" FORCE)
+endif()
 ```
 
 ---
@@ -127,39 +61,72 @@ hitls_define_dependency(HITLS_CRYPTO_MLDSA_ARMV8 DEPS HITLS_CRYPTO_MLDSA)
 
 ## Low
 
-### Header file incorrectly added to source list
-`crypto/mldsa/CMakeLists.txt:32`
+### Misleading unused parameter cast
+`crypto/mldsa/src/asm/export_ml_dsa_armv8.c:46`
 **Reviewers**: CLAUDE | **置信度**: 较可信
 ```
-if(HITLS_CRYPTO_MLDSA_ARMV8)
-    ...
-    list(APPEND _mldsa_sources ${CMAKE_CURRENT_SOURCE_DIR}/src/asm/export_ml_dsa_armv8.h)
-    ...
-endif()
+void MLDSA_UseHint(const CRYPT_ML_DSA_Ctx *ctx, int32_t *const h[MLDSA_K_MAX], int32_t *w[MLDSA_K_MAX])
+{
+    (void) h;  // This is misleading - h IS used in the loop below
+    void (*fp)(int32_t *, int32_t const *);
+    fp = ctx->info->k == K_VALUE_OF_MLDSA_44? Usehint88: Usehint32;
+
+    for (uint8_t i = 0; i < ctx->info->k; i++) {
+        fp(w[i], h[i]);
+    }
+}
 ```
-**Issue**: The header file export_ml_dsa_armv8.h is added to _mldsa_sources. In CMake, header files should typically not be listed as sources - they are handled by target_include_directories() and discovered automatically. While this won't cause a build error, it's not best practice.
+**Issue**: Line 46 contains `(void) h;` to suppress unused parameter warnings, but the `h` parameter is actually used on line 51 in the loop `fp(w[i], h[i])`. The cast is unnecessary and confusing as it suggests the parameter is not used when it actually is.
 **Fix**:
 ```
-if(HITLS_CRYPTO_MLDSA_ARMV8)
-    list(APPEND _mldsa_sources ${CMAKE_CURRENT_SOURCE_DIR}/src/asm/decompose_armv8.S)
-    list(APPEND _mldsa_sources ${CMAKE_CURRENT_SOURCE_DIR}/src/asm/intt_armv8.S)
-    list(APPEND _mldsa_sources ${CMAKE_CURRENT_SOURCE_DIR}/src/asm/ntt_armv8.S)
-    list(APPEND _mldsa_sources ${CMAKE_CURRENT_SOURCE_DIR}/src/asm/pointwise_acc_montgomery_armv8.S)
-    list(APPEND _mldsa_sources ${CMAKE_CURRENT_SOURCE_DIR}/src/asm/pointwise_montgomery_armv8.S)
-    list(APPEND _mldsa_sources ${CMAKE_CURRENT_SOURCE_DIR}/src/asm/polyz_unpack_armv8.S)
-    list(APPEND _mldsa_sources ${CMAKE_CURRENT_SOURCE_DIR}/src/asm/power2round_armv8.S)
-    list(APPEND _mldsa_sources ${CMAKE_CURRENT_SOURCE_DIR}/src/asm/rej_uniform_armv8.S)
-    list(APPEND _mldsa_sources ${CMAKE_CURRENT_SOURCE_DIR}/src/asm/rej_uniform_eta2_armv8.S)
-    list(APPEND _mldsa_sources ${CMAKE_CURRENT_SOURCE_DIR}/src/asm/rej_uniform_eta4_armv8.S)
-    list(APPEND _mldsa_sources ${CMAKE_CURRENT_SOURCE_DIR}/src/asm/usehint_armv8.S)
-    list(APPEND _mldsa_sources ${CMAKE_CURRENT_SOURCE_DIR}/src/asm/validity_check_armv8.S)
-    list(APPEND _mldsa_sources ${CMAKE_CURRENT_SOURCE_DIR}/src/asm/vec_opts_x8_armv8.S)
-    list(APPEND _mldsa_sources ${CMAKE_CURRENT_SOURCE_DIR}/src/asm/export_ml_dsa_armv8.c)
-    # Remove export_ml_dsa_armv8.h from sources - headers are handled by target_include_directories
-    list(APPEND _mldsa_sources ${CMAKE_CURRENT_SOURCE_DIR}/src/asm/aarch64_zeta_table.c)
-    list(APPEND _mldsa_sources ${CMAKE_CURRENT_SOURCE_DIR}/src/asm/polyz_unpack_table.c)
-    list(APPEND _mldsa_sources ${CMAKE_CURRENT_SOURCE_DIR}/src/asm/rej_uniform_table.c)
-endif()
+void MLDSA_UseHint(const CRYPT_ML_DSA_Ctx *ctx, int32_t *const h[MLDSA_K_MAX], int32_t *w[MLDSA_K_MAX])
+{
+    void (*fp)(int32_t *, int32_t const *);
+    fp = ctx->info->k == K_VALUE_OF_MLDSA_44? Usehint88: Usehint32;
+
+    for (uint8_t i = 0; i < ctx->info->k; i++) {
+        fp(w[i], h[i]);
+    }
+}
+```
+
+---
+
+### MLDSA_MatrixMul relies on implicit memory layout assumptions
+`crypto/mldsa/src/asm/export_ml_dsa_armv8.c:32-42`
+**Reviewers**: CLAUDE | **置信度**: 需评估
+```
+void MLDSA_MatrixMul(const CRYPT_ML_DSA_Ctx *ctx, int32_t *t, int32_t *const matrix[MLDSA_L_MAX],
+    int32_t *const s[MLDSA_L_MAX])
+{
+    if (ctx->info->k == K_VALUE_OF_MLDSA_44) {
+        PolyveclPointwiseAccMontgomeryL4Asm(t, matrix[0], s[0]);
+    } else if (ctx->info->k == K_VALUE_OF_MLDSA_65) {
+        PolyveclPointwiseAccMontgomeryL5Asm(t, matrix[0], s[0]);
+    } else {
+        PolyveclPointwiseAccMontgomeryL7Asm(t, matrix[0], s[0]);
+    }
+}
+```
+**Issue**: The ARMv8 implementation of MLDSA_MatrixMul only passes `matrix[0]` and `s[0]` to the assembly functions, unlike the C implementation which iterates over all rows. This relies on the specific memory layout created by MLDSASetMatrixMem where the matrix is allocated contiguously. The assembly functions expect `matrix[0]` to point to a contiguous array with 1024-byte stride between polynomials. If the memory allocation pattern in MLDSASetMatrixMem changes, this will silently break. The code is currently correct based on MLDSASetMatrixMem implementation, but the dependency is implicit and fragile.
+**Fix**:
+```
+/* Add documentation noting the memory layout dependency */
+/* matrix[0] must point to contiguous memory with MLDSA_N * sizeof(int32_t) stride.
+ * This assumes MLDSASetMatrixMem allocation pattern: matrix[i][j] is stored
+ * contiguously with stride MLDSA_N between adjacent polynomials in each row.
+ */
+void MLDSA_MatrixMul(const CRYPT_ML_DSA_Ctx *ctx, int32_t *t, int32_t *const matrix[MLDSA_L_MAX],
+    int32_t *const s[MLDSA_L_MAX])
+{
+    if (ctx->info->k == K_VALUE_OF_MLDSA_44) {
+        PolyveclPointwiseAccMontgomeryL4Asm(t, matrix[0], s[0]);
+    } else if (ctx->info->k == K_VALUE_OF_MLDSA_65) {
+        PolyveclPointwiseAccMontgomeryL5Asm(t, matrix[0], s[0]);
+    } else {
+        PolyveclPointwiseAccMontgomeryL7Asm(t, matrix[0], s[0]);
+    }
+}
 ```
 
 ---

@@ -4,67 +4,90 @@
 
 ## High
 
-### Missing ARMv8 architecture check before including assembly files
-`crypto/mldsa/CMakeLists.txt:15-28`
+### MLDSA_MatrixMul may process incorrect matrix row
+`crypto/mldsa/src/asm/export_ml_dsa_armv8.c:32-42`
 ```
-if(HITLS_CRYPTO_MLDSA_ARMV8)
-    list(APPEND _mldsa_sources ${CMAKE_CURRENT_SOURCE_DIR}/src/asm/decompose_armv8.S)
-    ...
+void MLDSA_MatrixMul(const CRYPT_ML_DSA_Ctx *ctx, int32_t *t, int32_t *const matrix[MLDSA_L_MAX],
+    int32_t *const s[MLDSA_L_MAX])
+{
+    if (ctx->info->k == K_VALUE_OF_MLDSA_44) {
+        PolyveclPointwiseAccMontgomeryL4Asm(t, matrix[0], s[0]);
+    } else if (ctx->info->k == K_VALUE_OF_MLDSA_65) {
+        PolyveclPointwiseAccMontgomeryL5Asm(t, matrix[0], s[0]);
+    } else {
+        PolyveclPointwiseAccMontgomeryL7Asm(t, matrix[0], s[0]);
+    }
+}
 ```
-**Issue**: The CMakeLists.txt includes ARMv8 assembly files when HITLS_CRYPTO_MLDSA_ARMV8 is ON, but doesn't verify the build architecture is actually ARMv8. Building with HITLS_CRYPTO_MLDSA_ARMV8=ON on x86_64 will fail to compile or produce incorrect results. The check should also verify HITLS_ASM_ARMV8 is enabled.
+**Issue**: The assembly function PolyveclPointwiseAccMontgomeryL4Asm expects the second parameter (matrix row) to be a contiguous array of l polynomials with stride 1024. The code passes matrix[i] which points to matrix[i][0]. However, based on MLDSASetMatrixMem allocation, the matrix[i] row IS contiguous with 1024-byte stride. The current code is correct, but this is fragile and depends on the specific memory layout in MLDSASetMatrixMem. If the memory allocation pattern changes, this will silently break.
 **Fix**:
 ```
-if(HITLS_CRYPTO_MLDSA_ARMV8 AND HITLS_ASM_ARMV8)
-    list(APPEND _mldsa_sources ${CMAKE_CURRENT_SOURCE_DIR}/src/asm/decompose_armv8.S)
-    ...
+// Add compile-time assertion to verify matrix memory layout
+static_assert(offsetof(MLDSA_KeyGenMatrixSt, matrix) < 10000, 
+    "Matrix layout verification failed");
+
+void MLDSA_MatrixMul(const CRYPT_ML_DSA_Ctx *ctx, int32_t *t, int32_t *const matrix[MLDSA_L_MAX],
+    int32_t *const s[MLDSA_L_MAX])
+{
+    // Verify that matrix[0] points to contiguous memory
+    // This assumes MLDSASetMatrixMem allocates matrix[i][0..l-1] contiguously
+    if (ctx->info->k == K_VALUE_OF_MLDSA_44) {
+        PolyveclPointwiseAccMontgomeryL4Asm(t, matrix[0], s[0]);
+    } else if (ctx->info->k == K_VALUE_OF_MLDSA_65) {
+        PolyveclPointwiseAccMontgomeryL5Asm(t, matrix[0], s[0]);
+    } else {
+        PolyveclPointwiseAccMontgomeryL7Asm(t, matrix[0], s[0]);
+    }
+}
 ```
 
 ---
 
-### Missing HITLS_CRYPTO_MLDSA_ARMV8 dependency definition
-`cmake/hitls_define_dependencies.cmake:420-424`
+
+## Medium
+
+### Missing architecture guard for MLDSA_ARMV8 option
+`cmake/hitls_options.cmake:301`
 ```
-hitls_define_dependency(HITLS_CRYPTO_MLDSA
-    DEPS HITLS_CRYPTO_PKEY
-        HITLS_CRYPTO_PKEY_SIGN HITLS_CRYPTO_SHA3 HITLS_BSL_PARAMS HITLS_BSL_OBJ_DEFAULT
-    CHILDREN HITLS_CRYPTO_MLDSA_CHECK
-)
+option(HITLS_CRYPTO_MLDSA_ARMV8                                "MLDSA ARMv8" OFF)
 ```
-**Issue**: HITLS_CRYPTO_MLDSA_ARMV8 is not defined in hitls_define_dependencies.cmake, unlike all other *_ARMV8 features. This means there's no automatic validation that HITLS_ASM_ARMV8 is enabled when HITLS_CRYPTO_MLDSA_ARMV8 is ON. Other ARMV8 features (like HITLS_CRYPTO_BN_ARMV8, HITLS_CRYPTO_AES_ARMV8) have proper dependency definitions.
+**Issue**: The HITLS_CRYPTO_MLDSA_ARMV8 option has no architecture detection to prevent it from being enabled on non-ARMv8 platforms. If a user enables this option on x86 or other architectures, the build will fail with assembler errors. The option should be automatically disabled or hidden on non-ARMv8 platforms.
 **Fix**:
 ```
-hitls_define_dependency(HITLS_CRYPTO_MLDSA
-    DEPS HITLS_CRYPTO_PKEY
-        HITLS_CRYPTO_PKEY_SIGN HITLS_CRYPTO_SHA3 HITLS_BSL_PARAMS HITLS_BSL_OBJ_DEFAULT
-    CHILDREN HITLS_CRYPTO_MLDSA_CHECK HITLS_CRYPTO_MLDSA_ARMV8
-)
-hitls_define_dependency(HITLS_CRYPTO_MLDSA_ARMV8 DEPS HITLS_CRYPTO_MLDSA)
+# Only allow MLDSA_ARMV8 on AArch64
+if(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|ARM64")
+    option(HITLS_CRYPTO_MLDSA_ARMV8                            "MLDSA ARMv8" OFF)
+else()
+    set(HITLS_CRYPTO_MLDSA_ARMV8 OFF CACHE BOOL "MLDSA ARMv8 (not supported on this platform)" FORCE)
+endif()
 ```
-
----
-
-### HITLS_CRYPTO_MLDSA_ARMV8 bypasses ASM architecture validation
-`cmake/hitls_config_check.cmake:113-117`
-```
-if(_var MATCHES "^HITLS_CRYPTO_.*_ARMV8$")
-    if(NOT HITLS_ASM_ARMV8)
-```
-**Issue**: The config check validates that all other *_ARMV8 features require HITLS_ASM_ARMV8, but HITLS_CRYPTO_MLDSA_ARMV8 is not included in this check because it's not in the dependency system. The pattern matching regex "^HITLS_CRYPTO_.*_ARMV8$" should match MLDSA_ARMV8 but the feature isn't properly registered.
 
 ---
 
 
 ## Low
 
-### Header file incorrectly added as source file
-`crypto/mldsa/CMakeLists.txt:28`
+### Unused parameter warning
+`crypto/mldsa/src/asm/export_ml_dsa_armv8.c:46`
 ```
-list(APPEND _mldsa_sources ${CMAKE_CURRENT_SOURCE_DIR}/src/asm/export_ml_dsa_armv8.h)
+void MLDSA_UseHint(const CRYPT_ML_DSA_Ctx *ctx, int32_t *const h[MLDSA_K_MAX], int32_t *w[MLDSA_K_MAX])
+{
+    (void) h;  // This is misleading - h IS used in the loop below
+    void (*fp)(int32_t *, int32_t const *);
+    fp = ctx->info->k == K_VALUE_OF_MLDSA_44? Usehint88: Usehint32;
 ```
-**Issue**: Header file export_ml_dsa_armv8.h is added to _mldsa_sources. Header files should not be listed as sources in CMake.
+**Issue**: The `h` parameter in MLDSA_UseHint is marked as unused with `(void) h;` but it is actually used indirectly through the `fp(w[i], h[i])` call. The cast is unnecessary and confusing.
 **Fix**:
 ```
-# Remove this line - header files should not be in source lists
+void MLDSA_UseHint(const CRYPT_ML_DSA_Ctx *ctx, int32_t *const h[MLDSA_K_MAX], int32_t *w[MLDSA_K_MAX])
+{
+    void (*fp)(int32_t *, int32_t const *);
+    fp = ctx->info->k == K_VALUE_OF_MLDSA_44? Usehint88: Usehint32;
+
+    for (uint8_t i = 0; i < ctx->info->k; i++) {
+        fp(w[i], h[i]);
+    }
+}
 ```
 
 ---

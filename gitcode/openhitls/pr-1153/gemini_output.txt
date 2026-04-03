@@ -1,0 +1,17 @@
+===ISSUE===
+FILE: crypto/mldsa/src/asm/export_ml_dsa_armv8.c
+LINE: 98-100
+SEVERITY: low
+TITLE: Unnecessary and potentially harmful byte-swap of SHAKE128 output buffer
+PROBLEM: The loop calls `CRYPT_HTOLE32(buf[i])` on the buffer produced by `hashMethod->squeeze` before passing it to `MldRejUniformAsm`. `MldRejUniformAsm` expects a raw byte array (as its signature implies: `const uint8_t *buf`), and unpacks bytes directly using the `ld3` instruction. On Little Endian (AArch64 default), `CRYPT_HTOLE32` is a no-op, so the code works. However, on Big Endian architectures, this loop would reverse the byte order of every 32-bit chunk, corrupting the byte stream for the ASM function. Furthermore, the C fallback loop at line 105 performs its own per-element `CRYPT_HTOLE32` swapping during reading, so pre-swapping the buffer is both useless and logically incorrect.
+CODE:
+```c
+    for (uint32_t i = 0; i < buflen; i++) {
+        buf[i] = CRYPT_HTOLE32(buf[i]);
+    }
+```
+FIX:
+```c
+    // The useless and potentially harmful byte-swap loop has been removed.
+```
+===END===

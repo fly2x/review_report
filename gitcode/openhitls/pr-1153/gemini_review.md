@@ -2,32 +2,19 @@
 **Reviewer**: GEMINI
 
 
-## High
+## Low
 
-### Missing negative value correction in MLDSA_Batch_Decompose
-`crypto/mldsa/src/noasm/export_mldsa_c.c:76-83`
+### Unnecessary and potentially harmful byte-swap of SHAKE128 output buffer
+`crypto/mldsa/src/asm/export_ml_dsa_armv8.c:98-100`
 ```
-void MLDSA_Batch_Decompose(const CRYPT_ML_DSA_Ctx *ctx, int32_t a[MLDSA_N], int32_t r1[MLDSA_N])
-{
-    for (uint32_t i = 0; i < MLDSA_N; i++) {
-        int32_t r0;
-        MLDSA_Decompose(ctx, a[i], &r1[i], &r0);
-        a[i] = r0;
+for (uint32_t i = 0; i < buflen; i++) {
+        buf[i] = CRYPT_HTOLE32(buf[i]);
     }
-}
 ```
-**Issue**: In `ml_dsa_core.c`, the original `ComputesW` function correctly added `MLDSA_Q` to negative values of `w[i][j]` before calling `Decompose()`. The refactored code extracts this loop into `MLDSA_Batch_Decompose()`. While the assembly version (`BatchDecompose88`/`32`) includes this correction via the `finit` macro, the C fallback version in `export_mldsa_c.c` omits it. Since `MLDSA_ComputesINVNTT()` can yield negative values, passing a negative `int32_t` directly to `MLDSA_Decompose()` causes the cast to `uint32_t` to produce a huge number, breaking the decomposition logic.
+**Issue**: The loop calls `CRYPT_HTOLE32(buf[i])` on the buffer produced by `hashMethod->squeeze` before passing it to `MldRejUniformAsm`. `MldRejUniformAsm` expects a raw byte array (as its signature implies: `const uint8_t *buf`), and unpacks bytes directly using the `ld3` instruction. On Little Endian (AArch64 default), `CRYPT_HTOLE32` is a no-op, so the code works. However, on Big Endian architectures, this loop would reverse the byte order of every 32-bit chunk, corrupting the byte stream for the ASM function. Furthermore, the C fallback loop at line 105 performs its own per-element `CRYPT_HTOLE32` swapping during reading, so pre-swapping the buffer is both useless and logically incorrect.
 **Fix**:
 ```
-void MLDSA_Batch_Decompose(const CRYPT_ML_DSA_Ctx *ctx, int32_t a[MLDSA_N], int32_t r1[MLDSA_N])
-{
-    for (uint32_t i = 0; i < MLDSA_N; i++) {
-        int32_t r0;
-        a[i] = a[i] + (MLDSA_Q & (a[i] >> 31));
-        MLDSA_Decompose(ctx, a[i], &r1[i], &r0);
-        a[i] = r0;
-    }
-}
+// The useless and potentially harmful byte-swap loop has been removed.
 ```
 
 ---

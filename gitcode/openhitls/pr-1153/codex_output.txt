@@ -1,129 +1,37 @@
 ===ISSUE===
-FILE: crypto/mldsa/src/ml_dsa_core.c
-LINE: 616-630
+FILE: crypto/mldsa/src/asm/export_ml_dsa_armv8.c
+LINE: 99-104
 SEVERITY: high
-TITLE: Secret-dependent early returns leak signing state
-PROBLEM: These helpers used to scan every vector and accumulate the result. The new early-return form stops at the first failing vector. `MLDSA_SignInternal()` calls these checks on secret-dependent `z`, `r0`, and `ct0`, so the signing runtime now reveals which vector fails first in each rejection-sampling round.
+TITLE: Pre-swapping the XOF buffer breaks ARMv8 rejection sampling on big-endian targets
+PROBLEM: `MldRejUniformAsm()` consumes the SHAKE output as a raw byte stream, but this code rewrites that stream with `CRYPT_HTOLE32()` before calling the asm routine. On big-endian AArch64, that reverses every 4-byte chunk in memory, so the asm path parses different 24-bit values than the scalar fallback and than the no-asm implementation. The result is a corrupted `ExpandA()` matrix, which in turn breaks ML-DSA keygen/sign/verify on supported big-endian builds.
 CODE:
 ```c
-static bool ValidityChecksL(const CRYPT_ML_DSA_Ctx *ctx, int32_t *const z[MLDSA_L_MAX], uint32_t t)
-{
-    bool valid = true;
-    for (uint8_t i = 0; i < ctx->info->l; i++) {
-        if (MLDSA_ValidityChecks(z[i], t) == false) {
-            return false;
-        }
+    GOTO_ERR_IF(hashMethod->squeeze(mdCtx, (uint8_t *)buf, outlen), ret);
+    for (uint32_t i = 0; i < buflen; i++) {
+        buf[i] = CRYPT_HTOLE32(buf[i]);
     }
-    return valid;
-}
-
-static bool ValidityChecksK(const CRYPT_ML_DSA_Ctx *ctx, int32_t *const z[MLDSA_K_MAX], uint32_t t)
-{
-    bool valid = true;
-    for (uint8_t i = 0; i < ctx->info->k; i++) {
-        if (MLDSA_ValidityChecks(z[i], t) == false) {
-            return false;
-        }
-    }
-    return valid;
-}
+    uint32_t gensize = 0;
+    gensize = MldRejUniformAsm(a, (uint8_t *) buf, outlen, MLD_REJ_UNIFORM_TABLE);
 ```
 FIX:
 ```c
-static bool ValidityChecksL(const CRYPT_ML_DSA_Ctx *ctx, int32_t *const z[MLDSA_L_MAX], uint32_t t)
-{
-    bool valid = true;
-    for (uint8_t i = 0; i < ctx->info->l; i++) {
-        valid &= MLDSA_ValidityChecks(z[i], t);
+    GOTO_ERR_IF(hashMethod->squeeze(mdCtx, (uint8_t *)buf, outlen), ret);
+
+    /* MldRejUniformAsm reads raw bytes, so do not byte-swap the buffer in place. */
+    uint32_t gensize = MldRejUniformAsm(a, (const uint8_t *)buf, outlen, MLD_REJ_UNIFORM_TABLE);
+    outlen = CRYPT_SHAKE128_BLOCKSIZE;
+    buflen = CRYPT_SHAKE128_BLOCKSIZE / 4;
+
+    for (uint32_t i = gensize, j = buflen + 1; i < MLDSA_N;) {
+        if (j >= buflen && i < MLDSA_N) {
+            GOTO_ERR_IF(hashMethod->squeeze(mdCtx, (uint8_t *)buf, outlen), ret);
+            j = 0;
+        }
+
+        const uint32_t w0 = GET_UINT32_LE((const uint8_t *)buf, j * sizeof(uint32_t));
+        const uint32_t w1 = GET_UINT32_LE((const uint8_t *)buf, (j + 1) * sizeof(uint32_t));
+        const uint32_t w2 = GET_UINT32_LE((const uint8_t *)buf, (j + 2) * sizeof(uint32_t));
+        ...
     }
-    return valid;
-}
-
-static bool ValidityChecksK(const CRYPT_ML_DSA_Ctx *ctx, int32_t *const z[MLDSA_K_MAX], uint32_t t)
-{
-    bool valid = true;
-    for (uint8_t i = 0; i < ctx->info->k; i++) {
-        valid &= MLDSA_ValidityChecks(z[i], t);
-    }
-    return valid;
-}
-```
-===END===
-
-===ISSUE===
-FILE: crypto/mldsa/src/asm/validity_check_armv8.S
-LINE: 100-105
-SEVERITY: high
-TITLE: ARMv8 bound check short-circuits on first failing chunk
-PROBLEM: The new ARMv8 fast path exits as soon as any 32-coefficient chunk fails. That makes the leak above much finer-grained on Armv8: signing time depends on the first failing chunk inside each vector, not just the first failing vector.
-CODE:
-```asm
-    UMAXV s30, mask_final.4s
-    umov w3, v30.s[0]
-    cbnz w3, done
-
-    subs count, count, #1
-    cbnz count, check_loop
-```
-FIX:
-```asm
-    eor tmp.16b, tmp.16b, tmp.16b
-
-check_loop:
-    load_data
-    check_one_line data0, mask_final
-
-    check_one_line data1, mask_tmp
-    ORR mask_final.16b, mask_final.16b, mask_tmp.16b
-    check_one_line data2, mask_tmp
-    ORR mask_final.16b, mask_final.16b, mask_tmp.16b
-    check_one_line data3, mask_tmp
-    ORR mask_final.16b, mask_final.16b, mask_tmp.16b
-    check_one_line data4, mask_tmp
-    ORR mask_final.16b, mask_final.16b, mask_tmp.16b
-    check_one_line data5, mask_tmp
-    ORR mask_final.16b, mask_final.16b, mask_tmp.16b
-    check_one_line data6, mask_tmp
-    ORR mask_final.16b, mask_final.16b, mask_tmp.16b
-    check_one_line data7, mask_tmp
-    ORR mask_final.16b, mask_final.16b, mask_tmp.16b
-
-    ORR tmp.16b, tmp.16b, mask_final.16b
-    subs count, count, #1
-    cbnz count, check_loop
-
-    UMAXV s29, tmp.4s
-    umov w3, v29.s[0]
-```
-===END===
-
-===ISSUE===
-FILE: crypto/mldsa/src/asm/validity_check_armv8.S
-LINE: 30-37
-SEVERITY: low
-TITLE: ABS-based check accepts INT32_MIN as in-range
-PROBLEM: The scalar reference computes the magnitude with bit-twiddling, which rejects `INT32_MIN`. This replacement uses `ABS` and then a signed `CMGE`. On AArch64, `ABS` does not make `INT32_MIN` positive, so `CMGE` sees it as negative and the bound check can return a false success for that value.
-CODE:
-```asm
-.macro check_one_line ldata, lmask
-    // n = z[j] >> 31;    // Shift rightwards by 31 bits.
-    // n = z[j] - (n & ((uint32_t)z[j] << 1));
-    // if (n >= t) return false;
-    // => n = z < 0? z - z*2 : z = ABS(z); 
-    // n>=t -> hit -> return 1
-    ABS \ldata\().4s, \ldata\().4s
-    CMGE \lmask\().4s, \ldata\().4s, const_t.4s
-.endm
-```
-FIX:
-```asm
-.macro check_one_line ldata, lmask
-    // n = z - ((z >> 31) & ((uint32_t)z << 1))
-    SSHR tmp1.4s, \ldata\().4s, #31
-    SHL  \lmask\().4s, \ldata\().4s, #1
-    AND  \lmask\().16b, \lmask\().16b, tmp1.16b
-    SUB  \ldata\().4s, \ldata\().4s, \lmask\().4s
-    CMGE \lmask\().4s, \ldata\().4s, const_t.4s
-.endm
 ```
 ===END===
