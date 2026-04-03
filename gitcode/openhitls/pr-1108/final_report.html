@@ -1,0 +1,477 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Final Report: openHiTLS/openhitls#1108</title>
+    <style>
+        :root { --critical: #dc2626; --high: #ea580c; --medium: #ca8a04; --low: #65a30d;
+                 --trusted: #059669; --likely: #0284c7; --evaluate: #7c3aed; }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: system-ui, sans-serif; background: #f8fafc; color: #1e293b; padding: 2rem; line-height: 1.6; }
+        .container { max-width: 900px; margin: 0 auto; }
+        h1 { font-size: 1.75rem; margin-bottom: 0.5rem; }
+        .subtitle { color: #64748b; margin-bottom: 1rem; }
+        .stats { display: flex; gap: 1rem; margin-bottom: 2rem; flex-wrap: wrap; }
+        .stat { background: white; border: 1px solid #e2e8f0; border-radius: 0.5rem; padding: 1rem; min-width: 100px; text-align: center; }
+        .stat-value { font-size: 1.5rem; font-weight: 700; }
+        .stat-label { font-size: 0.875rem; color: #64748b; }
+        .stat.critical .stat-value { color: var(--critical); }
+        .stat.high .stat-value { color: var(--high); }
+        .stat.medium .stat-value { color: var(--medium); }
+        .stat.low .stat-value { color: var(--low); }
+        .reviewers { background: #e0e7ff; color: #3730a3; padding: 0.5rem 1rem; border-radius: 0.5rem; margin-bottom: 2rem; }
+        .section { margin-bottom: 2rem; }
+        .section-title { font-size: 1.1rem; font-weight: 600; padding: 0.5rem 1rem; border-radius: 0.5rem 0.5rem 0 0; color: white; }
+        .section-title.critical { background: var(--critical); }
+        .section-title.high { background: var(--high); }
+        .section-title.medium { background: var(--medium); }
+        .section-title.low { background: var(--low); }
+        .issue { background: white; border: 1px solid #e2e8f0; border-top: none; padding: 1rem; }
+        .issue:last-child { border-radius: 0 0 0.5rem 0.5rem; }
+        .issue-title { font-weight: 600; margin-bottom: 0.25rem; }
+        .issue-location { font-family: monospace; font-size: 0.875rem; color: #64748b; margin-bottom: 0.5rem; }
+        .issue-meta { font-size: 0.75rem; margin-bottom: 0.75rem; display: flex; gap: 0.75rem; align-items: center; }
+        .issue-meta .reviewers { background: #f1f5f9; color: #475569; padding: 0.25rem 0.5rem; border-radius: 0.25rem; margin: 0; }
+        .confidence-badge { padding: 0.25rem 0.5rem; border-radius: 0.25rem; font-weight: 500; }
+        .confidence-badge.trusted { background: #d1fae5; color: #065f46; }
+        .confidence-badge.likely { background: #dbeafe; color: #1e40af; }
+        .confidence-badge.evaluate { background: #ede9fe; color: #5b21b6; }
+        pre { background: #1e293b; color: #e2e8f0; padding: 0.75rem; border-radius: 0.375rem; overflow-x: auto; font-size: 0.875rem; margin: 0.5rem 0; }
+        .problem { margin: 0.75rem 0; }
+        .fix-label { font-weight: 600; margin-top: 0.75rem; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Final Code Review Report</h1>
+        <div class="subtitle">openHiTLS/openhitls - PR #1108</div>
+        <p style="margin-bottom: 1rem;"></p>
+
+        <div class="stats">
+            <div class="stat"><div class="stat-value">12</div><div class="stat-label">Total</div></div>
+            <div class="stat critical"><div class="stat-value">0</div><div class="stat-label">Critical</div></div>
+            <div class="stat high"><div class="stat-value">6</div><div class="stat-label">High</div></div>
+            <div class="stat medium"><div class="stat-value">4</div><div class="stat-label">Medium</div></div>
+            <div class="stat low"><div class="stat-value">2</div><div class="stat-label">Low</div></div>
+        </div>
+
+        <div class="reviewers">Reviewers: claude, gemini, codex</div>
+<div class="section"><div class="section-title high">High</div>
+<div class="issue">
+                <div class="issue-title">ECDSA composite public keys allocate only one coordinate</div>
+                <div class="issue-location">crypto/composite/src/composite_encdec.c:292-301</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CODEX</span>
+                    <span class="confidence-badge trusted">置信度: 可信</span>
+                </div>
+                <pre>static int32_t CRYPT_CompositeGetEcdsaPubKey(const CRYPT_CompositeCtx *ctx, BSL_Buffer *encode)
+{
+    int32_t ret;
+    uint32_t pubLen = 0;
+    RETURN_RET_IF_ERR(ctx-&gt;tradMethod-&gt;ctrl(ctx-&gt;tradCtx, CRYPT_CTRL_GET_BITS, &amp;pubLen, sizeof(pubLen)), ret);
+    RETURN_RET_IF(pubLen == 0, CRYPT_EAL_ALG_NOT_SUPPORT);
+    pubLen = BITS_TO_BYTES(pubLen);
+    uint8_t *pub = (uint8_t *)BSL_SAL_Malloc(pubLen);
+    RETURN_RET_IF(pub == NULL, CRYPT_MEM_ALLOC_FAIL);
+    BSL_Param param[2] = {{CRYPT_PARAM_EC_PUBKEY, BSL_PARAM_TYPE_OCTETS, pub, pubLen, 0}, BSL_PARAM_END};</pre>
+                <div class="problem"><strong>Issue:</strong> CRYPT_CompositeGetEcdsaPubKey uses CRYPT_CTRL_GET_BITS which returns the curve size in bits (e.g., 256 for P-256), then converts to bytes. However, CRYPT_PARAM_EC_PUBKEY exports the full encoded EC point in uncompressed format (0x04 + X + Y), which requires 2*coordLen + 1 bytes. For P-256 this allocates 32 bytes instead of 65 bytes, for P-384 it allocates 48 bytes instead of 97 bytes. This causes getPub() to fail and breaks all ECDSA-based composite keygen/export paths.</div>
+                <div class="fix-label">Fix:</div><pre>static int32_t CRYPT_CompositeGetEcdsaPubKey(const CRYPT_CompositeCtx *ctx, BSL_Buffer *encode)
+{
+    int32_t ret;
+    uint32_t bits = 0;
+    RETURN_RET_IF_ERR(ctx-&gt;tradMethod-&gt;ctrl(ctx-&gt;tradCtx, CRYPT_CTRL_GET_BITS, &amp;bits, sizeof(bits)), ret);
+    RETURN_RET_IF(bits == 0, CRYPT_EAL_ALG_NOT_SUPPORT);
+
+    uint32_t coordLen = BITS_TO_BYTES(bits);
+    uint32_t pubLen = (coordLen &lt;&lt; 1) + 1; /* uncompressed EC point: 0x04 + X + Y */
+    uint8_t *pub = (uint8_t *)BSL_SAL_Malloc(pubLen);
+    RETURN_RET_IF(pub == NULL, CRYPT_MEM_ALLOC_FAIL);
+    BSL_Param param[2] = {{CRYPT_PARAM_EC_PUBKEY, BSL_PARAM_TYPE_OCTETS, pub, pubLen, 0}, BSL_PARAM_END};</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">Reinitializing a composite context can overflow stale key buffers</div>
+                <div class="issue-location">crypto/composite/src/composite.c:246-293</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CODEX</span>
+                    <span class="confidence-badge trusted">置信度: 可信</span>
+                </div>
+                <pre>static int32_t CRYPT_CompositeSetAlgInfo(CRYPT_CompositeCtx *ctx, void *val, uint32_t len)
+{
+    int32_t ret;
+    if (len != sizeof(int32_t) || val == NULL) {
+        BSL_ERR_PUSH_ERROR(CRYPT_INVALID_ARG);
+        return CRYPT_INVALID_ARG;
+    }
+    ctx-&gt;info = CRYPT_COMPOSITE_GetInfo(*(int32_t *)val);
+    if (ctx-&gt;info == NULL) {
+        BSL_ERR_PUSH_ERROR(CRYPT_INVALID_ARG);
+        return CRYPT_INVALID_ARG;
+    }
+    const EAL_PkeyMethod *pqcMethod = CRYPT_EAL_PkeyFindMethod(ctx-&gt;info-&gt;pqcAlg);
+    const EAL_PkeyMethod *tradMethod = CRYPT_EAL_PkeyFindMethod(ctx-&gt;info-&gt;tradAlg);
+    if (pqcMethod == NULL || tradMethod == NULL) {
+        BSL_ERR_PUSH_ERROR(CRYPT_NOT_SUPPORT);
+        return CRYPT_NOT_SUPPORT;
+    }
+    ctx-&gt;pqcMethod = pqcMethod;
+    ctx-&gt;tradMethod = tradMethod;
+    ctx-&gt;pqcCtx = pqcMethod-&gt;newCtx();
+    RETURN_RET_IF((ctx-&gt;pqcCtx == NULL), CRYPT_MEM_ALLOC_FAIL);
+    ctx-&gt;tradCtx = tradMethod-&gt;newCtx();</pre>
+                <div class="problem"><strong>Issue:</strong> CRYPT_CompositeSetAlgInfo() can be called multiple times on the same context. It replaces ctx->info and allocates new subcontexts (pqcCtx, tradCtx), but CRYPT_CompositeCreateKeyBuf() only allocates when pubKey/prvKey are NULL. If the context already holds a smaller key and is reconfigured to a larger algorithm, CRYPT_COMPOSITE_GenKey() will copy the larger key into the old smaller allocation, causing heap buffer overflow. Additionally, repeated initialization leaks the old pqcCtx and tradCtx.</div>
+                <div class="fix-label">Fix:</div><pre>static int32_t CRYPT_CompositeSetAlgInfo(CRYPT_CompositeCtx *ctx, void *val, uint32_t len)
+{
+    int32_t ret;
+    if (len != sizeof(int32_t) || val == NULL) {
+        BSL_ERR_PUSH_ERROR(CRYPT_INVALID_ARG);
+        return CRYPT_INVALID_ARG;
+    }
+    /* Prevent reinitialization which could cause buffer overflow */
+    if (ctx-&gt;info != NULL || ctx-&gt;pqcCtx != NULL || ctx-&gt;tradCtx != NULL ||
+        ctx-&gt;pubKey != NULL || ctx-&gt;prvKey != NULL) {
+        BSL_ERR_PUSH_ERROR(CRYPT_INVALID_ARG);
+        return CRYPT_INVALID_ARG;
+    }
+    ctx-&gt;info = CRYPT_COMPOSITE_GetInfo(*(int32_t *)val);
+    if (ctx-&gt;info == NULL) {
+        BSL_ERR_PUSH_ERROR(CRYPT_INVALID_ARG);
+        return CRYPT_INVALID_ARG;
+    }
+    const EAL_PkeyMethod *pqcMethod = CRYPT_EAL_PkeyFindMethod(ctx-&gt;info-&gt;pqcAlg);
+    const EAL_PkeyMethod *tradMethod = CRYPT_EAL_PkeyFindMethod(ctx-&gt;info-&gt;tradAlg);
+    if (pqcMethod == NULL || tradMethod == NULL) {
+        BSL_ERR_PUSH_ERROR(CRYPT_NOT_SUPPORT);
+        return CRYPT_NOT_SUPPORT;
+    }
+    ctx-&gt;pqcMethod = pqcMethod;
+    ctx-&gt;tradMethod = tradMethod;
+    ctx-&gt;pqcCtx = pqcMethod-&gt;newCtx();</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">Potential use of uninitialized data in CRYPT_COMPOSITE_SetPrvKeyEx</div>
+                <div class="issue-location">crypto/composite/src/composite.c:517-526</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CLAUDE</span>
+                    <span class="confidence-badge trusted">置信度: 可信</span>
+                </div>
+                <pre>int32_t CRYPT_COMPOSITE_SetPrvKeyEx(CRYPT_CompositeCtx *ctx, const BSL_Param *para)
+{
+    if (para == NULL) {
+        BSL_ERR_PUSH_ERROR(CRYPT_NULL_INPUT);
+        return CRYPT_NULL_INPUT;
+    }
+    CRYPT_CompositePrv prv = {0};
+    (void)GetConstParamValue(para, CRYPT_PARAM_COMPOSITE_PRVKEY, &amp;prv.data, &amp;prv.len);
+    return CRYPT_COMPOSITE_SetPrvKey(ctx, &amp;prv);
+}</pre>
+                <div class="problem"><strong>Issue:</strong> GetConstParamValue return value is ignored with (void) cast. If the parameter is not found, prv.data and prv.len won't be set, leaving them at their initialized zero values. The subsequent CRYPT_COMPOSITE_SetPrvKey call will use this uninitialized data, causing incorrect key length validation failures or potential memory issues.</div>
+                <div class="fix-label">Fix:</div><pre>int32_t CRYPT_COMPOSITE_SetPrvKeyEx(CRYPT_CompositeCtx *ctx, const BSL_Param *para)
+{
+    if (para == NULL) {
+        BSL_ERR_PUSH_ERROR(CRYPT_NULL_INPUT);
+        return CRYPT_NULL_INPUT;
+    }
+    CRYPT_CompositePrv prv = {0};
+    if (GetConstParamValue(para, CRYPT_PARAM_COMPOSITE_PRVKEY, &amp;prv.data, &amp;prv.len) == NULL) {
+        BSL_ERR_PUSH_ERROR(CRYPT_INVALID_ARG);
+        return CRYPT_INVALID_ARG;
+    }
+    return CRYPT_COMPOSITE_SetPrvKey(ctx, &amp;prv);
+}</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">Potential use of uninitialized data in CRYPT_COMPOSITE_SetPubKeyEx</div>
+                <div class="issue-location">crypto/composite/src/composite.c:528-537</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CLAUDE</span>
+                    <span class="confidence-badge trusted">置信度: 可信</span>
+                </div>
+                <pre>int32_t CRYPT_COMPOSITE_SetPubKeyEx(CRYPT_CompositeCtx *ctx, const BSL_Param *para)
+{
+    if (para == NULL) {
+        BSL_ERR_PUSH_ERROR(CRYPT_NULL_INPUT);
+        return CRYPT_NULL_INPUT;
+    }
+    CRYPT_CompositePub pub = {0};
+    (void)GetConstParamValue(para, CRYPT_PARAM_COMPOSITE_PUBKEY, &amp;pub.data, &amp;pub.len);
+    return CRYPT_COMPOSITE_SetPubKey(ctx, &amp;pub);
+}</pre>
+                <div class="problem"><strong>Issue:</strong> GetConstParamValue return value is ignored with (void) cast. If the parameter is not found, pub.data and pub.len won't be set, leaving them at their initialized zero values. The subsequent CRYPT_COMPOSITE_SetPubKey call will use this uninitialized data.</div>
+                <div class="fix-label">Fix:</div><pre>int32_t CRYPT_COMPOSITE_SetPubKeyEx(CRYPT_CompositeCtx *ctx, const BSL_Param *para)
+{
+    if (para == NULL) {
+        BSL_ERR_PUSH_ERROR(CRYPT_NULL_INPUT);
+        return CRYPT_NULL_INPUT;
+    }
+    CRYPT_CompositePub pub = {0};
+    if (GetConstParamValue(para, CRYPT_PARAM_COMPOSITE_PUBKEY, &amp;pub.data, &amp;pub.len) == NULL) {
+        BSL_ERR_PUSH_ERROR(CRYPT_INVALID_ARG);
+        return CRYPT_INVALID_ARG;
+    }
+    return CRYPT_COMPOSITE_SetPubKey(ctx, &amp;pub);
+}</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">Potential NULL pointer dereference in CRYPT_COMPOSITE_GetPrvKeyEx</div>
+                <div class="issue-location">crypto/composite/src/composite.c:485-499</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CLAUDE</span>
+                    <span class="confidence-badge trusted">置信度: 可信</span>
+                </div>
+                <pre>int32_t CRYPT_COMPOSITE_GetPrvKeyEx(const CRYPT_CompositeCtx *ctx, BSL_Param *para)
+{
+    if (para == NULL) {
+        BSL_ERR_PUSH_ERROR(CRYPT_NULL_INPUT);
+        return CRYPT_NULL_INPUT;
+    }
+    CRYPT_CompositePrv prv = {0};
+    BSL_Param *paramPrv = GetParamValue(para, CRYPT_PARAM_COMPOSITE_PRVKEY, &amp;prv.data, &amp;(prv.len));
+    int32_t ret = CRYPT_COMPOSITE_GetPrvKey(ctx, &amp;prv);
+    if (ret != CRYPT_SUCCESS) {
+        return ret;
+    }
+    paramPrv-&gt;useLen = prv.len;
+    return CRYPT_SUCCESS;
+}</pre>
+                <div class="problem"><strong>Issue:</strong> GetParamValue may return NULL if the parameter is not found, but the code doesn't check for this before dereferencing paramPrv to set paramPrv->useLen. This will cause a NULL pointer dereference and crash.</div>
+                <div class="fix-label">Fix:</div><pre>int32_t CRYPT_COMPOSITE_GetPrvKeyEx(const CRYPT_CompositeCtx *ctx, BSL_Param *para)
+{
+    if (para == NULL) {
+        BSL_ERR_PUSH_ERROR(CRYPT_NULL_INPUT);
+        return CRYPT_NULL_INPUT;
+    }
+    CRYPT_CompositePrv prv = {0};
+    BSL_Param *paramPrv = GetParamValue(para, CRYPT_PARAM_COMPOSITE_PRVKEY, &amp;prv.data, &amp;(prv.len));
+    if (paramPrv == NULL) {
+        BSL_ERR_PUSH_ERROR(CRYPT_INVALID_ARG);
+        return CRYPT_INVALID_ARG;
+    }
+    int32_t ret = CRYPT_COMPOSITE_GetPrvKey(ctx, &amp;prv);
+    if (ret != CRYPT_SUCCESS) {
+        return ret;
+    }
+    paramPrv-&gt;useLen = prv.len;
+    return CRYPT_SUCCESS;
+}</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">Potential NULL pointer dereference in CRYPT_COMPOSITE_GetPubKeyEx</div>
+                <div class="issue-location">crypto/composite/src/composite.c:501-515</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CLAUDE</span>
+                    <span class="confidence-badge trusted">置信度: 可信</span>
+                </div>
+                <pre>int32_t CRYPT_COMPOSITE_GetPubKeyEx(const CRYPT_CompositeCtx *ctx, BSL_Param *para)
+{
+    if (para == NULL) {
+        BSL_ERR_PUSH_ERROR(CRYPT_NULL_INPUT);
+        return CRYPT_NULL_INPUT;
+    }
+    CRYPT_CompositePub pub = {0};
+    BSL_Param *paramPub = GetParamValue(para, CRYPT_PARAM_COMPOSITE_PUBKEY, &amp;pub.data, &amp;(pub.len));
+    int32_t ret = CRYPT_COMPOSITE_GetPubKey(ctx, &amp;pub);
+    if (ret != CRYPT_SUCCESS) {
+        return ret;
+    }
+    paramPub-&gt;useLen = pub.len;
+    return CRYPT_SUCCESS;
+}</pre>
+                <div class="problem"><strong>Issue:</strong> GetParamValue may return NULL if the parameter is not found, but the code doesn't check for this before dereferencing paramPub to set paramPub->useLen. This will cause a NULL pointer dereference and crash.</div>
+                <div class="fix-label">Fix:</div><pre>int32_t CRYPT_COMPOSITE_GetPubKeyEx(const CRYPT_CompositeCtx *ctx, BSL_Param *para)
+{
+    if (para == NULL) {
+        BSL_ERR_PUSH_ERROR(CRYPT_NULL_INPUT);
+        return CRYPT_NULL_INPUT;
+    }
+    CRYPT_CompositePub pub = {0};
+    BSL_Param *paramPub = GetParamValue(para, CRYPT_PARAM_COMPOSITE_PUBKEY, &amp;pub.data, &amp;(pub.len));
+    if (paramPub == NULL) {
+        BSL_ERR_PUSH_ERROR(CRYPT_INVALID_ARG);
+        return CRYPT_INVALID_ARG;
+    }
+    int32_t ret = CRYPT_COMPOSITE_GetPubKey(ctx, &amp;pub);
+    if (ret != CRYPT_SUCCESS) {
+        return ret;
+    }
+    paramPub-&gt;useLen = pub.len;
+    return CRYPT_SUCCESS;
+}</pre>
+            </div>
+</div>
+<div class="section"><div class="section-title medium">Medium</div>
+<div class="issue">
+                <div class="issue-title">CRYPT_CTRL_SET_RSA_E is ignored after parameter setup</div>
+                <div class="issue-location">crypto/composite/src/composite.c:210-224</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CODEX</span>
+                    <span class="confidence-badge trusted">置信度: 可信</span>
+                </div>
+                <pre>static int32_t CRYPT_CompositeSetRsaE(CRYPT_CompositeCtx *ctx, void *val, uint32_t len)
+{
+    if (val == NULL &amp;&amp; len == 0) {
+        BSL_SAL_FREE(ctx-&gt;e);
+        ctx-&gt;eLen = 0;
+        return CRYPT_SUCCESS;
+    }
+    RETURN_RET_IF((val == NULL || len == 0), CRYPT_INVALID_ARG);
+    uint8_t *e = BSL_SAL_Dump((uint8_t *)val, len);
+    RETURN_RET_IF(e == NULL, CRYPT_MEM_ALLOC_FAIL);
+    BSL_SAL_FREE(ctx-&gt;e);
+    ctx-&gt;e = e;
+    ctx-&gt;eLen = len;
+    return CRYPT_SUCCESS;
+}</pre>
+                <div class="problem"><strong>Issue:</strong> CRYPT_CompositeSetRsaE only stores the exponent in ctx->e but doesn't call CRYPT_CompositeSetRsaPara to apply it. In the normal call order (PkeySetParaById then PkeyCtrl(...SET_RSA_E...) then PkeyGen), the RSA subcontext is configured in SetParaById with the default exponent 65537, and the later SET_RSA_E call doesn't update the subcontext, so the generated key still uses the default exponent.</div>
+                <div class="fix-label">Fix:</div><pre>static int32_t CRYPT_CompositeSetRsaE(CRYPT_CompositeCtx *ctx, void *val, uint32_t len)
+{
+    if (val == NULL &amp;&amp; len == 0) {
+        BSL_SAL_FREE(ctx-&gt;e);
+        ctx-&gt;eLen = 0;
+        /* Reset to default exponent if subcontext exists */
+        if (ctx-&gt;info != NULL &amp;&amp; ctx-&gt;tradCtx != NULL &amp;&amp; ctx-&gt;info-&gt;tradAlg == CRYPT_PKEY_RSA) {
+            return CRYPT_CompositeSetRsaPara(ctx);
+        }
+        return CRYPT_SUCCESS;
+    }
+    RETURN_RET_IF((val == NULL || len == 0), CRYPT_INVALID_ARG);
+    uint8_t *e = BSL_SAL_Dump((uint8_t *)val, len);
+    RETURN_RET_IF(e == NULL, CRYPT_MEM_ALLOC_FAIL);
+    BSL_SAL_FREE(ctx-&gt;e);
+    ctx-&gt;e = e;
+    ctx-&gt;eLen = len;
+    /* Apply the new exponent if subcontext exists */
+    if (ctx-&gt;info != NULL &amp;&amp; ctx-&gt;tradCtx != NULL &amp;&amp; ctx-&gt;info-&gt;tradAlg == CRYPT_PKEY_RSA) {
+        return CRYPT_CompositeSetRsaPara(ctx);
+    }
+    return CRYPT_SUCCESS;
+}</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">MLDSA87/P-384 private-key length table has a misplaced digit</div>
+                <div class="issue-location">crypto/composite/src/composite.c:71-73</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CODEX</span>
+                    <span class="confidence-badge trusted">置信度: 可信</span>
+                </div>
+                <pre>static const COMPOSITE_ALG_INFO g_composite_info[] = {
+    ...
+    {CRYPT_COMPOSITE_MLDSA87_ECDSA_P384_SHA512, "COMPSIG-MLDSA87-ECDSA-P384-SHA512",
+     CRYPT_PKEY_ML_DSA, CRYPT_MLDSA_TYPE_MLDSA_87, CRYPT_PKEY_ECDSA, CRYPT_ECC_NISTP384,
+     CRYPT_MD_SHA512, CRYPT_MD_SHA384, 0, 2689, 962, 2592, 32, 4627},</pre>
+                <div class="problem"><strong>Issue:</strong> The max composite private-key length for CRYPT_COMPOSITE_MLDSA87_ECDSA_P384_SHA512 is recorded as 962 instead of 96. CRYPT_COMPOSITE_SetPrvKey uses this table entry as its upper bound, so malformed inputs with a valid 96-byte P-384 private key plus trailing garbage are accepted. The correct value for P-384 ECDSA private key (48 bytes) + ML-DSA-87 private key (2432 bytes) should give a tradPrvkeyLen of 96, not 962.</div>
+                <div class="fix-label">Fix:</div><pre>static const COMPOSITE_ALG_INFO g_composite_info[] = {
+    ...
+    {CRYPT_COMPOSITE_MLDSA87_ECDSA_P384_SHA512, "COMPSIG-MLDSA87-ECDSA-P384-SHA512",
+     CRYPT_PKEY_ML_DSA, CRYPT_MLDSA_TYPE_MLDSA_87, CRYPT_PKEY_ECDSA, CRYPT_ECC_NISTP384,
+     CRYPT_MD_SHA512, CRYPT_MD_SHA384, 0, 2689, 96, 2592, 32, 4627},</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">Ed448 composite OIDs are routed to an unimplemented parser</div>
+                <div class="issue-location">crypto/codecskey/src/crypt_codecskey_local.c:1173</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CODEX</span>
+                    <span class="confidence-badge trusted">置信度: 可信</span>
+                </div>
+                <pre>#ifdef HITLS_CRYPTO_COMPOSITE
+        case BSL_CID_MLDSA87_ECDSA_P384_SHA512:
+        case BSL_CID_MLDSA87_ECDSA_BRAINPOOLP384R1_SHA512:
+        case BSL_CID_MLDSA87_ED448_SHAKE256:
+        case BSL_CID_MLDSA87_RSA3072_PSS_SHA512:
+        case BSL_CID_MLDSA87_RSA4096_PSS_SHA512:
+        case BSL_CID_MLDSA87_ECDSA_P521_SHA512:
+            return ParseCompositePrikeyAsn1Buff(libctx, attrName, pk8PrikeyInfo-&gt;pkeyRawKey,
+                                                pk8PrikeyInfo-&gt;pkeyRawKeyLen, pk8PrikeyInfo-&gt;keyType, ealPriKey);
+#endif</pre>
+                <div class="problem"><strong>Issue:</strong> The PKCS#8 and SPKI dispatch tables treat BSL_CID_MLDSA87_ED448_SHAKE256 as a supported composite key type, but the composite implementation has no g_composite_info entry or traditional-key handler for Ed448 (CRYPT_PKEY_ED448). The comment at line 86 explicitly states "Ed448 not implemented, placeholder". Any key with this OID is advertised as supported but fails during CRYPT_EAL_PkeyFindMethod when setting algorithm parameters.</div>
+                <div class="fix-label">Fix:</div><pre>#ifdef HITLS_CRYPTO_COMPOSITE
+        case BSL_CID_MLDSA87_ECDSA_P384_SHA512:
+        case BSL_CID_MLDSA87_ECDSA_BRAINPOOLP384R1_SHA512:
+        case BSL_CID_MLDSA87_RSA3072_PSS_SHA512:
+        case BSL_CID_MLDSA87_RSA4096_PSS_SHA512:
+        case BSL_CID_MLDSA87_ECDSA_P521_SHA512:
+            return ParseCompositePrikeyAsn1Buff(libctx, attrName, pk8PrikeyInfo-&gt;pkeyRawKey,
+                                                pk8PrikeyInfo-&gt;pkeyRawKeyLen, pk8PrikeyInfo-&gt;keyType, ealPriKey);
+#endif</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">Missing NULL check for ctx->info->label in CompositeMsgEncode</div>
+                <div class="issue-location">crypto/composite/src/composite.c:565-567</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CLAUDE</span>
+                    <span class="confidence-badge trusted">置信度: 可信</span>
+                </div>
+                <pre>static int32_t CompositeMsgEncode(CRYPT_CompositeCtx *ctx, int32_t hashId, const uint8_t *data, uint32_t dataLen,
+                                  CRYPT_Data *msg)
+{
+    int32_t ret;
+    uint8_t digest[64];
+    uint32_t digestLen = sizeof(digest);
+    RETURN_RET_IF_ERR(CompositePreHash(hashId, data, dataLen, digest, &amp;digestLen), ret);
+    const char *label = ctx-&gt;info-&gt;label;
+    uint32_t prefixLen = COMPOSITE_SIGNATURE_PREFIX_LEN;
+    uint32_t labelLen = (uint32_t)strlen(label);</pre>
+                <div class="problem"><strong>Issue:</strong> The code calls strlen(ctx->info->label) without verifying that ctx->info->label is not NULL. If label is NULL, this will cause a crash in strlen. The label field is a const char* that could be NULL.</div>
+                <div class="fix-label">Fix:</div><pre>static int32_t CompositeMsgEncode(CRYPT_CompositeCtx *ctx, int32_t hashId, const uint8_t *data, uint32_t dataLen,
+                                  CRYPT_Data *msg)
+{
+    int32_t ret;
+    uint8_t digest[64];
+    uint32_t digestLen = sizeof(digest);
+    RETURN_RET_IF_ERR(CompositePreHash(hashId, data, dataLen, digest, &amp;digestLen), ret);
+    const char *label = ctx-&gt;info-&gt;label;
+    if (label == NULL) {
+        BSL_ERR_PUSH_ERROR(CRYPT_COMPOSITE_KEYINFO_NOT_SET);
+        return CRYPT_COMPOSITE_KEYINFO_NOT_SET;
+    }
+    uint32_t prefixLen = COMPOSITE_SIGNATURE_PREFIX_LEN;
+    uint32_t labelLen = (uint32_t)strlen(label);</pre>
+            </div>
+</div>
+<div class="section"><div class="section-title low">Low</div>
+<div class="issue">
+                <div class="issue-title">Missing BSL_ERR_PUSH_ERROR after CRYPT_COMPOSITE_SetPrvKeyEx failure</div>
+                <div class="issue-location">crypto/codecskey/src/crypt_decoder_composite.c:96-100</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CLAUDE</span>
+                    <span class="confidence-badge likely">置信度: 较可信</span>
+                </div>
+                <pre>ret = CRYPT_COMPOSITE_SetPrvKeyEx(pctx, priParam);
+if (ret != CRYPT_SUCCESS) {
+    CRYPT_COMPOSITE_FreeCtx(pctx);
+    return ret;
+}</pre>
+                <div class="problem"><strong>Issue:</strong> When CRYPT_COMPOSITE_SetPrvKeyEx fails, the error is not pushed via BSL_ERR_PUSH_ERROR before returning. This makes debugging harder as the actual error context from the failed call is lost.</div>
+                <div class="fix-label">Fix:</div><pre>ret = CRYPT_COMPOSITE_SetPrvKeyEx(pctx, priParam);
+if (ret != CRYPT_SUCCESS) {
+    BSL_ERR_PUSH_ERROR(ret);
+    CRYPT_COMPOSITE_FreeCtx(pctx);
+    return ret;
+}</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">Missing HITLS_CRYPTO_COMPOSITE in PKEY_SIGN condition</div>
+                <div class="issue-location">config/macro_config/hitls_config_layer_crypto.h:768-771</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CLAUDE</span>
+                    <span class="confidence-badge likely">置信度: 较可信</span>
+                </div>
+                <pre>#if defined(HITLS_CRYPTO_DSA) || defined(HITLS_CRYPTO_RSA_SIGN) || defined(HITLS_CRYPTO_RSA_VERIFY) || \
+    defined(HITLS_CRYPTO_ECDSA) || defined(HITLS_CRYPTO_SM2_SIGN) || defined(HITLS_CRYPTO_SM9) || \
+    defined(HITLS_CRYPTO_ED25519) || defined(HITLS_CRYPTO_SLH_DSA) || defined(HITLS_CRYPTO_MLDSA)
+    #ifndef HITLS_CRYPTO_PKEY_SIGN
+        #define HITLS_CRYPTO_PKEY_SIGN
+    #endif
+#endif</pre>
+                <div class="problem"><strong>Issue:</strong> The preprocessor condition for HITLS_CRYPTO_PKEY_SIGN includes ML-DSA but not COMPOSITE. Since COMPOSITE keys support signing, this might cause issues with feature detection or linking when composite signature support is expected.</div>
+                <div class="fix-label">Fix:</div><pre>#if defined(HITLS_CRYPTO_DSA) || defined(HITLS_CRYPTO_RSA_SIGN) || defined(HITLS_CRYPTO_RSA_VERIFY) || \
+    defined(HITLS_CRYPTO_ECDSA) || defined(HITLS_CRYPTO_SM2_SIGN) || defined(HITLS_CRYPTO_SM9) || \
+    defined(HITLS_CRYPTO_ED25519) || defined(HITLS_CRYPTO_SLH_DSA) || defined(HITLS_CRYPTO_MLDSA) || \
+    defined(HITLS_CRYPTO_COMPOSITE)
+    #ifndef HITLS_CRYPTO_PKEY_SIGN
+        #define HITLS_CRYPTO_PKEY_SIGN
+    #endif
+#endif</pre>
+            </div>
+</div>
+</div></body></html>

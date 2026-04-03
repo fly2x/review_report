@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Code Review: openHiTLS/openhitls#1108 - CODEX</title>
+    <style>
+        :root { --critical: #dc2626; --high: #ea580c; --medium: #ca8a04; --low: #65a30d; }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: system-ui, sans-serif; background: #f8fafc; color: #1e293b; padding: 2rem; line-height: 1.6; }
+        .container { max-width: 900px; margin: 0 auto; }
+        h1 { font-size: 1.5rem; margin-bottom: 0.5rem; }
+        .subtitle { color: #64748b; margin-bottom: 2rem; }
+        .section { margin-bottom: 2rem; }
+        .section-title { font-size: 1.1rem; font-weight: 600; padding: 0.5rem 1rem; border-radius: 0.5rem 0.5rem 0 0; color: white; }
+        .section-title.critical { background: var(--critical); }
+        .section-title.high { background: var(--high); }
+        .section-title.medium { background: var(--medium); }
+        .section-title.low { background: var(--low); }
+        .issue { background: white; border: 1px solid #e2e8f0; border-top: none; padding: 1rem; }
+        .issue:last-child { border-radius: 0 0 0.5rem 0.5rem; }
+        .issue-title { font-weight: 600; margin-bottom: 0.25rem; }
+        .issue-location { font-family: monospace; font-size: 0.875rem; color: #64748b; margin-bottom: 0.75rem; }
+        .issue-source { font-size: 0.75rem; color: #94a3b8; margin-top: 0.5rem; }
+        pre { background: #1e293b; color: #e2e8f0; padding: 0.75rem; border-radius: 0.375rem; overflow-x: auto; font-size: 0.875rem; margin: 0.5rem 0; }
+        .problem { margin: 0.75rem 0; }
+        .fix-label { font-weight: 600; margin-top: 0.75rem; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Code Review: openHiTLS/openhitls#1108 - CODEX</h1>
+        <div class="subtitle"></div>
+<div class="section"><div class="section-title high">High</div>
+<div class="issue">
+                <div class="issue-title">ECDSA composite public keys allocate only one coordinate</div>
+                <div class="issue-location">crypto/composite/src/composite_encdec.c:295-301</div>
+                <pre>uint32_t pubLen = 0;
+RETURN_RET_IF_ERR(ctx-&gt;tradMethod-&gt;ctrl(ctx-&gt;tradCtx, CRYPT_CTRL_GET_BITS, &amp;pubLen, sizeof(pubLen)), ret);
+RETURN_RET_IF(pubLen == 0, CRYPT_EAL_ALG_NOT_SUPPORT);
+pubLen = BITS_TO_BYTES(pubLen);
+uint8_t *pub = (uint8_t *)BSL_SAL_Malloc(pubLen);
+BSL_Param param[2] = {{CRYPT_PARAM_EC_PUBKEY, BSL_PARAM_TYPE_OCTETS, pub, pubLen, 0}, BSL_PARAM_END};</pre>
+                <div class="problem"><strong>Issue:</strong> `CRYPT_CTRL_GET_BITS` returns the curve size in bits, but `CRYPT_PARAM_EC_PUBKEY` exports the full encoded EC point. This allocates 32/48/66 bytes for P-256/P-384/P-521 instead of 65/97/133, so `getPub()` fails and every ECDSA-based composite keygen/export path breaks.</div>
+                <div class="fix-label">Fix:</div><pre>uint32_t bits = 0;
+RETURN_RET_IF_ERR(ctx-&gt;tradMethod-&gt;ctrl(ctx-&gt;tradCtx, CRYPT_CTRL_GET_BITS, &amp;bits, sizeof(bits)), ret);
+RETURN_RET_IF(bits == 0, CRYPT_EAL_ALG_NOT_SUPPORT);
+
+uint32_t coordLen = BITS_TO_BYTES(bits);
+uint32_t pubLen = (coordLen &lt;&lt; 1) + 1; /* uncompressed EC point */
+uint8_t *pub = (uint8_t *)BSL_SAL_Malloc(pubLen);
+BSL_Param param[2] = {{CRYPT_PARAM_EC_PUBKEY, BSL_PARAM_TYPE_OCTETS, pub, pubLen, 0}, BSL_PARAM_END};</pre>
+                <div class="issue-source">Reviewer: codex</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">Reinitializing a composite context can overflow stale key buffers</div>
+                <div class="issue-location">crypto/composite/src/composite.c:246-279</div>
+                <pre>ctx-&gt;info = CRYPT_COMPOSITE_GetInfo(*(int32_t *)val);
+...
+ctx-&gt;pqcCtx = pqcMethod-&gt;newCtx();
+RETURN_RET_IF((ctx-&gt;pqcCtx == NULL), CRYPT_MEM_ALLOC_FAIL);
+ctx-&gt;tradCtx = tradMethod-&gt;newCtx();
+...
+if (ctx-&gt;pubKey == NULL) {
+    ctx-&gt;pubKey = BSL_SAL_Malloc(ctx-&gt;pubLen);
+}
+...
+ctx-&gt;pubLen = pqcPub.dataLen + tradPub.dataLen;
+(void)memcpy_s(ctx-&gt;pubKey, ctx-&gt;pubLen, pqcPub.data, pqcPub.dataLen);</pre>
+                <div class="problem"><strong>Issue:</strong> `CRYPT_CompositeSetAlgInfo()` can be called multiple times on the same context. It replaces `ctx->info` and allocates new subcontexts, but `CRYPT_CompositeCreateKeyBuf()` only allocates when `pubKey`/`prvKey` are `NULL`. If the context already holds a smaller key and is reconfigured to a larger algorithm, `CRYPT_COMPOSITE_GenKey()` copies the larger key into the old allocation. Even before keygen, repeated initialization leaks the old `pqcCtx` and `tradCtx`.</div>
+                <div class="fix-label">Fix:</div><pre>if (ctx-&gt;info != NULL || ctx-&gt;pqcCtx != NULL || ctx-&gt;tradCtx != NULL ||
+    ctx-&gt;pubKey != NULL || ctx-&gt;prvKey != NULL) {
+    BSL_ERR_PUSH_ERROR(CRYPT_INVALID_ARG);
+    return CRYPT_INVALID_ARG;
+}
+
+ctx-&gt;info = CRYPT_COMPOSITE_GetInfo(*(int32_t *)val);</pre>
+                <div class="issue-source">Reviewer: codex</div>
+            </div>
+</div>
+<div class="section"><div class="section-title medium">Medium</div>
+<div class="issue">
+                <div class="issue-title">`CRYPT_CTRL_SET_RSA_E` is ignored after parameter setup</div>
+                <div class="issue-location">crypto/composite/src/composite.c:210-223</div>
+                <pre>uint8_t *e = BSL_SAL_Dump((uint8_t *)val, len);
+RETURN_RET_IF(e == NULL, CRYPT_MEM_ALLOC_FAIL);
+BSL_SAL_FREE(ctx-&gt;e);
+ctx-&gt;e = e;
+ctx-&gt;eLen = len;
+return CRYPT_SUCCESS;
+...
+if (ctx-&gt;info-&gt;tradAlg == CRYPT_PKEY_RSA) {
+    GOTO_ERR_IF(CRYPT_CompositeSetRsaPara(ctx), ret);
+}</pre>
+                <div class="problem"><strong>Issue:</strong> The new control only updates `ctx->e`, but the RSA subcontext consumes that value only once inside `CRYPT_CompositeSetAlgInfo()`. In the normal call order (`PkeySetParaById` then `PkeyCtrl(...SET_RSA_E...)` then `PkeyGen`), the generated key still uses the default exponent `65537`.</div>
+                <div class="fix-label">Fix:</div><pre>if (val == NULL &amp;&amp; len == 0) {
+    BSL_SAL_FREE(ctx-&gt;e);
+    ctx-&gt;eLen = 0;
+    if (ctx-&gt;info != NULL &amp;&amp; ctx-&gt;tradCtx != NULL &amp;&amp; ctx-&gt;info-&gt;tradAlg == CRYPT_PKEY_RSA) {
+        return CRYPT_CompositeSetRsaPara(ctx);
+    }
+    return CRYPT_SUCCESS;
+}
+
+uint8_t *e = BSL_SAL_Dump((uint8_t *)val, len);
+RETURN_RET_IF(e == NULL, CRYPT_MEM_ALLOC_FAIL);
+BSL_SAL_FREE(ctx-&gt;e);
+ctx-&gt;e = e;
+ctx-&gt;eLen = len;
+if (ctx-&gt;info != NULL &amp;&amp; ctx-&gt;tradCtx != NULL &amp;&amp; ctx-&gt;info-&gt;tradAlg == CRYPT_PKEY_RSA) {
+    return CRYPT_CompositeSetRsaPara(ctx);
+}
+return CRYPT_SUCCESS;</pre>
+                <div class="issue-source">Reviewer: codex</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">MLDSA87/P-384 private-key length table has a misplaced digit</div>
+                <div class="issue-location">crypto/composite/src/composite.c:71-73</div>
+                <pre>{CRYPT_COMPOSITE_MLDSA87_ECDSA_P384_SHA512, "COMPSIG-MLDSA87-ECDSA-P384-SHA512",
+ CRYPT_PKEY_ML_DSA, CRYPT_MLDSA_TYPE_MLDSA_87, CRYPT_PKEY_ECDSA, CRYPT_ECC_NISTP384,
+ CRYPT_MD_SHA512, CRYPT_MD_SHA384, 0, 2689, 962, 2592, 32, 4627},</pre>
+                <div class="problem"><strong>Issue:</strong> The max composite private-key length for `CRYPT_COMPOSITE_MLDSA87_ECDSA_P384_SHA512` is recorded as `962` instead of `96`. `CRYPT_COMPOSITE_SetPrvKey()` uses this table entry as its upper bound, so malformed inputs with a valid 96-byte key plus trailing garbage are accepted.</div>
+                <div class="fix-label">Fix:</div><pre>{CRYPT_COMPOSITE_MLDSA87_ECDSA_P384_SHA512, "COMPSIG-MLDSA87-ECDSA-P384-SHA512",
+ CRYPT_PKEY_ML_DSA, CRYPT_MLDSA_TYPE_MLDSA_87, CRYPT_PKEY_ECDSA, CRYPT_ECC_NISTP384,
+ CRYPT_MD_SHA512, CRYPT_MD_SHA384, 0, 2689, 96, 2592, 32, 4627},</pre>
+                <div class="issue-source">Reviewer: codex</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">Ed448 composite OIDs are routed to an unimplemented parser</div>
+                <div class="issue-location">crypto/codecskey/src/crypt_codecskey_local.c:1171-1178</div>
+                <pre>case BSL_CID_MLDSA87_ECDSA_BRAINPOOLP384R1_SHA512:
+case BSL_CID_MLDSA87_ED448_SHAKE256:
+case BSL_CID_MLDSA87_RSA3072_PSS_SHA512:
+...
+    return ParseCompositePrikeyAsn1Buff(...);
+
+case BSL_CID_MLDSA87_ECDSA_BRAINPOOLP384R1_SHA512:
+case BSL_CID_MLDSA87_ED448_SHAKE256:
+case BSL_CID_MLDSA87_RSA3072_PSS_SHA512:
+...
+    return ParseCompositePubkeyAsn1Buff(...);</pre>
+                <div class="problem"><strong>Issue:</strong> The new PKCS#8 and SPKI dispatch tables treat `BSL_CID_MLDSA87_ED448_SHAKE256` as a supported composite key type, but the composite implementation has no `g_composite_info` entry or traditional-key handler for Ed448. Any key with this OID is advertised as supported and then fails during `CRYPT_EAL_PkeySetParaById()`.</div>
+                <div class="fix-label">Fix:</div><pre>case BSL_CID_MLDSA87_ECDSA_BRAINPOOLP384R1_SHA512:
+case BSL_CID_MLDSA87_RSA3072_PSS_SHA512:
+case BSL_CID_MLDSA87_RSA4096_PSS_SHA512:
+case BSL_CID_MLDSA87_ECDSA_P521_SHA512:
+    return ParseCompositePrikeyAsn1Buff(...);
+
+case BSL_CID_MLDSA87_ECDSA_BRAINPOOLP384R1_SHA512:
+case BSL_CID_MLDSA87_RSA3072_PSS_SHA512:
+case BSL_CID_MLDSA87_RSA4096_PSS_SHA512:
+case BSL_CID_MLDSA87_ECDSA_P521_SHA512:
+    return ParseCompositePubkeyAsn1Buff(...);</pre>
+                <div class="issue-source">Reviewer: codex</div>
+            </div>
+</div>
+</div></body></html>

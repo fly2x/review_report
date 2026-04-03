@@ -1,0 +1,52 @@
+[
+  {
+    "source": "codex",
+    "file": "crypto/composite/src/composite_encdec.c",
+    "line": "295-301",
+    "severity": "high",
+    "title": "ECDSA composite public keys allocate only one coordinate",
+    "problem": "`CRYPT_CTRL_GET_BITS` returns the curve size in bits, but `CRYPT_PARAM_EC_PUBKEY` exports the full encoded EC point. This allocates 32/48/66 bytes for P-256/P-384/P-521 instead of 65/97/133, so `getPub()` fails and every ECDSA-based composite keygen/export path breaks.",
+    "code": "uint32_t pubLen = 0;\nRETURN_RET_IF_ERR(ctx->tradMethod->ctrl(ctx->tradCtx, CRYPT_CTRL_GET_BITS, &pubLen, sizeof(pubLen)), ret);\nRETURN_RET_IF(pubLen == 0, CRYPT_EAL_ALG_NOT_SUPPORT);\npubLen = BITS_TO_BYTES(pubLen);\nuint8_t *pub = (uint8_t *)BSL_SAL_Malloc(pubLen);\nBSL_Param param[2] = {{CRYPT_PARAM_EC_PUBKEY, BSL_PARAM_TYPE_OCTETS, pub, pubLen, 0}, BSL_PARAM_END};",
+    "fix": "uint32_t bits = 0;\nRETURN_RET_IF_ERR(ctx->tradMethod->ctrl(ctx->tradCtx, CRYPT_CTRL_GET_BITS, &bits, sizeof(bits)), ret);\nRETURN_RET_IF(bits == 0, CRYPT_EAL_ALG_NOT_SUPPORT);\n\nuint32_t coordLen = BITS_TO_BYTES(bits);\nuint32_t pubLen = (coordLen << 1) + 1; /* uncompressed EC point */\nuint8_t *pub = (uint8_t *)BSL_SAL_Malloc(pubLen);\nBSL_Param param[2] = {{CRYPT_PARAM_EC_PUBKEY, BSL_PARAM_TYPE_OCTETS, pub, pubLen, 0}, BSL_PARAM_END};"
+  },
+  {
+    "source": "codex",
+    "file": "crypto/composite/src/composite.c",
+    "line": "246-279",
+    "severity": "high",
+    "title": "Reinitializing a composite context can overflow stale key buffers",
+    "problem": "`CRYPT_CompositeSetAlgInfo()` can be called multiple times on the same context. It replaces `ctx->info` and allocates new subcontexts, but `CRYPT_CompositeCreateKeyBuf()` only allocates when `pubKey`/`prvKey` are `NULL`. If the context already holds a smaller key and is reconfigured to a larger algorithm, `CRYPT_COMPOSITE_GenKey()` copies the larger key into the old allocation. Even before keygen, repeated initialization leaks the old `pqcCtx` and `tradCtx`.",
+    "code": "ctx->info = CRYPT_COMPOSITE_GetInfo(*(int32_t *)val);\n...\nctx->pqcCtx = pqcMethod->newCtx();\nRETURN_RET_IF((ctx->pqcCtx == NULL), CRYPT_MEM_ALLOC_FAIL);\nctx->tradCtx = tradMethod->newCtx();\n...\nif (ctx->pubKey == NULL) {\n    ctx->pubKey = BSL_SAL_Malloc(ctx->pubLen);\n}\n...\nctx->pubLen = pqcPub.dataLen + tradPub.dataLen;\n(void)memcpy_s(ctx->pubKey, ctx->pubLen, pqcPub.data, pqcPub.dataLen);",
+    "fix": "if (ctx->info != NULL || ctx->pqcCtx != NULL || ctx->tradCtx != NULL ||\n    ctx->pubKey != NULL || ctx->prvKey != NULL) {\n    BSL_ERR_PUSH_ERROR(CRYPT_INVALID_ARG);\n    return CRYPT_INVALID_ARG;\n}\n\nctx->info = CRYPT_COMPOSITE_GetInfo(*(int32_t *)val);"
+  },
+  {
+    "source": "codex",
+    "file": "crypto/composite/src/composite.c",
+    "line": "210-223",
+    "severity": "medium",
+    "title": "`CRYPT_CTRL_SET_RSA_E` is ignored after parameter setup",
+    "problem": "The new control only updates `ctx->e`, but the RSA subcontext consumes that value only once inside `CRYPT_CompositeSetAlgInfo()`. In the normal call order (`PkeySetParaById` then `PkeyCtrl(...SET_RSA_E...)` then `PkeyGen`), the generated key still uses the default exponent `65537`.",
+    "code": "uint8_t *e = BSL_SAL_Dump((uint8_t *)val, len);\nRETURN_RET_IF(e == NULL, CRYPT_MEM_ALLOC_FAIL);\nBSL_SAL_FREE(ctx->e);\nctx->e = e;\nctx->eLen = len;\nreturn CRYPT_SUCCESS;\n...\nif (ctx->info->tradAlg == CRYPT_PKEY_RSA) {\n    GOTO_ERR_IF(CRYPT_CompositeSetRsaPara(ctx), ret);\n}",
+    "fix": "if (val == NULL && len == 0) {\n    BSL_SAL_FREE(ctx->e);\n    ctx->eLen = 0;\n    if (ctx->info != NULL && ctx->tradCtx != NULL && ctx->info->tradAlg == CRYPT_PKEY_RSA) {\n        return CRYPT_CompositeSetRsaPara(ctx);\n    }\n    return CRYPT_SUCCESS;\n}\n\nuint8_t *e = BSL_SAL_Dump((uint8_t *)val, len);\nRETURN_RET_IF(e == NULL, CRYPT_MEM_ALLOC_FAIL);\nBSL_SAL_FREE(ctx->e);\nctx->e = e;\nctx->eLen = len;\nif (ctx->info != NULL && ctx->tradCtx != NULL && ctx->info->tradAlg == CRYPT_PKEY_RSA) {\n    return CRYPT_CompositeSetRsaPara(ctx);\n}\nreturn CRYPT_SUCCESS;"
+  },
+  {
+    "source": "codex",
+    "file": "crypto/composite/src/composite.c",
+    "line": "71-73",
+    "severity": "medium",
+    "title": "MLDSA87/P-384 private-key length table has a misplaced digit",
+    "problem": "The max composite private-key length for `CRYPT_COMPOSITE_MLDSA87_ECDSA_P384_SHA512` is recorded as `962` instead of `96`. `CRYPT_COMPOSITE_SetPrvKey()` uses this table entry as its upper bound, so malformed inputs with a valid 96-byte key plus trailing garbage are accepted.",
+    "code": "{CRYPT_COMPOSITE_MLDSA87_ECDSA_P384_SHA512, \"COMPSIG-MLDSA87-ECDSA-P384-SHA512\",\n CRYPT_PKEY_ML_DSA, CRYPT_MLDSA_TYPE_MLDSA_87, CRYPT_PKEY_ECDSA, CRYPT_ECC_NISTP384,\n CRYPT_MD_SHA512, CRYPT_MD_SHA384, 0, 2689, 962, 2592, 32, 4627},",
+    "fix": "{CRYPT_COMPOSITE_MLDSA87_ECDSA_P384_SHA512, \"COMPSIG-MLDSA87-ECDSA-P384-SHA512\",\n CRYPT_PKEY_ML_DSA, CRYPT_MLDSA_TYPE_MLDSA_87, CRYPT_PKEY_ECDSA, CRYPT_ECC_NISTP384,\n CRYPT_MD_SHA512, CRYPT_MD_SHA384, 0, 2689, 96, 2592, 32, 4627},"
+  },
+  {
+    "source": "codex",
+    "file": "crypto/codecskey/src/crypt_codecskey_local.c",
+    "line": "1171-1178",
+    "severity": "medium",
+    "title": "Ed448 composite OIDs are routed to an unimplemented parser",
+    "problem": "The new PKCS#8 and SPKI dispatch tables treat `BSL_CID_MLDSA87_ED448_SHAKE256` as a supported composite key type, but the composite implementation has no `g_composite_info` entry or traditional-key handler for Ed448. Any key with this OID is advertised as supported and then fails during `CRYPT_EAL_PkeySetParaById()`.",
+    "code": "case BSL_CID_MLDSA87_ECDSA_BRAINPOOLP384R1_SHA512:\ncase BSL_CID_MLDSA87_ED448_SHAKE256:\ncase BSL_CID_MLDSA87_RSA3072_PSS_SHA512:\n...\n    return ParseCompositePrikeyAsn1Buff(...);\n\ncase BSL_CID_MLDSA87_ECDSA_BRAINPOOLP384R1_SHA512:\ncase BSL_CID_MLDSA87_ED448_SHAKE256:\ncase BSL_CID_MLDSA87_RSA3072_PSS_SHA512:\n...\n    return ParseCompositePubkeyAsn1Buff(...);",
+    "fix": "case BSL_CID_MLDSA87_ECDSA_BRAINPOOLP384R1_SHA512:\ncase BSL_CID_MLDSA87_RSA3072_PSS_SHA512:\ncase BSL_CID_MLDSA87_RSA4096_PSS_SHA512:\ncase BSL_CID_MLDSA87_ECDSA_P521_SHA512:\n    return ParseCompositePrikeyAsn1Buff(...);\n\ncase BSL_CID_MLDSA87_ECDSA_BRAINPOOLP384R1_SHA512:\ncase BSL_CID_MLDSA87_RSA3072_PSS_SHA512:\ncase BSL_CID_MLDSA87_RSA4096_PSS_SHA512:\ncase BSL_CID_MLDSA87_ECDSA_P521_SHA512:\n    return ParseCompositePubkeyAsn1Buff(...);"
+  }
+]

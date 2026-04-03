@@ -1,0 +1,131 @@
+[
+  {
+    "source": "claude",
+    "file": "crypto/composite/src/composite.c",
+    "line": "517-526",
+    "severity": "high",
+    "title": "Potential use of uninitialized data in CRYPT_COMPOSITE_SetPrvKeyEx",
+    "problem": "GetConstParamValue return value is ignored with (void) cast. If the parameter is not found, *value and *valueLen won't be set, leaving prv.data and prv.len uninitialized (zero). The subsequent CRYPT_COMPOSITE_SetPrvKey call will use this uninitialized data, potentially causing memory corruption or incorrect behavior.",
+    "code": "int32_t CRYPT_COMPOSITE_SetPrvKeyEx(CRYPT_CompositeCtx *ctx, const BSL_Param *para)\n{\n    if (para == NULL) {\n        BSL_ERR_PUSH_ERROR(CRYPT_NULL_INPUT);\n        return CRYPT_NULL_INPUT;\n    }\n    CRYPT_CompositePrv prv = {0};\n    (void)GetConstParamValue(para, CRYPT_PARAM_COMPOSITE_PRVKEY, &prv.data, &prv.len);\n    return CRYPT_COMPOSITE_SetPrvKey(ctx, &prv);\n}",
+    "fix": "int32_t CRYPT_COMPOSITE_SetPrvKeyEx(CRYPT_CompositeCtx *ctx, const BSL_Param *para)\n{\n    if (para == NULL) {\n        BSL_ERR_PUSH_ERROR(CRYPT_NULL_INPUT);\n        return CRYPT_NULL_INPUT;\n    }\n    CRYPT_CompositePrv prv = {0};\n    if (GetConstParamValue(para, CRYPT_PARAM_COMPOSITE_PRVKEY, &prv.data, &prv.len) == NULL) {\n        BSL_ERR_PUSH_ERROR(CRYPT_INVALID_ARG);\n        return CRYPT_INVALID_ARG;\n    }\n    return CRYPT_COMPOSITE_SetPrvKey(ctx, &prv);\n}"
+  },
+  {
+    "source": "claude",
+    "file": "crypto/composite/src/composite.c",
+    "line": "528-537",
+    "severity": "high",
+    "title": "Potential use of uninitialized data in CRYPT_COMPOSITE_SetPubKeyEx",
+    "problem": "GetConstParamValue return value is ignored with (void) cast. If the parameter is not found, *value and *valueLen won't be set, leaving pub.data and pub.len uninitialized (zero). The subsequent CRYPT_COMPOSITE_SetPubKey call will use this uninitialized data, potentially causing memory corruption or incorrect behavior.",
+    "code": "int32_t CRYPT_COMPOSITE_SetPubKeyEx(CRYPT_CompositeCtx *ctx, const BSL_Param *para)\n{\n    if (para == NULL) {\n        BSL_ERR_PUSH_ERROR(CRYPT_NULL_INPUT);\n        return CRYPT_NULL_INPUT;\n    }\n    CRYPT_CompositePub pub = {0};\n    (void)GetConstParamValue(para, CRYPT_PARAM_COMPOSITE_PUBKEY, &pub.data, &pub.len);\n    return CRYPT_COMPOSITE_SetPubKey(ctx, &pub);\n}",
+    "fix": "int32_t CRYPT_COMPOSITE_SetPubKeyEx(CRYPT_CompositeCtx *ctx, const BSL_Param *para)\n{\n    if (para == NULL) {\n        BSL_ERR_PUSH_ERROR(CRYPT_NULL_INPUT);\n        return CRYPT_NULL_INPUT;\n    }\n    CRYPT_CompositePub pub = {0};\n    if (GetConstParamValue(para, CRYPT_PARAM_COMPOSITE_PUBKEY, &pub.data, &pub.len) == NULL) {\n        BSL_ERR_PUSH_ERROR(CRYPT_INVALID_ARG);\n        return CRYPT_INVALID_ARG;\n    }\n    return CRYPT_COMPOSITE_SetPubKey(ctx, &pub);\n}"
+  },
+  {
+    "source": "claude",
+    "file": "crypto/composite/src/composite.c",
+    "line": "485-499",
+    "severity": "high",
+    "title": "Potential NULL pointer dereference in CRYPT_COMPOSITE_GetPrvKeyEx",
+    "problem": "GetParamValue may return NULL if the parameter is not found, but the code doesn't check for this before dereferencing paramPrv to set paramPrv->useLen. This could cause a NULL pointer dereference and crash.",
+    "code": "int32_t CRYPT_COMPOSITE_GetPrvKeyEx(const CRYPT_CompositeCtx *ctx, BSL_Param *para)\n{\n    if (para == NULL) {\n        BSL_ERR_PUSH_ERROR(CRYPT_NULL_INPUT);\n        return CRYPT_NULL_INPUT;\n    }\n    CRYPT_CompositePrv prv = {0};\n    BSL_Param *paramPrv = GetParamValue(para, CRYPT_PARAM_COMPOSITE_PRVKEY, &prv.data, &(prv.len));\n    int32_t ret = CRYPT_COMPOSITE_GetPrvKey(ctx, &prv);\n    if (ret != CRYPT_SUCCESS) {\n        return ret;\n    }\n    paramPrv->useLen = prv.len;\n    return CRYPT_SUCCESS;\n}",
+    "fix": "int32_t CRYPT_COMPOSITE_GetPrvKeyEx(const CRYPT_CompositeCtx *ctx, BSL_Param *para)\n{\n    if (para == NULL) {\n        BSL_ERR_PUSH_ERROR(CRYPT_NULL_INPUT);\n        return CRYPT_NULL_INPUT;\n    }\n    CRYPT_CompositePrv prv = {0};\n    BSL_Param *paramPrv = GetParamValue(para, CRYPT_PARAM_COMPOSITE_PRVKEY, &prv.data, &(prv.len));\n    if (paramPrv == NULL) {\n        BSL_ERR_PUSH_ERROR(CRYPT_INVALID_ARG);\n        return CRYPT_INVALID_ARG;\n    }\n    int32_t ret = CRYPT_COMPOSITE_GetPrvKey(ctx, &prv);\n    if (ret != CRYPT_SUCCESS) {\n        return ret;\n    }\n    paramPrv->useLen = prv.len;\n    return CRYPT_SUCCESS;\n}"
+  },
+  {
+    "source": "claude",
+    "file": "crypto/composite/src/composite.c",
+    "line": "501-515",
+    "severity": "high",
+    "title": "Potential NULL pointer dereference in CRYPT_COMPOSITE_GetPubKeyEx",
+    "problem": "GetParamValue may return NULL if the parameter is not found, but the code doesn't check for this before dereferencing paramPub to set paramPub->useLen. This could cause a NULL pointer dereference and crash.",
+    "code": "int32_t CRYPT_COMPOSITE_GetPubKeyEx(const CRYPT_CompositeCtx *ctx, BSL_Param *para)\n{\n    if (para == NULL) {\n        BSL_ERR_PUSH_ERROR(CRYPT_NULL_INPUT);\n        return CRYPT_NULL_INPUT;\n    }\n    CRYPT_CompositePub pub = {0};\n    BSL_Param *paramPub = GetParamValue(para, CRYPT_PARAM_COMPOSITE_PUBKEY, &pub.data, &(pub.len));\n    int32_t ret = CRYPT_COMPOSITE_GetPubKey(ctx, &pub);\n    if (ret != CRYPT_SUCCESS) {\n        return ret;\n    }\n    paramPub->useLen = pub.len;\n    return CRYPT_SUCCESS;\n}",
+    "fix": "int32_t CRYPT_COMPOSITE_GetPubKeyEx(const CRYPT_CompositeCtx *ctx, BSL_Param *para)\n{\n    if (para == NULL) {\n        BSL_ERR_PUSH_ERROR(CRYPT_NULL_INPUT);\n        return CRYPT_NULL_INPUT;\n    }\n    CRYPT_CompositePub pub = {0};\n    BSL_Param *paramPub = GetParamValue(para, CRYPT_PARAM_COMPOSITE_PUBKEY, &pub.data, &(pub.len));\n    if (paramPub == NULL) {\n        BSL_ERR_PUSH_ERROR(CRYPT_INVALID_ARG);\n        return CRYPT_INVALID_ARG;\n    }\n    int32_t ret = CRYPT_COMPOSITE_GetPubKey(ctx, &pub);\n    if (ret != CRYPT_SUCCESS) {\n        return ret;\n    }\n    paramPub->useLen = pub.len;\n    return CRYPT_SUCCESS;\n}"
+  },
+  {
+    "source": "claude",
+    "file": "crypto/composite/src/composite.c",
+    "line": "195-221",
+    "severity": "medium",
+    "title": "Missing NULL checks in CRYPT_COMPOSITE_DupCtx",
+    "problem": "The code dereferences ctx->pqcMethod and ctx->tradMethod without first checking if they are NULL. While this is called after setting algorithm info, a defensive check would be safer to prevent potential NULL pointer dereference if the context is in an inconsistent state.",
+    "code": "newCtx->info = ctx->info;\n    newCtx->pqcMethod = ctx->pqcMethod;\n    newCtx->tradMethod = ctx->tradMethod;\n    ...\n    if (ctx->pqcMethod != NULL && ctx->tradMethod != NULL) {\n        newCtx->pqcCtx = ctx->pqcMethod->dupCtx(ctx->pqcCtx);\n        newCtx->tradCtx = ctx->tradMethod->dupCtx(ctx->tradCtx);\n        if (newCtx->pqcCtx == NULL || newCtx->tradCtx == NULL) {\n            BSL_ERR_PUSH_ERROR(CRYPT_MEM_ALLOC_FAIL);\n            goto ERR;\n        }\n    }",
+    "fix": "newCtx->info = ctx->info;\n    if (ctx->pqcMethod == NULL || ctx->tradMethod == NULL) {\n        BSL_ERR_PUSH_ERROR(CRYPT_COMPOSITE_KEYINFO_NOT_SET);\n        goto ERR;\n    }\n    newCtx->pqcMethod = ctx->pqcMethod;\n    newCtx->tradMethod = ctx->tradMethod;\n    ..."
+  },
+  {
+    "source": "claude",
+    "file": "crypto/composite/src/composite.c",
+    "line": "455-464",
+    "severity": "medium",
+    "title": "Potential integer overflow in key length subtraction",
+    "problem": "The code checks `prv->len <= ctx->info->pqcPrvkeyLen` and `prv->len > ctx->info->prvKeyLen`, but doesn't verify that `prv->len - ctx->info->pqcPrvkeyLen` won't underflow when computing the tradPrv length. While the checks should prevent this, explicit bounds checking would be safer.",
+    "code": "RETURN_RET_IF(prv->len <= ctx->info->pqcPrvkeyLen, CRYPT_COMPOSITE_KEYLEN_ERROR);\n    RETURN_RET_IF(prv->len > ctx->info->prvKeyLen, CRYPT_COMPOSITE_KEYLEN_ERROR);\n    BSL_Buffer pqcPrv = {prv->data, ctx->info->pqcPrvkeyLen};\n    BSL_Buffer tradPrv = {prv->data + ctx->info->pqcPrvkeyLen, prv->len - ctx->info->pqcPrvkeyLen};",
+    "fix": "RETURN_RET_IF(prv->len <= ctx->info->pqcPrvkeyLen, CRYPT_COMPOSITE_KEYLEN_ERROR);\n    RETURN_RET_IF(prv->len > ctx->info->prvKeyLen, CRYPT_COMPOSITE_KEYLEN_ERROR);\n    uint32_t tradLen = prv->len - ctx->info->pqcPrvkeyLen;\n    if (tradLen > ctx->info->prvKeyLen - ctx->info->pqcPrvkeyLen) {\n        BSL_ERR_PUSH_ERROR(CRYPT_COMPOSITE_KEYLEN_ERROR);\n        return CRYPT_COMPOSITE_KEYLEN_ERROR;\n    }\n    BSL_Buffer pqcPrv = {prv->data, ctx->info->pqcPrvkeyLen};\n    BSL_Buffer tradPrv = {prv->data + ctx->info->pqcPrvkeyLen, tradLen};"
+  },
+  {
+    "source": "claude",
+    "file": "crypto/composite/src/composite.c",
+    "line": "473-482",
+    "severity": "medium",
+    "title": "Potential integer overflow in public key length subtraction",
+    "problem": "The code checks `pub->len <= ctx->info->pqcPubkeyLen` and `pub->len > ctx->info->pubKeyLen`, but doesn't verify that `pub->len - ctx->info->pqcPubkeyLen` won't underflow when computing the tradPub length.",
+    "code": "RETURN_RET_IF(pub->len <= ctx->info->pqcPubkeyLen, CRYPT_COMPOSITE_KEYLEN_ERROR);\n    RETURN_RET_IF(pub->len > ctx->info->pubKeyLen, CRYPT_COMPOSITE_KEYLEN_ERROR);\n    BSL_Buffer pqcPub = {pub->data, ctx->info->pqcPubkeyLen};\n    BSL_Buffer tradPub = {pub->data + ctx->info->pqcPubkeyLen, pub->len - ctx->info->pqcPubkeyLen};",
+    "fix": "RETURN_RET_IF(pub->len <= ctx->info->pqcPubkeyLen, CRYPT_COMPOSITE_KEYLEN_ERROR);\n    RETURN_RET_IF(pub->len > ctx->info->pubKeyLen, CRYPT_COMPOSITE_KEYLEN_ERROR);\n    uint32_t tradLen = pub->len - ctx->info->pqcPubkeyLen;\n    if (tradLen > ctx->info->pubKeyLen - ctx->info->pqcPubkeyLen) {\n        BSL_ERR_PUSH_ERROR(CRYPT_COMPOSITE_KEYLEN_ERROR);\n        return CRYPT_COMPOSITE_KEYLEN_ERROR;\n    }\n    BSL_Buffer pqcPub = {pub->data, ctx->info->pqcPubkeyLen};\n    BSL_Buffer tradPub = {pub->data + ctx->info->pqcPubkeyLen, tradLen};"
+  },
+  {
+    "source": "claude",
+    "file": "crypto/codecskey/src/crypt_decoder_composite.c",
+    "line": "93-94",
+    "severity": "medium",
+    "title": "Missing BSL_ERR_PUSH_ERROR after CRYPT_COMPOSITE_SetPrvKeyEx failure",
+    "problem": "When CRYPT_COMPOSITE_SetPrvKeyEx fails, the error is not pushed via BSL_ERR_PUSH_ERROR, making debugging harder and potentially losing context about the actual error.",
+    "code": "ret = CRYPT_COMPOSITE_SetPrvKeyEx(pctx, priParam);\n    if (ret != CRYPT_SUCCESS) {\n        CRYPT_COMPOSITE_FreeCtx(pctx);\n        return ret;\n    }",
+    "fix": "ret = CRYPT_COMPOSITE_SetPrvKeyEx(pctx, priParam);\n    if (ret != CRYPT_SUCCESS) {\n        BSL_ERR_PUSH_ERROR(ret);\n        CRYPT_COMPOSITE_FreeCtx(pctx);\n        return ret;\n    }"
+  },
+  {
+    "source": "claude",
+    "file": "crypto/codecskey/src/crypt_codecskey_local.c",
+    "line": "1169-1177",
+    "severity": "low",
+    "title": "Inconsistent error handling in ParseCompositePrikeyAsn1Buff",
+    "problem": "After calling CRYPT_EAL_PkeySetPrv, if it fails, the code frees pctx but returns without pushing error via BSL_ERR_PUSH_ERROR. This is inconsistent with other similar functions like ParseMldsaPrikeyAsn1Buff.",
+    "code": "ret = CRYPT_EAL_PkeySetPrv(pctx, &prv);\n    if (ret != CRYPT_SUCCESS) {\n        CRYPT_EAL_PkeyFreeCtx(pctx);\n        BSL_ERR_PUSH_ERROR(ret);\n        return ret;\n    }"
+  },
+  {
+    "source": "claude",
+    "file": "crypto/composite/src/composite.c",
+    "line": "598-604",
+    "severity": "low",
+    "title": "Insufficient signature length validation in CRYPT_COMPOSITE_Sign",
+    "problem": "The code checks `*signLen < ctx->info->pqcSigLen` but doesn't verify that the remaining buffer space (*signLen - pqcSigLen) is sufficient for the traditional signature. While tradSigLen is passed to the sign function, there's no explicit check that the total expected signature length fits.",
+    "code": "if (*signLen < ctx->info->pqcSigLen) {\n        BSL_ERR_PUSH_ERROR(CRYPT_COMPOSITE_INVALID_SIG_LEN);\n        return CRYPT_COMPOSITE_INVALID_SIG_LEN;\n    }\n    int32_t ret;\n    uint32_t pqcSigLen = ctx->info->pqcSigLen;\n    uint32_t tradSigLen = *signLen - pqcSigLen;",
+    "fix": "if (*signLen < ctx->info->pqcSigLen) {\n        BSL_ERR_PUSH_ERROR(CRYPT_COMPOSITE_INVALID_SIG_LEN);\n        return CRYPT_COMPOSITE_INVALID_SIG_LEN;\n    }\n    uint32_t expectedSigLen = ctx->info->pqcSigLen + ctx->info->tradSigLen;\n    if (*signLen < expectedSigLen) {\n        BSL_ERR_PUSH_ERROR(CRYPT_COMPOSITE_INVALID_SIG_LEN);\n        return CRYPT_COMPOSITE_INVALID_SIG_LEN;\n    }\n    int32_t ret;\n    uint32_t pqcSigLen = ctx->info->pqcSigLen;\n    uint32_t tradSigLen = *signLen - pqcSigLen;"
+  },
+  {
+    "source": "claude",
+    "file": "crypto/composite/src/composite.c",
+    "line": "567",
+    "severity": "low",
+    "title": "Missing NULL check for ctx->info->label in CompositeMsgEncode",
+    "problem": "The code calls strlen(ctx->info->label) without verifying that ctx->info->label is not NULL. If label is NULL, this will cause a crash.",
+    "code": "const char *label = ctx->info->label;\n    uint32_t prefixLen = COMPOSITE_SIGNATURE_PREFIX_LEN;\n    uint32_t labelLen = (uint32_t)strlen(label);",
+    "fix": "const char *label = ctx->info->label;\n    if (label == NULL) {\n        return CRYPT_COMPOSITE_KEYINFO_NOT_SET;\n    }\n    uint32_t prefixLen = COMPOSITE_SIGNATURE_PREFIX_LEN;\n    uint32_t labelLen = (uint32_t)strlen(label);"
+  },
+  {
+    "source": "claude",
+    "file": "crypto/composite/src/composite.c",
+    "line": "607-608",
+    "severity": "low",
+    "title": "Unsafe pointer cast in CRYPT_COMPOSITE_Sign",
+    "problem": "The code casts ctx->info->label (a const char pointer) to void* via uintptr_t. This is technically undefined behavior in C/C++ as it converts a pointer to data to a pointer to function (or vice versa). The control function expects a different type of data.",
+    "code": "GOTO_ERR_IF(ctx->pqcMethod->ctrl(ctx->pqcCtx, CRYPT_CTRL_SET_CTX_INFO, (void *)(uintptr_t)ctx->info->label,\n        (uint32_t)strlen(ctx->info->label)), ret);",
+    "fix": "GOTO_ERR_IF(ctx->pqcMethod->ctrl(ctx->pqcCtx, CRYPT_CTRL_SET_CTX_INFO, (void *)ctx->info->label,\n        (uint32_t)strlen(ctx->info->label)), ret);"
+  },
+  {
+    "source": "claude",
+    "file": "config/macro_config/hitls_config_layer_crypto.h",
+    "line": "739-740",
+    "severity": "low",
+    "title": "Missing HITLS_CRYPTO_COMPOSITE in PKEY_SIGN condition",
+    "problem": "The preprocessor condition for HITLS_CRYPTO_PKEY_SIGN includes ML-DSA but not COMPOSITE. Since COMPOSITE keys can sign, this might cause issues with feature detection or linking.",
+    "code": "#if defined(HITLS_CRYPTO_DSA) || defined(HITLS_CRYPTO_RSA_SIGN) || defined(HITLS_CRYPTO_RSA_VERIFY) || \\\n    defined(HITLS_CRYPTO_ECDSA) || defined(HITLS_CRYPTO_SM2_SIGN) || defined(HITLS_CRYPTO_SM9) || \\\n    defined(HITLS_CRYPTO_ED25519) || defined(HITLS_CRYPTO_SLH_DSA) || defined(HITLS_CRYPTO_MLDSA)",
+    "fix": "#if defined(HITLS_CRYPTO_DSA) || defined(HITLS_CRYPTO_RSA_SIGN) || defined(HITLS_CRYPTO_RSA_VERIFY) || \\\n    defined(HITLS_CRYPTO_ECDSA) || defined(HITLS_CRYPTO_SM2_SIGN) || defined(HITLS_CRYPTO_SM9) || \\\n    defined(HITLS_CRYPTO_ED25519) || defined(HITLS_CRYPTO_SLH_DSA) || defined(HITLS_CRYPTO_MLDSA) || \\\n    defined(HITLS_CRYPTO_COMPOSITE)"
+  }
+]
