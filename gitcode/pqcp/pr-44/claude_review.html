@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Code Review: openHiTLS/pqcp#44 - CLAUDE</title>
+    <style>
+        :root { --critical: #dc2626; --high: #ea580c; --medium: #ca8a04; --low: #65a30d; }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: system-ui, sans-serif; background: #f8fafc; color: #1e293b; padding: 2rem; line-height: 1.6; }
+        .container { max-width: 900px; margin: 0 auto; }
+        h1 { font-size: 1.5rem; margin-bottom: 0.5rem; }
+        .subtitle { color: #64748b; margin-bottom: 2rem; }
+        .section { margin-bottom: 2rem; }
+        .section-title { font-size: 1.1rem; font-weight: 600; padding: 0.5rem 1rem; border-radius: 0.5rem 0.5rem 0 0; color: white; }
+        .section-title.critical { background: var(--critical); }
+        .section-title.high { background: var(--high); }
+        .section-title.medium { background: var(--medium); }
+        .section-title.low { background: var(--low); }
+        .issue { background: white; border: 1px solid #e2e8f0; border-top: none; padding: 1rem; }
+        .issue:last-child { border-radius: 0 0 0.5rem 0.5rem; }
+        .issue-title { font-weight: 600; margin-bottom: 0.25rem; }
+        .issue-location { font-family: monospace; font-size: 0.875rem; color: #64748b; margin-bottom: 0.75rem; }
+        .issue-source { font-size: 0.75rem; color: #94a3b8; margin-top: 0.5rem; }
+        pre { background: #1e293b; color: #e2e8f0; padding: 0.75rem; border-radius: 0.375rem; overflow-x: auto; font-size: 0.875rem; margin: 0.5rem 0; }
+        .problem { margin: 0.75rem 0; }
+        .fix-label { font-weight: 600; margin-top: 0.75rem; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Code Review: openHiTLS/pqcp#44 - CLAUDE</h1>
+        <div class="subtitle"></div>
+<div class="section"><div class="section-title high">High</div>
+<div class="issue">
+                <div class="issue-title">Compiler support check doesn't verify CPU capability</div>
+                <div class="issue-location">CMakeLists.txt:56-68</div>
+                <pre>if(CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|amd64|AMD64)$")
+    check_c_compiler_flag("-maes" PQCP_COMPILER_SUPPORTS_MAES)
+    if(PQCP_COMPILER_SUPPORTS_MAES)
+        set(PQCP_HIAE_SUPPORTED TRUE)
+        list(APPEND PQCP_HIAE_COMPILE_OPTIONS "-maes")
+    endif()</pre>
+                <div class="problem"><strong>Issue:</strong> check_c_compiler_flag only tests if the compiler accepts the flag, not if the target CPU actually supports the AES/ARM Crypto instructions. This can lead to runtime SIGILL errors when the code runs on a CPU without these instructions (e.g., compiling on a x86_64 with AES-NI but running on an older x86_64 without it, or cross-compiling for a different target).</div>
+                
+                <div class="issue-source">Reviewer: claude</div>
+            </div>
+</div>
+<div class="section"><div class="section-title medium">Medium</div>
+<div class="issue">
+                <div class="issue-title">ProcessPartialNoCommit lacks platform support validation</div>
+                <div class="issue-location">src/hiae/src/hiae_cipher.c:63-73</div>
+                <pre>static void ProcessPartialNoCommit(const PQCP_HIAE_CipherCtx *ctx, const uint8_t *in, uint32_t inLen, uint8_t *out)
+{
+    DATA128b tmpState[HIAE_STATE_NUM];
+    (void)memcpy_s(tmpState, sizeof(tmpState), ctx-&gt;state, sizeof(ctx-&gt;state));
+    if (ctx-&gt;isEnc) {
+        HIAE_Stream_Encrypt(tmpState, out, in, inLen);
+    } else {
+        HIAE_Stream_Decrypt(tmpState, out, in, inLen);
+    }
+    BSL_SAL_CleanseData(tmpState, sizeof(tmpState));
+}</pre>
+                <div class="problem"><strong>Issue:</strong> The ProcessPartialNoCommit function calls HIAE_Stream_Encrypt/Decrypt which use SIMD intrinsics. If the code somehow runs on an unsupported platform (where the compiler flag was accepted but CPU doesn't support the instructions), this will cause undefined behavior or crash.</div>
+                
+                <div class="issue-source">Reviewer: claude</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">SetIv doesn't validate platform support before calling HIAE_Init</div>
+                <div class="issue-location">src/hiae/src/hiae_cipher.c:296-318</div>
+                <pre>static int32_t SetIv(PQCP_HIAE_CipherCtx *ctx, const uint8_t *iv, uint32_t ivLen)
+{
+    ...
+    if (memcpy_s(ctx-&gt;iv, sizeof(ctx-&gt;iv), iv, ivLen) != EOK) {
+        return PQCP_INVALID_ARG;
+    }
+    HIAE_Init(ctx-&gt;state, ctx-&gt;key, ctx-&gt;iv);
+    ...
+}</pre>
+                <div class="problem"><strong>Issue:</strong> The SetIv function calls HIAE_Init without checking if the platform actually supports HiAE. If CMake incorrectly detected support, this could cause runtime errors.</div>
+                
+                <div class="issue-source">Reviewer: claude</div>
+            </div>
+</div>
+<div class="section"><div class="section-title low">Low</div>
+<div class="issue">
+                <div class="issue-title">Inefficient empty foreach loop when HiAE is not supported</div>
+                <div class="issue-location">CMakeLists.txt:131-134</div>
+                <pre>foreach(src ${HIAE_SOURCES})
+    if(PQCP_HIAE_SUPPORTED)
+        set_source_files_properties(${src} PROPERTIES COMPILE_OPTIONS "${PQCP_HIAE_COMPILE_OPTIONS}")
+    endif()
+endforeach()</pre>
+                <div class="problem"><strong>Issue:</strong> When PQCP_HIAE_SUPPORTED is FALSE, HIAE_SOURCES is empty and the foreach loop serves no purpose. The loop body has an if check for PQCP_HIAE_SUPPORTED which is already known to be FALSE at this point.</div>
+                <div class="fix-label">Fix:</div><pre>if(PQCP_HIAE_SUPPORTED)
+    foreach(src ${HIAE_SOURCES})
+        set_source_files_properties(${src} PROPERTIES COMPILE_OPTIONS "${PQCP_HIAE_COMPILE_OPTIONS}")
+    endforeach()
+endif()</pre>
+                <div class="issue-source">Reviewer: claude</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">FlushPendingData always processes full 16-byte block</div>
+                <div class="issue-location">src/hiae/src/hiae_mac.c:61-72</div>
+                <pre>static int32_t FlushPendingData(PQCP_HIAE_MacCtx *ctx)
+{
+    uint8_t block[HIAE_BLOCK_SIZE] = {0};
+    if (ctx-&gt;dataBufLen == 0) {
+        return PQCP_SUCCESS;
+    }
+    if (memcpy_s(block, sizeof(block), ctx-&gt;dataBuf, ctx-&gt;dataBufLen) != EOK) {
+        return PQCP_INVALID_ARG;
+    }
+    HIAE_Stream_ProcAD(ctx-&gt;state, block, sizeof(block));
+    ctx-&gt;dataBufLen = 0;
+    return PQCP_SUCCESS;
+}</pre>
+                <div class="problem"><strong>Issue:</strong> The function passes sizeof(block) (16 bytes) to HIAE_Stream_ProcAD even when only partial data (ctx->dataBufLen bytes) is buffered. While the zero-padding is correct for the algorithm, this is inconsistent with how the cipher's CommitPendingMsg handles partial blocks and could be confusing.</div>
+                
+                <div class="issue-source">Reviewer: claude</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">HIAE_Init returns void on error without indication</div>
+                <div class="issue-location">src/hiae/src/hiae_impl.c:442-459</div>
+                <pre>void HIAE_Init(DATA128b *state, const uint8_t *key, const uint8_t *iv)
+{
+    if (state == NULL || key == NULL || iv == NULL) {
+        return;
+    }
+    DATA128b c0 = SIMD_LOAD(CONST0);
+    ...
+}</pre>
+                <div class="problem"><strong>Issue:</strong> HIAE_Init checks for NULL pointers and returns early, but returns void. If called directly (bypassing the provider layer) with NULL inputs, the state remains uninitialized with no error indication. While provider callers check first, this low-level API could be misused.</div>
+                
+                <div class="issue-source">Reviewer: claude</div>
+            </div>
+</div>
+</div></body></html>

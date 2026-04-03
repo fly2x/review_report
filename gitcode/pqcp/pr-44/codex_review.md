@@ -1,0 +1,273 @@
+# Code Review: openHiTLS/pqcp#44
+**Reviewer**: CODEX
+
+
+## High
+
+### AEAD decrypt path never verifies the expected authentication tag
+`src/hiae/src/hiae_cipher.c:256-276`
+```
+ret = FinalizeIfNeeded(c);
+if (ret != PQCP_SUCCESS) {
+    return ret;
+}
+*outLen = 0;
+return PQCP_SUCCESS;
+...
+case CRYPT_CTRL_GET_TAG:
+    return GetTag(c, (uint8_t *)val, valLen);
+```
+**Issue**: The new AEAD implementation only exposes `CRYPT_CTRL_GET_TAG`, and `PQCP_HIAE_CipherFinal()` always returns success after finalization. There is no way to provide the caller's expected tag on decrypt, so forged ciphertext is decrypted and returned unless every caller separately fetches and compares the recomputed tag. That defeats the AEAD contract and makes unauthenticated plaintext easy to consume.
+**Fix**:
+```
+/* include/pqcp_err.h */
+typedef enum
+{
+    PQCP_SUCCESS = 0,
+    PQCP_NOT_SUPPORT = 0x38000001,
+    PQCP_INVALID_ARG,
+    PQCP_MEM_ALLOC_FAIL,
+    PQCP_NULL_INPUT,
+    PQCP_VERIFY_FAIL,
+    ...
+} PQCP_ERROR;
+
+/* src/hiae/src/hiae_cipher.c */
+typedef struct {
+    DATA128b state[HIAE_STATE_NUM];
+    uint8_t key[HIAE_KEY_LEN];
+    uint8_t iv[HIAE_IV_LEN];
+    uint8_t tag[HIAE_TAG_LEN];
+    uint8_t expectedTag[HIAE_TAG_LEN];
+    uint32_t tagLen;
+    uint64_t aadLen;
+    uint64_t msgLen;
+    bool isEnc;
+    bool aadSet;
+    bool inited;
+    bool finalized;
+    bool tagSet;
+    uint8_t msgBuf[HIAE_BLOCK_SIZE];
+    uint32_t msgBufLen;
+} PQCP_HIAE_CipherCtx;
+
+static bool TagEqualConstTime(const uint8_t *lhs, const uint8_t *rhs, uint32_t len)
+{
+    uint8_t diff = 0;
+    uint32_t i;
+
+    for (i = 0; i < len; i++) {
+        diff |= (uint8_t)(lhs[i] ^ rhs[i]);
+    }
+    return diff == 0;
+}
+
+static int32_t SetTag(PQCP_HIAE_CipherCtx *ctx, const uint8_t *tag, uint32_t tagLen)
+{
+    if (ctx == NULL || tag == NULL) {
+        return PQCP_NULL_INPUT;
+    }
+    if (tagLen != HIAE_TAG_LEN) {
+        return PQCP_INVALID_ARG;
+    }
+    if (memcpy_s(ctx->expectedTag, sizeof(ctx->expectedTag), tag, tagLen) != EOK) {
+        return PQCP_INVALID_ARG;
+    }
+    ctx->tagSet = true;
+    return PQCP_SUCCESS;
+}
+
+int32_t PQCP_HIAE_CipherFinal(void *ctx, uint8_t *out, uint32_t *outLen)
+{
+    PQCP_HIAE_CipherCtx *c = (PQCP_HIAE_CipherCtx *)ctx;
+    int32_t ret;
+    (void)out;
+
+    if (c == NULL || outLen == NULL) {
+        return PQCP_NULL_INPUT;
+    }
+    if (!c->inited) {
+        return CRYPT_EAL_ERR_STATE;
+    }
+
+    ret = FinalizeIfNeeded(c);
+    if (ret != PQCP_SUCCESS) {
+        return ret;
+    }
+    if (!c->isEnc) {
+        if (!c->tagSet || !TagEqualConstTime(c->tag, c->expectedTag, HIAE_TAG_LEN)) {
+            return PQCP_VERIFY_FAIL;
+        }
+    }
+    *outLen = 0;
+    return PQCP_SUCCESS;
+}
+
+int32_t PQCP_HIAE_CipherCtrl(void *ctx, int32_t cmd, void *val, uint32_t valLen)
+{
+    PQCP_HIAE_CipherCtx *c = (PQCP_HIAE_CipherCtx *)ctx;
+    if (c == NULL) {
+        return PQCP_NULL_INPUT;
+    }
+
+    switch (cmd) {
+        case CRYPT_CTRL_SET_IV:
+            return SetIv(c, (const uint8_t *)val, valLen);
+        case CRYPT_CTRL_SET_TAG:
+            return SetTag(c, (const uint8_t *)val, valLen);
+        case CRYPT_CTRL_SET_AAD:
+            return SetAad(c, (const uint8_t *)val, valLen);
+        case CRYPT_CTRL_GET_TAG:
+            return GetTag(c, (uint8_t *)val, valLen);
+        ...
+    }
+}
+```
+
+---
+
+
+## Medium
+
+### HiAE is reported as enabled but never actually compiled in plain CMake builds
+`CMakeLists.txt:70-75`
+```
+if(PQCP_HIAE_SUPPORTED)
+    list(APPEND PROVIDER_SOURCES ${HIAE_SOURCES})
+    message(STATUS "HiAE enabled for ${CMAKE_SYSTEM_PROCESSOR}")
+else()
+    message(STATUS "HiAE disabled: unsupported target platform or compiler flags for ${CMAKE_SYSTEM_PROCESSOR}")
+endif()
+...
+target_compile_definitions(pqcp_provider PRIVATE
+    HITLS_CRYPTO_EAL
+    HITLS_CRYPTO_PKEY
+    HITLS_CRYPTO_MD
+    HITLS_CRYPTO_CIPHER
+    HITLS_CRYPTO_MAC
+    HITLS_NO_CONFIG_CHECK
+)
+
+if(NOT PQCP_HIAE_SUPPORTED)
+    target_compile_options(pqcp_provider PRIVATE -UPQCP_HIAE)
+endif()
+```
+**Issue**: The PR adds `PQCP_HIAE_SUPPORTED` detection and prints `HiAE enabled`, but all new HiAE code is wrapped in `#ifdef PQCP_HIAE`. `CMakeLists.txt` never defines `PQCP_HIAE` when HiAE is supported, so a documented `cmake .. && make` build compiles the new files as empty stubs and exports no HiAE algorithms.
+**Fix**:
+```
+option(PQCP_ENABLE_HIAE "Build HiAE support" ON)
+
+set(PQCP_HIAE_ENABLED FALSE)
+if(PQCP_ENABLE_HIAE AND PQCP_HIAE_SUPPORTED)
+    list(APPEND PROVIDER_SOURCES ${HIAE_SOURCES})
+    set(PQCP_HIAE_ENABLED TRUE)
+    message(STATUS "HiAE enabled for ${CMAKE_SYSTEM_PROCESSOR}")
+else()
+    message(STATUS "HiAE disabled: unsupported target platform or compiler flags for ${CMAKE_SYSTEM_PROCESSOR}")
+endif()
+
+add_library(pqcp_provider ${PQCP_LIB_TYPE} ${PROVIDER_SOURCES})
+
+target_compile_definitions(pqcp_provider PRIVATE
+    HITLS_CRYPTO_EAL
+    HITLS_CRYPTO_PKEY
+    HITLS_CRYPTO_MD
+    HITLS_CRYPTO_CIPHER
+    HITLS_CRYPTO_MAC
+    HITLS_NO_CONFIG_CHECK
+)
+
+if(PQCP_HIAE_ENABLED)
+    target_compile_definitions(pqcp_provider PRIVATE PQCP_HIAE)
+endif()
+```
+
+---
+
+### `CRYPT_CTRL_SET_AAD` unnecessarily rejects valid multi-chunk AAD
+`src/hiae/src/hiae_cipher.c:321-349`
+```
+if (ctx->aadSet) {
+    return CRYPT_EAL_ERR_STATE;
+}
+...
+ctx->aadLen += aadLen;
+HIAE_Stream_ProcAD(ctx->state, aad, aadLen);
+ctx->aadSet = true;
+return PQCP_SUCCESS;
+```
+**Issue**: The provider hard-fails on the second `SET_AAD` call even when no payload has been processed yet. That is an API regression for streaming AEAD callers that feed associated data in pieces, and it is unnecessary because the low-level implementation already supports incremental AD absorption.
+**Fix**:
+```
+static int32_t SetAad(PQCP_HIAE_CipherCtx *ctx, const uint8_t *aad, uint32_t aadLen)
+{
+    if (!ctx->inited || ctx->finalized) {
+        return CRYPT_EAL_ERR_STATE;
+    }
+    if (aadLen > 0 && aad == NULL) {
+        return PQCP_NULL_INPUT;
+    }
+    if (ctx->msgLen != 0 || ctx->msgBufLen != 0) {
+        return CRYPT_EAL_ERR_STATE;
+    }
+    if (aadLen == 0) {
+        return PQCP_SUCCESS;
+    }
+    if (CheckLenLimitU64(ctx->aadLen, aadLen, HIAE_A_MAX) != PQCP_SUCCESS) {
+        return PQCP_INVALID_ARG;
+    }
+
+    ctx->aadLen += aadLen;
+    HIAE_Stream_ProcAD(ctx->state, aad, aadLen);
+    ctx->aadSet = true;
+    return PQCP_SUCCESS;
+}
+```
+
+---
+
+### HiAE is auto-enabled from compiler flag parsing instead of actual target capability
+`CMakeLists.txt:56-67`
+```
+if(CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|amd64|AMD64)$")
+    check_c_compiler_flag("-maes" PQCP_COMPILER_SUPPORTS_MAES)
+    if(PQCP_COMPILER_SUPPORTS_MAES)
+        set(PQCP_HIAE_SUPPORTED TRUE)
+        list(APPEND PQCP_HIAE_COMPILE_OPTIONS "-maes")
+    endif()
+elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "^(aarch64|arm64|ARM64)$")
+    check_c_compiler_flag("-march=armv8-a+crypto+aes+sha2" PQCP_COMPILER_SUPPORTS_ARMV8_CRYPTO)
+    if(PQCP_COMPILER_SUPPORTS_ARMV8_CRYPTO)
+        set(PQCP_HIAE_SUPPORTED TRUE)
+        list(APPEND PQCP_HIAE_COMPILE_OPTIONS "-march=armv8-a+crypto+aes+sha2")
+    endif()
+endif()
+```
+**Issue**: `check_c_compiler_flag()` only proves that the compiler accepts `-maes` or `-march=armv8-a+crypto+aes+sha2`. It does not prove the produced binary will run on the deployment CPU. With the current logic, generic x86_64/arm64 builds can advertise HiAE and emit AES instructions that trap with `SIGILL` on CPUs lacking AES-NI or ARM crypto extensions.
+**Fix**:
+```
+option(PQCP_ENABLE_HIAE "Enable HiAE on targets guaranteed to have AES/crypto extensions" OFF)
+
+set(PQCP_HIAE_SUPPORTED FALSE)
+set(PQCP_HIAE_COMPILE_OPTIONS)
+
+if(PQCP_ENABLE_HIAE)
+    if(CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|amd64|AMD64)$")
+        check_c_compiler_flag("-maes" PQCP_COMPILER_SUPPORTS_MAES)
+        if(NOT PQCP_COMPILER_SUPPORTS_MAES)
+            message(FATAL_ERROR "HiAE requires a compiler that supports -maes")
+        endif()
+        list(APPEND PQCP_HIAE_COMPILE_OPTIONS "-maes")
+        set(PQCP_HIAE_SUPPORTED TRUE)
+    elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "^(aarch64|arm64|ARM64)$")
+        check_c_compiler_flag("-march=armv8-a+crypto" PQCP_COMPILER_SUPPORTS_ARMV8_CRYPTO)
+        if(NOT PQCP_COMPILER_SUPPORTS_ARMV8_CRYPTO)
+            message(FATAL_ERROR "HiAE requires ARMv8 crypto extensions")
+        endif()
+        list(APPEND PQCP_HIAE_COMPILE_OPTIONS "-march=armv8-a+crypto")
+        set(PQCP_HIAE_SUPPORTED TRUE)
+    endif()
+endif()
+```
+
+---

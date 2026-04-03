@@ -1,0 +1,57 @@
+[
+  {
+    "source": "claude",
+    "file": "CMakeLists.txt",
+    "line": "56-68",
+    "severity": "high",
+    "title": "Compiler support check doesn't verify CPU capability",
+    "problem": "check_c_compiler_flag only tests if the compiler accepts the flag, not if the target CPU actually supports the AES/ARM Crypto instructions. This can lead to runtime SIGILL errors when the code runs on a CPU without these instructions (e.g., compiling on a x86_64 with AES-NI but running on an older x86_64 without it, or cross-compiling for a different target).",
+    "code": "if(CMAKE_SYSTEM_PROCESSOR MATCHES \"^(x86_64|amd64|AMD64)$\")\n    check_c_compiler_flag(\"-maes\" PQCP_COMPILER_SUPPORTS_MAES)\n    if(PQCP_COMPILER_SUPPORTS_MAES)\n        set(PQCP_HIAE_SUPPORTED TRUE)\n        list(APPEND PQCP_HIAE_COMPILE_OPTIONS \"-maes\")\n    endif()"
+  },
+  {
+    "source": "claude",
+    "file": "src/hiae/src/hiae_cipher.c",
+    "line": "63-73",
+    "severity": "medium",
+    "title": "ProcessPartialNoCommit lacks platform support validation",
+    "problem": "The ProcessPartialNoCommit function calls HIAE_Stream_Encrypt/Decrypt which use SIMD intrinsics. If the code somehow runs on an unsupported platform (where the compiler flag was accepted but CPU doesn't support the instructions), this will cause undefined behavior or crash.",
+    "code": "static void ProcessPartialNoCommit(const PQCP_HIAE_CipherCtx *ctx, const uint8_t *in, uint32_t inLen, uint8_t *out)\n{\n    DATA128b tmpState[HIAE_STATE_NUM];\n    (void)memcpy_s(tmpState, sizeof(tmpState), ctx->state, sizeof(ctx->state));\n    if (ctx->isEnc) {\n        HIAE_Stream_Encrypt(tmpState, out, in, inLen);\n    } else {\n        HIAE_Stream_Decrypt(tmpState, out, in, inLen);\n    }\n    BSL_SAL_CleanseData(tmpState, sizeof(tmpState));\n}"
+  },
+  {
+    "source": "claude",
+    "file": "src/hiae/src/hiae_cipher.c",
+    "line": "296-318",
+    "severity": "medium",
+    "title": "SetIv doesn't validate platform support before calling HIAE_Init",
+    "problem": "The SetIv function calls HIAE_Init without checking if the platform actually supports HiAE. If CMake incorrectly detected support, this could cause runtime errors.",
+    "code": "static int32_t SetIv(PQCP_HIAE_CipherCtx *ctx, const uint8_t *iv, uint32_t ivLen)\n{\n    ...\n    if (memcpy_s(ctx->iv, sizeof(ctx->iv), iv, ivLen) != EOK) {\n        return PQCP_INVALID_ARG;\n    }\n    HIAE_Init(ctx->state, ctx->key, ctx->iv);\n    ...\n}"
+  },
+  {
+    "source": "claude",
+    "file": "CMakeLists.txt",
+    "line": "131-134",
+    "severity": "low",
+    "title": "Inefficient empty foreach loop when HiAE is not supported",
+    "problem": "When PQCP_HIAE_SUPPORTED is FALSE, HIAE_SOURCES is empty and the foreach loop serves no purpose. The loop body has an if check for PQCP_HIAE_SUPPORTED which is already known to be FALSE at this point.",
+    "code": "foreach(src ${HIAE_SOURCES})\n    if(PQCP_HIAE_SUPPORTED)\n        set_source_files_properties(${src} PROPERTIES COMPILE_OPTIONS \"${PQCP_HIAE_COMPILE_OPTIONS}\")\n    endif()\nendforeach()",
+    "fix": "if(PQCP_HIAE_SUPPORTED)\n    foreach(src ${HIAE_SOURCES})\n        set_source_files_properties(${src} PROPERTIES COMPILE_OPTIONS \"${PQCP_HIAE_COMPILE_OPTIONS}\")\n    endforeach()\nendif()"
+  },
+  {
+    "source": "claude",
+    "file": "src/hiae/src/hiae_mac.c",
+    "line": "61-72",
+    "severity": "low",
+    "title": "FlushPendingData always processes full 16-byte block",
+    "problem": "The function passes sizeof(block) (16 bytes) to HIAE_Stream_ProcAD even when only partial data (ctx->dataBufLen bytes) is buffered. While the zero-padding is correct for the algorithm, this is inconsistent with how the cipher's CommitPendingMsg handles partial blocks and could be confusing.",
+    "code": "static int32_t FlushPendingData(PQCP_HIAE_MacCtx *ctx)\n{\n    uint8_t block[HIAE_BLOCK_SIZE] = {0};\n    if (ctx->dataBufLen == 0) {\n        return PQCP_SUCCESS;\n    }\n    if (memcpy_s(block, sizeof(block), ctx->dataBuf, ctx->dataBufLen) != EOK) {\n        return PQCP_INVALID_ARG;\n    }\n    HIAE_Stream_ProcAD(ctx->state, block, sizeof(block));\n    ctx->dataBufLen = 0;\n    return PQCP_SUCCESS;\n}"
+  },
+  {
+    "source": "claude",
+    "file": "src/hiae/src/hiae_impl.c",
+    "line": "442-459",
+    "severity": "low",
+    "title": "HIAE_Init returns void on error without indication",
+    "problem": "HIAE_Init checks for NULL pointers and returns early, but returns void. If called directly (bypassing the provider layer) with NULL inputs, the state remains uninitialized with no error indication. While provider callers check first, this low-level API could be misused.",
+    "code": "void HIAE_Init(DATA128b *state, const uint8_t *key, const uint8_t *iv)\n{\n    if (state == NULL || key == NULL || iv == NULL) {\n        return;\n    }\n    DATA128b c0 = SIMD_LOAD(CONST0);\n    ...\n}"
+  }
+]
