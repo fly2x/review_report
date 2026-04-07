@@ -1,0 +1,3 @@
+I have completed my review of PR #1196. The changes cleanly and correctly introduce `DTLCP11` support while extending existing logic for stream protocols (TLCP) to datagram protocols (DTLCP). The version masking logic gracefully handles mutually exclusive versions without overlap bugs, and memory bounds and logic scopes are correctly implemented. 
+
+Since there are no security flaws, logic errors, resource leaks, or API regressions found, I will not report any issues.

@@ -1,0 +1,12 @@
+[
+  {
+    "source": "claude",
+    "file": "tls/config/src/config_check.c",
+    "line": "104-107",
+    "severity": "medium",
+    "title": "Cipher suite validation bypass doesn't check actual negotiated protocol",
+    "problem": "The cipher suite validation bypass allows TLCP cipher suites whenever IS_SUPPORT_TLCP(config->version) is true, but it doesn't verify whether the actual negotiated version (minVersion/maxVersion) is compatible with TLCP/DTLCP. For example, if a config has version bits set for both DTLS12 and DTLCP11, but after ChangeMinMaxVersion the minVersion/maxVersion are set to DTLS12 only (because TLCP bits are cleared), the TLCP cipher suites would still be allowed by this bypass even though the negotiated version range doesn't include TLCP/DTLCP. This could allow cipher suites to be configured that don't match the actual protocol version that will be negotiated.",
+    "code": "static bool IsCipherSuiteValid(const TLS_Config *config, uint16_t cipherSuite)\n{\n    /* The cipher suite must match the configured version */\n    return CFG_CheckCipherSuiteSupported(cipherSuite) == true &&\n           (CFG_CheckCipherSuiteVersion(cipherSuite, config->minVersion, config->maxVersion) == true ||\n           (IS_SUPPORT_TLCP(config->version) &&\n           (cipherSuite == HITLS_ECDHE_SM4_CBC_SM3 || cipherSuite == HITLS_ECC_SM4_CBC_SM3 ||\n            cipherSuite == HITLS_ECDHE_SM4_GCM_SM3 || cipherSuite == HITLS_ECC_SM4_GCM_SM3)));\n}",
+    "fix": "static bool IsCipherSuiteValid(const TLS_Config *config, uint16_t cipherSuite)\n{\n    /* The cipher suite must match the configured version */\n    return CFG_CheckCipherSuiteSupported(cipherSuite) == true &&\n           (CFG_CheckCipherSuiteVersion(cipherSuite, config->minVersion, config->maxVersion) == true ||\n           ((IS_SUPPORT_TLCP(config->version) && IS_SUPPORT_DATAGRAM(config->version)) &&\n           (cipherSuite == HITLS_ECDHE_SM4_CBC_SM3 || cipherSuite == HITLS_ECC_SM4_CBC_SM3 ||\n            cipherSuite == HITLS_ECDHE_SM4_GCM_SM3 || cipherSuite == HITLS_ECC_SM4_GCM_SM3)));\n}"
+  }
+]

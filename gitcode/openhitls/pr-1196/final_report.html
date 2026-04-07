@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Final Report: openHiTLS/openhitls#1196</title>
+    <style>
+        :root { --critical: #dc2626; --high: #ea580c; --medium: #ca8a04; --low: #65a30d;
+                 --trusted: #059669; --likely: #0284c7; --evaluate: #7c3aed; }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: system-ui, sans-serif; background: #f8fafc; color: #1e293b; padding: 2rem; line-height: 1.6; }
+        .container { max-width: 900px; margin: 0 auto; }
+        h1 { font-size: 1.75rem; margin-bottom: 0.5rem; }
+        .subtitle { color: #64748b; margin-bottom: 1rem; }
+        .stats { display: flex; gap: 1rem; margin-bottom: 2rem; flex-wrap: wrap; }
+        .stat { background: white; border: 1px solid #e2e8f0; border-radius: 0.5rem; padding: 1rem; min-width: 100px; text-align: center; }
+        .stat-value { font-size: 1.5rem; font-weight: 700; }
+        .stat-label { font-size: 0.875rem; color: #64748b; }
+        .stat.critical .stat-value { color: var(--critical); }
+        .stat.high .stat-value { color: var(--high); }
+        .stat.medium .stat-value { color: var(--medium); }
+        .stat.low .stat-value { color: var(--low); }
+        .reviewers { background: #e0e7ff; color: #3730a3; padding: 0.5rem 1rem; border-radius: 0.5rem; margin-bottom: 2rem; }
+        .section { margin-bottom: 2rem; }
+        .section-title { font-size: 1.1rem; font-weight: 600; padding: 0.5rem 1rem; border-radius: 0.5rem 0.5rem 0 0; color: white; }
+        .section-title.critical { background: var(--critical); }
+        .section-title.high { background: var(--high); }
+        .section-title.medium { background: var(--medium); }
+        .section-title.low { background: var(--low); }
+        .issue { background: white; border: 1px solid #e2e8f0; border-top: none; padding: 1rem; }
+        .issue:last-child { border-radius: 0 0 0.5rem 0.5rem; }
+        .issue-title { font-weight: 600; margin-bottom: 0.25rem; }
+        .issue-location { font-family: monospace; font-size: 0.875rem; color: #64748b; margin-bottom: 0.5rem; }
+        .issue-meta { font-size: 0.75rem; margin-bottom: 0.75rem; display: flex; gap: 0.75rem; align-items: center; }
+        .issue-meta .reviewers { background: #f1f5f9; color: #475569; padding: 0.25rem 0.5rem; border-radius: 0.25rem; margin: 0; }
+        .confidence-badge { padding: 0.25rem 0.5rem; border-radius: 0.25rem; font-weight: 500; }
+        .confidence-badge.trusted { background: #d1fae5; color: #065f46; }
+        .confidence-badge.likely { background: #dbeafe; color: #1e40af; }
+        .confidence-badge.evaluate { background: #ede9fe; color: #5b21b6; }
+        pre { background: #1e293b; color: #e2e8f0; padding: 0.75rem; border-radius: 0.375rem; overflow-x: auto; font-size: 0.875rem; margin: 0.5rem 0; }
+        .problem { margin: 0.75rem 0; }
+        .fix-label { font-weight: 600; margin-top: 0.75rem; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Final Code Review Report</h1>
+        <div class="subtitle">openHiTLS/openhitls - PR #1196</div>
+        <p style="margin-bottom: 1rem;"></p>
+
+        <div class="stats">
+            <div class="stat"><div class="stat-value">3</div><div class="stat-label">Total</div></div>
+            <div class="stat critical"><div class="stat-value">0</div><div class="stat-label">Critical</div></div>
+            <div class="stat high"><div class="stat-value">0</div><div class="stat-label">High</div></div>
+            <div class="stat medium"><div class="stat-value">3</div><div class="stat-label">Medium</div></div>
+            <div class="stat low"><div class="stat-value">0</div><div class="stat-label">Low</div></div>
+        </div>
+
+        <div class="reviewers">Reviewers: claude, gemini, codex</div>
+<div class="section"><div class="section-title medium">Medium</div>
+<div class="issue">
+                <div class="issue-title">NewDTLSConfig advertises DTLCP support that client path immediately removes</div>
+                <div class="issue-location">tls/config/src/config_dtls.c:75-80</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CODEX</span>
+                    <span class="confidence-badge likely">置信度: 较可信</span>
+                </div>
+                <pre>#ifdef HITLS_TLS_PROTO_DTLS12
+    newConfig-&gt;version |= DTLS12_VERSION_BIT;
+#endif
+#ifdef HITLS_TLS_PROTO_DTLCP11
+    newConfig-&gt;version |= DTLCP11_VERSION_BIT;
+#endif
+
+newConfig-&gt;libCtx = libCtx;
+newConfig-&gt;attrName = attrName;
+
+newConfig-&gt;originVersionMask = newConfig-&gt;version;</pre>
+                <div class="problem"><strong>Issue:</strong> HITLS_CFG_NewDTLSConfig() now sets both DTLS12_VERSION_BIT and DTLCP11_VERSION_BIT by default, making the returned config advertise DTLCP support. However, ConnectEventInIdleState() immediately strips DTLCP11_VERSION_BIT from any client config that contains both DTLS and DTLCP bits. This creates confusing behavior where a config claims DTLCP support but can never send a DTLCP ClientHello, causing connection failures against DTLCP-only peers.</div>
+                <div class="fix-label">Fix:</div><pre>#ifdef HITLS_TLS_PROTO_DTLS12
+    newConfig-&gt;version |= DTLS12_VERSION_BIT;
+#endif
+/* Keep HITLS_CFG_NewDTLSConfig() DTLS-only until the client path can
+ * actually negotiate DTLCP as well. */
+
+newConfig-&gt;libCtx = libCtx;
+newConfig-&gt;attrName = attrName;
+
+newConfig-&gt;originVersionMask = newConfig-&gt;version;</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">DTLS version comparison logic uses wrong operator when TLCP bit is set</div>
+                <div class="issue-location">tls/handshake/recv/src/recv_client_hello.c:596-605</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CODEX</span>
+                    <span class="confidence-badge evaluate">置信度: 需评估</span>
+                </div>
+                <pre>static uint32_t MapLegacyVersionToBits(const TLS_Ctx *ctx, uint16_t version)
+{
+    uint32_t ret = 0;
+    uint16_t versions[] = {HITLS_VERSION_DTLS12, HITLS_VERSION_TLS12, HITLS_VERSION_TLCP_DTLCP11};
+    bool isGreater = !IS_SUPPORT_DATAGRAM(ctx-&gt;config.tlsConfig.originVersionMask) ||
+                     IS_SUPPORT_TLCP(ctx-&gt;config.tlsConfig.originVersionMask);
+
+    for (uint32_t i = 0; i &lt; sizeof(versions) / sizeof(versions[0]); i++) {
+        if (isGreater? version &gt;= versions[i] : version &lt;= versions[i]) {
+            ret |= MapVersion2VersionBit(IS_SUPPORT_DATAGRAM(ctx-&gt;config.tlsConfig.originVersionMask), versions[i]);
+        }
+    }</pre>
+                <div class="problem"><strong>Issue:</strong> The isGreater flag uses >= comparison whenever IS_SUPPORT_TLCP() is true, but this affects DTLS version comparisons incorrectly. DTLS version numbers are reversed (lower numeric value = higher protocol version), so DTLS requires <= comparisons. For a datagram server with both DTLS12 and DTLCP11 bits, receiving legacy_version=DTLS10 would incorrectly use >= instead of <= for the DTLS12 comparison. However, the current code appears to handle this correctly in practice since the result intersects with the server's supported versions and DTLS10 would select DTLS12 as the negotiated version. The issue may be more about code clarity than actual incorrect behavior.</div>
+                <div class="fix-label">Fix:</div><pre>static uint32_t MapLegacyVersionToBits(const TLS_Ctx *ctx, uint16_t version)
+{
+    uint32_t ret = 0;
+    uint16_t versions[] = {HITLS_VERSION_DTLS12, HITLS_VERSION_TLS12, HITLS_VERSION_TLCP_DTLCP11};
+    bool isDatagram = IS_SUPPORT_DATAGRAM(ctx-&gt;config.tlsConfig.originVersionMask);
+
+    for (uint32_t i = 0; i &lt; sizeof(versions) / sizeof(versions[0]); i++) {
+        bool match;
+        if (versions[i] == HITLS_VERSION_TLCP_DTLCP11) {
+            match = version &gt;= versions[i];
+        } else if (isDatagram) {
+            /* DTLS version numbers are reversed. */
+            match = version &lt;= versions[i];
+        } else {
+            match = version &gt;= versions[i];
+        }
+
+        if (match) {
+            ret |= MapVersion2VersionBit(isDatagram, versions[i]);
+        }
+    }</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">Cipher suite validation bypass doesn't check negotiated version compatibility</div>
+                <div class="issue-location">tls/config/src/config_check.c:104-107</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CLAUDE</span>
+                    <span class="confidence-badge evaluate">置信度: 需评估</span>
+                </div>
+                <pre>static bool IsCipherSuiteValid(const TLS_Config *config, uint16_t cipherSuite)
+{
+    /* The cipher suite must match the configured version */
+    return CFG_CheckCipherSuiteSupported(cipherSuite) == true &amp;&amp;
+           (CFG_CheckCipherSuiteVersion(cipherSuite, config-&gt;minVersion, config-&gt;maxVersion) == true ||
+           (IS_SUPPORT_TLCP(config-&gt;version) &amp;&amp;
+           (cipherSuite == HITLS_ECDHE_SM4_CBC_SM3 || cipherSuite == HITLS_ECC_SM4_CBC_SM3 ||
+            cipherSuite == HITLS_ECDHE_SM4_GCM_SM3 || cipherSuite == HITLS_ECC_SM4_GCM_SM3)));
+}</pre>
+                <div class="problem"><strong>Issue:</strong> The TLCP cipher suite bypass checks IS_SUPPORT_TLCP(config->version) but doesn't verify whether the actual negotiated version range (minVersion/maxVersion) includes TLCP. After ChangeMinMaxVersion(), if a config has both DTLS and DTLCP bits, the TLCP bits may be stripped from minVersion/maxVersion calculation while remaining in config->version. This could allow TLCP cipher suites to be configured that don't match the actual protocol version that will be negotiated. The proposed fix (adding IS_SUPPORT_DATAGRAM) is incomplete as it doesn't address the root cause of checking minVersion/maxVersion.</div>
+                <div class="fix-label">Fix:</div><pre>static bool IsCipherSuiteValid(const TLS_Config *config, uint16_t cipherSuite)
+{
+    /* The cipher suite must match the configured version */
+    return CFG_CheckCipherSuiteSupported(cipherSuite) == true &amp;&amp;
+           (CFG_CheckCipherSuiteVersion(cipherSuite, config-&gt;minVersion, config-&gt;maxVersion) == true ||
+           ((config-&gt;minVersion == HITLS_VERSION_TLCP_DTLCP11 || config-&gt;maxVersion == HITLS_VERSION_TLCP_DTLCP11) &amp;&amp;
+           (cipherSuite == HITLS_ECDHE_SM4_CBC_SM3 || cipherSuite == HITLS_ECC_SM4_CBC_SM3 ||
+            cipherSuite == HITLS_ECDHE_SM4_GCM_SM3 || cipherSuite == HITLS_ECC_SM4_GCM_SM3)));
+}</pre>
+            </div>
+</div>
+</div></body></html>

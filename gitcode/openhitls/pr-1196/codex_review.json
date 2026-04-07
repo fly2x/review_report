@@ -1,0 +1,22 @@
+[
+  {
+    "source": "codex",
+    "file": "tls/handshake/recv/src/recv_client_hello.c",
+    "line": "596-605",
+    "severity": "high",
+    "title": "Mixed DTLS/DTLCP version mapping can accept unsupported DTLS1.0 hellos",
+    "problem": "The new DTLS mixed-support path now runs through `MapLegacyVersionToBits()`, but that helper still flips to `>=` ordering whenever any TLCP bit is present. After this PR, `HITLS_CFG_NewDTLSConfig()` sets `DTLS12_VERSION_BIT | DTLCP11_VERSION_BIT`, so a datagram server enters the TLCP-style comparison path. For `legacy_version = HITLS_VERSION_DTLS10`, the loop incorrectly maps `DTLS12_VERSION_BIT`, and `ServerSelectNegoVersion()` can negotiate DTLS1.2 instead of returning `HITLS_MSG_HANDLE_UNSUPPORT_VERSION`. That regresses the existing DTLS1.2 version check.",
+    "code": "bool isGreater = !IS_SUPPORT_DATAGRAM(ctx->config.tlsConfig.originVersionMask) ||\n                 IS_SUPPORT_TLCP(ctx->config.tlsConfig.originVersionMask);\n\nfor (uint32_t i = 0; i < sizeof(versions) / sizeof(versions[0]); i++) {\n    if (isGreater? version >= versions[i] : version <= versions[i]) {\n        ret |= MapVersion2VersionBit(IS_SUPPORT_DATAGRAM(ctx->config.tlsConfig.originVersionMask), versions[i]);\n    }\n}\nif ((IS_SUPPORT_TLS(ret) || IS_SUPPORT_DTLS(ret)) && IS_SUPPORT_TLCP(ret)) {\n    ret &= ~TLCP_VERSION_BITS;\n}",
+    "fix": "bool isDatagram = IS_SUPPORT_DATAGRAM(ctx->config.tlsConfig.originVersionMask);\n\nfor (uint32_t i = 0; i < sizeof(versions) / sizeof(versions[0]); i++) {\n    bool match;\n    if (versions[i] == HITLS_VERSION_TLCP_DTLCP11) {\n        match = version >= versions[i];\n    } else if (isDatagram) {\n        /* DTLS version numbers are reversed. */\n        match = version <= versions[i];\n    } else {\n        match = version >= versions[i];\n    }\n\n    if (match) {\n        ret |= MapVersion2VersionBit(isDatagram, versions[i]);\n    }\n}\n\nif ((IS_SUPPORT_TLS(ret) || IS_SUPPORT_DTLS(ret)) && IS_SUPPORT_TLCP(ret)) {\n    ret &= ~TLCP_VERSION_BITS;\n}"
+  },
+  {
+    "source": "codex",
+    "file": "tls/config/src/config_dtls.c",
+    "line": "75-85",
+    "severity": "medium",
+    "title": "NewDTLSConfig now advertises DTLCP support that the client path immediately removes",
+    "problem": "`HITLS_CFG_NewDTLSConfig()` now adds `DTLCP11_VERSION_BIT` to every full DTLS config, so the returned object reports DTLCP support and gets DTLCP cipher suites/groups/signatures by default. But the PR also changed `ConnectEventInIdleState()` to strip `DTLCP11_VERSION_BIT` from any client whose original mask contains both DTLS and DTLCP. That makes the new behavior server-only and leaves callers with a config that claims DTLCP support but can never send a DTLCP ClientHello, causing confusing connect-time failures against DTLCP-only peers.",
+    "code": "#ifdef HITLS_TLS_PROTO_DTLS12\n    newConfig->version |= DTLS12_VERSION_BIT;\n#endif\n#ifdef HITLS_TLS_PROTO_DTLCP11\n    newConfig->version |= DTLCP11_VERSION_BIT;\n#endif\n\nnewConfig->libCtx = libCtx;\nnewConfig->attrName = attrName;\n\nnewConfig->originVersionMask = newConfig->version;",
+    "fix": "#ifdef HITLS_TLS_PROTO_DTLS12\n    newConfig->version |= DTLS12_VERSION_BIT;\n#endif\n/* Keep HITLS_CFG_NewDTLSConfig() DTLS-only until the client path can\n * actually negotiate DTLCP as well. */\n\nnewConfig->libCtx = libCtx;\nnewConfig->attrName = attrName;\n\nnewConfig->originVersionMask = newConfig->version;"
+  }
+]

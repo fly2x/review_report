@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Code Review: openHiTLS/openhitls#1196 - CODEX</title>
+    <style>
+        :root { --critical: #dc2626; --high: #ea580c; --medium: #ca8a04; --low: #65a30d; }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: system-ui, sans-serif; background: #f8fafc; color: #1e293b; padding: 2rem; line-height: 1.6; }
+        .container { max-width: 900px; margin: 0 auto; }
+        h1 { font-size: 1.5rem; margin-bottom: 0.5rem; }
+        .subtitle { color: #64748b; margin-bottom: 2rem; }
+        .section { margin-bottom: 2rem; }
+        .section-title { font-size: 1.1rem; font-weight: 600; padding: 0.5rem 1rem; border-radius: 0.5rem 0.5rem 0 0; color: white; }
+        .section-title.critical { background: var(--critical); }
+        .section-title.high { background: var(--high); }
+        .section-title.medium { background: var(--medium); }
+        .section-title.low { background: var(--low); }
+        .issue { background: white; border: 1px solid #e2e8f0; border-top: none; padding: 1rem; }
+        .issue:last-child { border-radius: 0 0 0.5rem 0.5rem; }
+        .issue-title { font-weight: 600; margin-bottom: 0.25rem; }
+        .issue-location { font-family: monospace; font-size: 0.875rem; color: #64748b; margin-bottom: 0.75rem; }
+        .issue-source { font-size: 0.75rem; color: #94a3b8; margin-top: 0.5rem; }
+        pre { background: #1e293b; color: #e2e8f0; padding: 0.75rem; border-radius: 0.375rem; overflow-x: auto; font-size: 0.875rem; margin: 0.5rem 0; }
+        .problem { margin: 0.75rem 0; }
+        .fix-label { font-weight: 600; margin-top: 0.75rem; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Code Review: openHiTLS/openhitls#1196 - CODEX</h1>
+        <div class="subtitle"></div>
+<div class="section"><div class="section-title high">High</div>
+<div class="issue">
+                <div class="issue-title">Mixed DTLS/DTLCP version mapping can accept unsupported DTLS1.0 hellos</div>
+                <div class="issue-location">tls/handshake/recv/src/recv_client_hello.c:596-605</div>
+                <pre>bool isGreater = !IS_SUPPORT_DATAGRAM(ctx-&gt;config.tlsConfig.originVersionMask) ||
+                 IS_SUPPORT_TLCP(ctx-&gt;config.tlsConfig.originVersionMask);
+
+for (uint32_t i = 0; i &lt; sizeof(versions) / sizeof(versions[0]); i++) {
+    if (isGreater? version &gt;= versions[i] : version &lt;= versions[i]) {
+        ret |= MapVersion2VersionBit(IS_SUPPORT_DATAGRAM(ctx-&gt;config.tlsConfig.originVersionMask), versions[i]);
+    }
+}
+if ((IS_SUPPORT_TLS(ret) || IS_SUPPORT_DTLS(ret)) &amp;&amp; IS_SUPPORT_TLCP(ret)) {
+    ret &amp;= ~TLCP_VERSION_BITS;
+}</pre>
+                <div class="problem"><strong>Issue:</strong> The new DTLS mixed-support path now runs through `MapLegacyVersionToBits()`, but that helper still flips to `>=` ordering whenever any TLCP bit is present. After this PR, `HITLS_CFG_NewDTLSConfig()` sets `DTLS12_VERSION_BIT | DTLCP11_VERSION_BIT`, so a datagram server enters the TLCP-style comparison path. For `legacy_version = HITLS_VERSION_DTLS10`, the loop incorrectly maps `DTLS12_VERSION_BIT`, and `ServerSelectNegoVersion()` can negotiate DTLS1.2 instead of returning `HITLS_MSG_HANDLE_UNSUPPORT_VERSION`. That regresses the existing DTLS1.2 version check.</div>
+                <div class="fix-label">Fix:</div><pre>bool isDatagram = IS_SUPPORT_DATAGRAM(ctx-&gt;config.tlsConfig.originVersionMask);
+
+for (uint32_t i = 0; i &lt; sizeof(versions) / sizeof(versions[0]); i++) {
+    bool match;
+    if (versions[i] == HITLS_VERSION_TLCP_DTLCP11) {
+        match = version &gt;= versions[i];
+    } else if (isDatagram) {
+        /* DTLS version numbers are reversed. */
+        match = version &lt;= versions[i];
+    } else {
+        match = version &gt;= versions[i];
+    }
+
+    if (match) {
+        ret |= MapVersion2VersionBit(isDatagram, versions[i]);
+    }
+}
+
+if ((IS_SUPPORT_TLS(ret) || IS_SUPPORT_DTLS(ret)) &amp;&amp; IS_SUPPORT_TLCP(ret)) {
+    ret &amp;= ~TLCP_VERSION_BITS;
+}</pre>
+                <div class="issue-source">Reviewer: codex</div>
+            </div>
+</div>
+<div class="section"><div class="section-title medium">Medium</div>
+<div class="issue">
+                <div class="issue-title">NewDTLSConfig now advertises DTLCP support that the client path immediately removes</div>
+                <div class="issue-location">tls/config/src/config_dtls.c:75-85</div>
+                <pre>#ifdef HITLS_TLS_PROTO_DTLS12
+    newConfig-&gt;version |= DTLS12_VERSION_BIT;
+#endif
+#ifdef HITLS_TLS_PROTO_DTLCP11
+    newConfig-&gt;version |= DTLCP11_VERSION_BIT;
+#endif
+
+newConfig-&gt;libCtx = libCtx;
+newConfig-&gt;attrName = attrName;
+
+newConfig-&gt;originVersionMask = newConfig-&gt;version;</pre>
+                <div class="problem"><strong>Issue:</strong> `HITLS_CFG_NewDTLSConfig()` now adds `DTLCP11_VERSION_BIT` to every full DTLS config, so the returned object reports DTLCP support and gets DTLCP cipher suites/groups/signatures by default. But the PR also changed `ConnectEventInIdleState()` to strip `DTLCP11_VERSION_BIT` from any client whose original mask contains both DTLS and DTLCP. That makes the new behavior server-only and leaves callers with a config that claims DTLCP support but can never send a DTLCP ClientHello, causing confusing connect-time failures against DTLCP-only peers.</div>
+                <div class="fix-label">Fix:</div><pre>#ifdef HITLS_TLS_PROTO_DTLS12
+    newConfig-&gt;version |= DTLS12_VERSION_BIT;
+#endif
+/* Keep HITLS_CFG_NewDTLSConfig() DTLS-only until the client path can
+ * actually negotiate DTLCP as well. */
+
+newConfig-&gt;libCtx = libCtx;
+newConfig-&gt;attrName = attrName;
+
+newConfig-&gt;originVersionMask = newConfig-&gt;version;</pre>
+                <div class="issue-source">Reviewer: codex</div>
+            </div>
+</div>
+</div></body></html>
