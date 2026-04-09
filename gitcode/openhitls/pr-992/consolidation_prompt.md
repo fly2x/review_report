@@ -17,112 +17,23 @@ You are consolidating change review findings from multiple AI reviewers.
 
 ## High
 
-### Integer overflow in tree size allocation
-`crypto/hbs/common/hbs_tree.c:331`
+### Integer overflow in chain iteration loop
+`crypto/hbs/lms/src/lms_ots.c:83`
 ```
-size_t treeSize = 2u * numLeaves * n;
-    uint8_t *tree = (uint8_t *)BSL_SAL_Calloc(treeSize, 1);
+/* Iterate the hash function 'steps' times starting from 'start' */
+    for (uint32_t j = start; j < start + steps; j++) {
+        int32_t ret = ctx->hashFuncs->chainHash(&otsCtx, k, j, buffer, buffer);
 ```
-**Issue**: The tree size calculation `treeSize = 2u * numLeaves * n` could overflow on 32-bit systems for large trees. While LMS_MAX_HEIGHT is 25, the practical limit check (LMS_MAX_PRACTICAL_HEIGHT=15) might not be enforced in all code paths reaching HbsLmsTree_GenerateAuthPath.
+**Issue**: The loop condition `j < start + steps` could overflow if both `start` and `steps` are large values, causing an infinite loop or buffer overflow. While the typical values are bounded by the Winternitz parameter (2^w-1), the code should explicitly validate this.
 **Fix**:
 ```
-/* Check for overflow before calculating tree size */
-    if (numLeaves > (SIZE_MAX / (2 * n))) {
+/* Iterate the hash function 'steps' times starting from 'start' */
+    uint32_t maxSteps = (1U << ctx->w) - 1;
+    if (start > maxSteps || start + steps < start || start + steps > maxSteps + 1) {
         return CRYPT_LMS_INVALID_PARAM;
     }
-    size_t treeSize = 2u * numLeaves * n;
-    uint8_t *tree = (uint8_t *)BSL_SAL_Calloc(treeSize, 1);
-```
-
----
-
-### Integer overflow in tree size allocation
-`crypto/hbs/lms/src/lms_tree.c:156`
-```
-uint32_t numLeaves = 1u << ctx->height;
-    size_t treeSize = 2 * numLeaves * ctx->n;
-    uint8_t *tree = BSL_SAL_Calloc(treeSize, 1);
-```
-**Issue**: The tree size calculation `treeSize = 2 * numLeaves * ctx->n` could overflow on 32-bit systems. While there's a height limit check in LmsParaInit, direct calls to LmsTree_ComputeRoot might bypass this validation.
-**Fix**:
-```
-uint32_t numLeaves = 1u << ctx->height;
-    
-    /* Check for overflow: treeSize = 2 * numLeaves * n */
-    if (numLeaves > (SIZE_MAX / (2 * ctx->n))) {
-        return CRYPT_MEM_ALLOC_FAIL;
-    }
-    size_t treeSize = 2 * numLeaves * ctx->n;
-    uint8_t *tree = BSL_SAL_Calloc(treeSize, 1);
-```
-
----
-
-### Division by zero vulnerability with unchecked w parameter
-`crypto/hbs/lms/src/lms_ots.c:143-149`
-```
-int32_t LmOtsSign(uint32_t otsType, LMS_SeedDerive *seed, const LmsFamilyHashFuncs *hashFuncs,
-    const LMS_InputBuffer *message, LMS_OutputBuffer *signature)
-{
-    LmOtsParams params;
-    int32_t ret = LmOtsLookupParamSet(otsType, &params);
-    if (ret != CRYPT_SUCCESS) {
-        return ret;
-    }
-
-    if (params.w == 0) {
-        return CRYPT_LMS_DIVISION_BY_ZERO;
-    }
-```
-**Issue**: LmOtsLookupParamSet validates w != 0 for known parameter sets, but if an attacker can supply a custom parameter set or if validation is bypassed, the division by later code could crash.
-**Fix**:
-```
-if (params.w == 0 || params.p == 0) {
-        return CRYPT_LMS_DIVISION_BY_ZERO;
-    }
-    
-    if (params.w != 1 && params.w != 2 && params.w != 4 && params.w != 8) {
-        return CRYPT_LMS_INVALID_PARAM;
-    }
-```
-
----
-
-### Integer overflow in HssGetMaxSignatures
-`crypto/hbs/hss/src/hss_utils.c:275-285`
-```
-for (uint32_t i = 0; i < para->levels; i++) {
-        uint32_t height = para->levelPara[i].height;
-
-        // Check for overflow: height must be <= 60 to safely compute (1ULL << height) without overflow
-        // and total must have enough headroom for multiplication
-        if (height > LMS_MAX_SAFE_HEIGHT_FOR_UINT64 || total > (UINT64_MAX >> height)) {
-            return UINT64_MAX;  // Return max to indicate overflow
-        }
-
-        total *= (1ULL << height);
-    }
-```
-**Issue**: The function calculates total signatures as product of (1<<height) for all levels but doesn't properly handle overflow. It returns UINT64_MAX on overflow, but callers might not check for this sentinel value.
-**Fix**:
-```
-for (uint32_t i = 0; i < para->levels; i++) {
-        uint32_t height = para->levelPara[i].height;
-
-        // Check for overflow: height must be <= 60 to safely compute (1ULL << height) without overflow
-        if (height > LMS_MAX_SAFE_HEIGHT_FOR_UINT64) {
-            return 0;  // Invalid - indicates no signatures available
-        }
-        
-        uint64_t signaturesAtLevel = 1ULL << height;
-        
-        // Check if multiplication would overflow
-        if (total > UINT64_MAX / signaturesAtLevel) {
-            return 0;  // Overflow - indicates no signatures available
-        }
-
-        total *= signaturesAtLevel;
-    }
+    for (uint32_t j = start; j < start + steps; j++) {
+        int32_t ret = ctx->hashFuncs->chainHash(&otsCtx, k, j, buffer, buffer);
 ```
 
 ---
@@ -130,176 +41,151 @@ for (uint32_t i = 0; i < para->levels; i++) {
 
 ## Medium
 
-### BaseB function has potential integer overflow
-`crypto/hbs/common/hbs_wots.c:41-50`
+### Timing side-channel vulnerability in root hash comparison
+`crypto/hbs/lms/src/lms_core.c:545`
 ```
-static void BaseB(const uint8_t *x, uint32_t xLen, uint32_t b, uint32_t *out, uint32_t outLen)
-{
-    uint32_t bit = 0;
-    uint32_t o = 0;
-    uint32_t xi = 0;
-    for (uint32_t i = 0; i < outLen; i++) {
-        while (bit < b && xi < xLen) {
-            o = (o << BYTE_BITS) + x[xi];
-            bit += 8;
-            xi++;
-        }
-```
-**Issue**: The BaseB function can overflow the `o` variable when processing input data. The calculation `o = (o << BYTE_BITS) + x[xi]` can overflow if `b` is large and multiple bytes are processed. For W=16 (4-bit chunks), this is unlikely to be an issue, but the function doesn't validate its inputs.
-**Fix**:
-```
-static void BaseB(const uint8_t *x, uint32_t xLen, uint32_t b, uint32_t *out, uint32_t outLen)
-{
-    uint32_t bit = 0;
-    uint32_t o = 0;
-    uint32_t xi = 0;
-    
-    /* Validate input: b must be <= 16 (for W=16) to prevent overflow */
-    if (b > 16 || outLen == 0) {
-        return;
-    }
-    
-    for (uint32_t i = 0; i < outLen; i++) {
-        while (bit < b && xi < xLen) {
-            /* Use 64-bit intermediate to prevent overflow */
-            uint64_t temp = ((uint64_t)o << BYTE_BITS) + x[xi];
-            if (temp > UINT32_MAX) {
-                /* Handle overflow - should not happen with valid inputs */
-                return;
-            }
-            o = (uint32_t)temp;
-            bit += 8;
-            xi++;
-        }
-```
-
----
-
-### Non-constant-time private key comparison
-`crypto/hbs/lms/src/lms_api.c:4598`
-```
-if (ctx1->privateKey != NULL && ctx2->privateKey != NULL) {
-        if (memcmp(ctx1->privateKey, ctx2->privateKey, ctx1->para->prvKeyLen) != 0) {
-            return CRYPT_LMS_CMP_FALSE;
-        }
+if (memcmp(currentHash, info.expectedRoot, info.n) == 0) {
+        return CRYPT_SUCCESS;
     }
 ```
-**Issue**: The CRYPT_LMS_Cmp function uses memcmp to compare private keys. While the comparison is limited to non-secret portions (counter and parameters), the use of memcmp can still leak timing information about private key state.
+**Issue**: The final root hash comparison uses memcmp() which is not constant-time. This could leak information about the expected root hash through timing differences, potentially allowing an attacker to forge signatures by observing verification timing.
 **Fix**:
 ```
-if (ctx1->privateKey != NULL && ctx2->privateKey != NULL) {
-        /* Use constant-time comparison for private keys */
-        if (ctx1->para->prvKeyLen != ctx2->para->prvKeyLen) {
-            return CRYPT_LMS_CMP_FALSE;
-        }
-        int result = CRYPT_Memcmp(ctx1->privateKey, ctx2->privateKey, ctx1->para->prvKeyLen);
-        if (result != 0) {
-            return CRYPT_LMS_CMP_FALSE;
-        }
+/* Use constant-time comparison to prevent timing side-channel */
+    uint8_t diff = 0;
+    for (size_t i = 0; i < info.n; i++) {
+        diff |= currentHash[i] ^ info.expectedRoot[i];
+    }
+    if (diff == 0) {
+        return CRYPT_SUCCESS;
     }
 ```
 
 ---
 
-### Non-constant-time private key metadata comparison
-`crypto/hbs/hss/src/hss_api.c:175`
+### Missing upper bound validation for levels parameter
+`crypto/hbs/hss/src/hss_api.c:498`
 ```
-// Only compare the counter and parameters, not the secret seed
-    if (memcmp(ctx1->privateKey, ctx2->privateKey, HSS_PRVKEY_SEED_OFFSET) != 0) {
-        return CRYPT_HSS_CMP_FALSE;
+if (levels < HSS_MIN_LEVELS || levels > HSS_MAX_COMPRESSED_LEVELS) {
+        return CRYPT_HSS_INVALID_PARAM;
     }
 ```
-**Issue**: The memcmp comparison of private key metadata (counter + params) could leak timing information. While the secret seed is not compared, timing variations could still leak information about the key state.
+**Issue**: The validation only checks against HSS_MAX_COMPRESSED_LEVELS (3) but not against HSS_MAX_LEVELS. An attacker could potentially craft a public key with levels value that passes this check but causes issues later. The comment in hss_params.h clearly states HSS_MAX_LEVELS (3) should be used for API validation.
 **Fix**:
 ```
-// Only compare the counter and parameters, not the secret seed
-    // Use constant-time comparison to prevent timing leaks
-    if (CRYPT_Memcmp(ctx1->privateKey, ctx2->privateKey, HSS_PRVKEY_SEED_OFFSET) != 0) {
-        return CRYPT_HSS_CMP_FALSE;
+if (levels < HSS_MIN_LEVELS || levels > HSS_MAX_LEVELS) {
+        return CRYPT_HSS_INVALID_PARAM;
     }
 ```
 
 ---
 
-### Inconsistent height validation allows bypass
-`crypto/hbs/lms/src/lms_hash.c:438-454`
+### Unbounded recursion could cause stack overflow
+`crypto/hbs/common/hbs_tree.c:94-98`
 ```
-int32_t LmsParaInit(LMS_Para *para, uint32_t lmsType, uint32_t otsType)
-{
-    if (para == NULL) {
-        return CRYPT_NULL_INPUT;
-    }
-
-    memset(para, 0, sizeof(LMS_Para));
-
-    int32_t ret = LmsLookupParamSet(lmsType, &para->h, &para->n, &para->height);
+ret = HbsTree_ComputeNode(leftNode, 2 * idx, height - 1, adrs, ctx, authPath, leafIdx);
     if (ret != CRYPT_SUCCESS) {
         return ret;
     }
-
-    // Validate height to prevent DoS via full tree regeneration on each signature
-    if (para->height > LMS_MAX_PRACTICAL_HEIGHT) {
-        return CRYPT_LMS_INVALID_PARAM;
-    }
+    ret = HbsTree_ComputeNode(rightNode, 2 * idx + 1, height - 1, adrs, ctx, authPath, leafIdx);
 ```
-**Issue**: LmsParaInit validates height against LMS_MAX_PRACTICAL_HEIGHT (15), but the LMS parameter lookup (LmsLookupParamSet) accepts heights up to 25. If LmsParaInit is bypassed, large trees could be allocated, causing potential DoS.
+**Issue**: The HbsTree_ComputeNode function uses recursive calls without any depth limit. For large tree heights (e.g., height=20 or 25), this could cause stack overflow. While LMS limits height to 25, HSS could theoretically have multiple levels.
 **Fix**:
 ```
-int32_t LmsParaInit(LMS_Para *para, uint32_t lmsType, uint32_t otsType)
-{
-    if (para == NULL) {
-        return CRYPT_NULL_INPUT;
+/* Add depth limit to prevent stack overflow */
+    if (height > MAX_TREE_RECURSION_DEPTH) {
+        return CRYPT_INVALID_ARG;
     }
-
-    memset(para, 0, sizeof(LMS_Para));
-
-    int32_t ret = LmsLookupParamSet(lmsType, &para->h, &para->n, &para->height);
+    ret = HbsTree_ComputeNode(leftNode, 2 * idx, height - 1, adrs, ctx, authPath, leafIdx);
     if (ret != CRYPT_SUCCESS) {
         return ret;
     }
+    ret = HbsTree_ComputeNode(rightNode, 2 * idx + 1, height - 1, adrs, ctx, authPath, leafIdx);
+```
 
-    // Validate height to prevent DoS via full tree regeneration on each signature
-    // This check MUST happen before any tree operations
-    if (para->height > LMS_MAX_PRACTICAL_HEIGHT) {
-        return CRYPT_LMS_INVALID_PARAM;
+---
+
+### Missing validation of remainingSigLen in signature parsing
+`crypto/hbs/hss/src/hss_core.c:199-210`
+```
+/* After q + otsSig, need lmsType(4) */
+    if (remaining < LMS_Q_LEN + otsSigLen + LMS_TYPE_LEN) {
+        return CRYPT_HSS_SIGNATURE_PARSE_FAIL;
     }
-    
-    // Add additional check: for tree operations, also verify against LMS_MAX_HEIGHT
-    if (para->height > LMS_MAX_HEIGHT) {
-        return CRYPT_LMS_INVALID_PARAM;
+```
+**Issue**: The signature parsing function parses signature data without properly validating the remainingSigLen between operations, which could lead to out-of-bounds reads if the signature is malformed.
+**Fix**:
+```
+/* After q + otsSig, need lmsType(4) */
+    if (remaining < LMS_Q_LEN + otsSigLen + LMS_TYPE_LEN) {
+        return CRYPT_HSS_SIGNATURE_PARSE_FAIL;
+    }
+    /* Validate we have enough for auth path too */
+    if (otsSigLen < LMS_TYPE_LEN) {
+        return CRYPT_HSS_SIGNATURE_PARSE_FAIL;
     }
 ```
 
 ---
 
-### Missing bounds check in HssCtrlSetLmsType
-`crypto/hbs/hss/src/hss_api.c:71-87`
+### Unvalidated loop iteration over levels array
+`crypto/hbs/hss/src/hss_api.c:60-72`
 ```
-if (levelIdx >= ctx->para->levels) {
-        return CRYPT_HSS_LEVEL_OUT_OF_RANGE;
-    }
+/* Key buffers are allocated on demand (keygen / import), not here. */
+    ctx->publicKey = NULL;
+    ctx->privateKey = NULL;
 
-    if (lmsType < LMS_SHA256_M32_H5 || lmsType > LMS_SHA256_M32_H25) {
-        return CRYPT_HSS_INVALID_PARAM;
-    }
+    ctx->signatureIndex = 0;
+    ctx->libCtx = NULL;
+
+    // Initialize cache arrays
+    for (uint32_t i = 0; i < HSS_LEVELS_ARRAY_SIZE; i++) {
+        ctx->cachedTrees[i] = NULL;
 ```
-**Issue**: The function validates that levelIdx < ctx->para->levels, but doesn't validate that lmsType is within valid bounds before using it to index arrays.
+**Issue**: The CRYPT_HSS_NewCtx function initializes cache arrays without checking the levels value, potentially using uninitialized loop bounds if levels is later set to an invalid value.
 **Fix**:
 ```
-if (levelIdx >= ctx->para->levels || levelIdx >= HSS_MAX_LEVELS) {
-        return CRYPT_HSS_LEVEL_OUT_OF_RANGE;
+/* Key buffers are allocated on demand (keygen / import), not here. */
+    ctx->publicKey = NULL;
+    ctx->privateKey = NULL;
+
+    ctx->signatureIndex = 0;
+    ctx->libCtx = NULL;
+    ctx->para->levels = 0;  /* Initialize to 0 to ensure bounds are valid */
+
+    // Initialize cache arrays
+    for (uint32_t i = 0; i < HSS_LEVELS_ARRAY_SIZE; i++) {
+        ctx->cachedTrees[i] = NULL;
+```
+
+---
+
+### HssGetMaxSignatures lacks overflow validation
+`crypto/hbs/hss/src/hss_utils.c:240-270`
+```
+if (height > LMS_MAX_SAFE_HEIGHT_FOR_UINT64 || total > (UINT64_MAX >> height)) {
+            return 0;  // Return 0 to indicate overflow/unsupported configuration
+        }
+
+        total *= (1ULL << height);
     }
 
-    // Validate against all supported LMS types
-    if (lmsType < LMS_SHA256_M32_H5 || lmsType > LMS_SHA256_M32_H25) {
-        return CRYPT_HSS_INVALID_PARAM;
+    return total;
+```
+**Issue**: While there's overflow checking, the function returns 0 on overflow which is ambiguous - it could also mean no signatures available. This could cause issues if the caller doesn't distinguish between "overflow" and "empty".
+**Fix**:
+```
+if (height > LMS_MAX_SAFE_HEIGHT_FOR_UINT64 || total > (UINT64_MAX >> height)) {
+            return 0;  /* TODO: Should return distinct error code for overflow */
+        }
+
+        total *= (1ULL << height);
     }
-    
-    // Additional validation: ensure the type lookup succeeds
-    uint32_t h, n, height;
-    if (LmsLookupParamSet(lmsType, &h, &n, &height) != CRYPT_SUCCESS) {
-        return CRYPT_HSS_INVALID_PARAM;
+
+    if (total == 0) {
+        return 0;  /* Indicates error - should be documented */
     }
+    return total;
 ```
 
 ---
@@ -307,35 +193,106 @@ if (levelIdx >= ctx->para->levels || levelIdx >= HSS_MAX_LEVELS) {
 
 ## Low
 
-### Missing NULL pointer dereference check
-`crypto/hbs/common/hbs_tree.c:90-92`
+### Missing input length validation in base conversion
+`crypto/hbs/common/hbs_wots.c:77-100`
 ```
-int32_t HbsTree_ComputeNode(uint8_t *node, uint32_t idx, uint32_t height, void *adrs, const HbsTreeCtx *ctx,
-    uint8_t *authPath, uint32_t leafIdx)
+static void HbsWots_MsgToBaseW(const HbsWotsCtx *ctx, const uint8_t *msg, uint32_t msgLen, uint32_t *out)
 {
-    int32_t ret;
     uint32_t n = ctx->n;
-    uint32_t hp = ctx->hp;
+    uint32_t len1 = 2 * n;
+    uint32_t len2 = 3;
 
-    if (node == NULL || adrs == NULL || ctx == NULL) {
-        return CRYPT_NULL_INPUT;
-    }
+    /* Convert message bytes to base-W */
+    BaseB(msg, msgLen, 4, out, len1); /* log2(16) = 4 */
 ```
-**Issue**: In HbsTree_ComputeNode, there's a check for NULL pointers (node, adrs, ctx) but authPath can be NULL, which is handled correctly. However, there's no validation that ctx->hashFuncs.xmss is non-NULL before dereferencing it.
+**Issue**: The HbsWots_MsgToBaseW function uses the msgLen parameter without validating it matches ctx->n. If an attacker provides a different length, it could read out of bounds.
 **Fix**:
 ```
-if (node == NULL || adrs == NULL || ctx == NULL) {
-        return CRYPT_NULL_INPUT;
+static void HbsWots_MsgToBaseW(const HbsWotsCtx *ctx, const uint8_t *msg, uint32_t msgLen, uint32_t *out)
+{
+    uint32_t n = ctx->n;
+    if (msgLen != n) {
+        return; /* or handle error appropriately */
     }
-    
-    /* Validate function pointers are set */
-    if (HBS_IS_XMSS(ctx)) {
-        if (ctx->hashFuncs.xmss == NULL || ctx->hashFuncs.xmss->nodeHash == NULL) {
-            return CRYPT_NULL_INPUT;
+    uint32_t len1 = 2 * n;
+    uint32_t len2 = 3;
+
+    /* Convert message bytes to base-W */
+    BaseB(msg, msgLen, 4, out, len1); /* log2(16) = 4 */
+```
+
+---
+
+### Constant-time comparison uses uint8_t accumulator
+`crypto/hbs/lms/src/lms_api.c:35-42`
+```
+static int32_t LmsConstTimeMemCmp(const uint8_t *a, const uint8_t *b, size_t len)
+{
+    uint8_t diff = 0;
+    for (size_t i = 0; i < len; i++) {
+        diff |= a[i] ^ b[i];
+    }
+    return (int32_t)diff;
+}
+```
+**Issue**: The LmsConstTimeMemCmp function uses a uint8_t accumulator which could saturate and wrap around to 0 for long buffers, potentially causing two different buffers to compare as equal.
+**Fix**:
+```
+static int32_t LmsConstTimeMemCmp(const uint8_t *a, const uint8_t *b, size_t len)
+{
+    volatile uint8_t diff = 0;
+    for (size_t i = 0; i < len; i++) {
+        diff |= a[i] ^ b[i];
+    }
+    /* Use != 0 instead of implicit conversion to ensure non-zero result */
+    return (diff != 0) ? 1 : 0;
+}
+```
+
+---
+
+### Missing NULL check before BSL_SAL_CleanseData
+`crypto/hbs/lms/src/lms_api.c:161-170`
+```
+if (ctx->cachedTree != NULL) {
+        BSL_SAL_CleanseData(ctx->cachedTree, ctx->cachedTreeSize);
+        BSL_SAL_FREE(ctx->cachedTree);
+    }
+```
+**Issue**: The CRYPT_LMS_FreeCtx function calls BSL_SAL_CleanseData on ctx->cachedTree using ctx->cachedTreeSize, but if ctx->cachedTree is NULL while cachedTreeSize is non-zero, this could cause issues.
+**Fix**:
+```
+if (ctx->cachedTree != NULL && ctx->cachedTreeSize > 0) {
+        BSL_SAL_CleanseData(ctx->cachedTree, ctx->cachedTreeSize);
+        BSL_SAL_FREE(ctx->cachedTree);
+    }
+```
+
+---
+
+### BaseB function may read uninitialized bytes
+`crypto/hbs/common/hbs_wots.c:46-67`
+```
+for (uint32_t i = 0; i < outLen; i++) {
+        while (bit < b && xi < xLen) {
+            o = (o << BYTE_BITS) + x[xi];
+            bit += 8;
+            xi++;
         }
-    } else if (ctx->hashFuncs.lms == NULL) {
-        return CRYPT_NULL_INPUT;
-    }
+```
+**Issue**: The BaseB function reads x[xi] without ensuring xi stays within xLen bounds in all cases. While the loop condition should prevent this, the complex bit manipulation logic makes it hard to verify.
+**Fix**:
+```
+for (uint32_t i = 0; i < outLen; i++) {
+        while (bit < b && xi < xLen) {
+            o = (o << BYTE_BITS) + x[xi];
+            bit += 8;
+            xi++;
+        }
+        if (xi >= xLen && bit < b) {
+            /* Not enough input bytes - return error */
+            return;
+        }
 ```
 
 ---
@@ -351,124 +308,101 @@ if (node == NULL || adrs == NULL || ctx == NULL) {
 
 ## High
 
-### HSS key export returns uninitialized buffers and writable aliases to internal key state
-`crypto/hbs/hss/src/hss_api.c:27-53`
+### HSS getter command IDs collide with generic EAL controls
+`crypto/hbs/include/crypt_hss.h:47-55`
 ```
-// Allocate key buffers
-ctx->publicKey = (uint8_t *)BSL_SAL_Calloc(1, HSS_PUBKEY_LEN);
-ctx->privateKey = (uint8_t *)BSL_SAL_Calloc(1, HSS_PRVKEY_LEN);
-
-...
-
-if (ctx->privateKey == NULL) {
-    return CRYPT_HSS_NO_KEY;
-}
-
-// Set private key parameter
-BSL_PARAM_InitValue(param, CRYPT_PARAM_HSS_PRVKEY, BSL_PARAM_TYPE_OCTETS, ctx->privateKey, HSS_PRVKEY_LEN);
-
-...
-
-if (ctx->publicKey == NULL) {
-    return CRYPT_HSS_NO_KEY;
-}
-
-// Set public key parameter
-BSL_PARAM_InitValue(param, CRYPT_PARAM_HSS_PUBKEY, BSL_PARAM_TYPE_OCTETS, ctx->publicKey, HSS_PUBKEY_LEN);
+/* HSS control commands */
+#define CRYPT_CTRL_HSS_SET_LEVELS        1  /**< Set hierarchy levels (1-8) */
+#define CRYPT_CTRL_HSS_SET_LMS_TYPE      2  /**< Set LMS type for level */
+#define CRYPT_CTRL_HSS_SET_OTS_TYPE      3  /**< Set OTS type for level */
+#define CRYPT_CTRL_HSS_GET_PUBKEY_LEN    4  /**< Get public key length */
+#define CRYPT_CTRL_HSS_GET_PRVKEY_LEN    5  /**< Get private key length */
+#define CRYPT_CTRL_HSS_GET_SIG_LEN       6  /**< Get signature length */
+#define CRYPT_CTRL_HSS_GET_REMAINING     7  /**< Get remaining signatures */
+#define CRYPT_CTRL_HSS_GET_LEVELS        8  /**< Get number of levels */
 ```
-**Issue**: `CRYPT_HSS_NewCtx()` allocates zero-filled key buffers before any key is generated or imported, and the export APIs only check for `NULL`. A fresh context can therefore "export" an all-zero key. Worse, `CRYPT_HSS_GetPrvKey()` and `CRYPT_HSS_GetPubKey()` use `BSL_PARAM_InitValue()` to point the caller at `ctx->privateKey`/`ctx->publicKey` instead of copying into caller-owned memory, so the caller can mutate the live key material in place.
+**Issue**: The new HSS getter macros reuse low numeric values that are already assigned in the global `CRYPT_CTRL_*` enum. `CRYPT_HSS_Ctrl()` dispatches on those raw numbers, so generic helpers are misrouted: `CRYPT_CTRL_GET_BITS` hits the HSS public-key-length branch, `CRYPT_CTRL_GET_SIGNLEN` hits the private-key-length branch, and `CRYPT_CTRL_GET_PUBKEY_LEN` hits `GET_LEVELS`. In practice that makes `CRYPT_EAL_PkeyGetKeyLen()` report `8` bytes, `CRYPT_EAL_PkeyGetSignLen()` report `48`, and the new HSS CMVP self-test allocates an undersized signature buffer.
 **Fix**:
 ```
-/* NewCtx: do not preallocate key buffers. */
-ctx->publicKey = NULL;
-ctx->privateKey = NULL;
+#include "crypt_types.h"
 
-int32_t CRYPT_HSS_GetPrvKey(CRYPT_HSS_Ctx *ctx, BSL_Param *param)
-{
-    if (ctx == NULL || param == NULL || ctx->privateKey == NULL) {
-        return (ctx == NULL || param == NULL) ? CRYPT_NULL_INPUT : CRYPT_HSS_NO_KEY;
-    }
+/* HSS control commands */
+#define CRYPT_CTRL_HSS_SET_LEVELS        1
+#define CRYPT_CTRL_HSS_SET_LMS_TYPE      2
+#define CRYPT_CTRL_HSS_SET_OTS_TYPE      3
 
-    BSL_Param *prv = BSL_PARAM_FindParam(param, CRYPT_PARAM_HSS_PRVKEY);
-    if (prv == NULL || prv->value == NULL || prv->valueLen < HSS_PRVKEY_LEN) {
-        return CRYPT_HSS_INVALID_KEY_LEN;
-    }
+/* Reuse the common EAL getter IDs so generic helpers work. */
+#define CRYPT_CTRL_HSS_GET_PUBKEY_LEN    CRYPT_CTRL_GET_PUBKEY_LEN
+#define CRYPT_CTRL_HSS_GET_PRVKEY_LEN    CRYPT_CTRL_GET_PRVKEY_LEN
+#define CRYPT_CTRL_HSS_GET_SIG_LEN       CRYPT_CTRL_GET_SIGNLEN
 
-    (void)memcpy_s(prv->value, prv->valueLen, ctx->privateKey, HSS_PRVKEY_LEN);
-    prv->useLen = HSS_PRVKEY_LEN;
-    return CRYPT_SUCCESS;
-}
-
-int32_t CRYPT_HSS_GetPubKey(CRYPT_HSS_Ctx *ctx, BSL_Param *param)
-{
-    if (ctx == NULL || param == NULL || ctx->publicKey == NULL) {
-        return (ctx == NULL || param == NULL) ? CRYPT_NULL_INPUT : CRYPT_HSS_NO_KEY;
-    }
-
-    BSL_Param *pub = BSL_PARAM_FindParam(param, CRYPT_PARAM_HSS_PUBKEY);
-    if (pub == NULL || pub->value == NULL || pub->valueLen < HSS_PUBKEY_LEN) {
-        return CRYPT_HSS_INVALID_KEY_LEN;
-    }
-
-    (void)memcpy_s(pub->value, pub->valueLen, ctx->publicKey, HSS_PUBKEY_LEN);
-    pub->useLen = HSS_PUBKEY_LEN;
-    return CRYPT_SUCCESS;
-}
+/* Keep HSS-only queries out of the shared control range. */
+#define CRYPT_CTRL_HSS_GET_REMAINING     0x1001
+#define CRYPT_CTRL_HSS_GET_LEVELS        0x1002
 ```
 
 ---
 
-### Multi-level HSS verification depends on hidden caller-supplied parameters
-`crypto/hbs/hss/src/hss_tree.c:266-299`
+### Seed derivation suppresses hash failures and lets callers use uninitialized output
+`crypto/hbs/lms/src/lms_hash.c:316-332`
 ```
-int32_t ret = HssParseSignature(&parsed, para, signature, signatureLen);
+int32_t LmsSeedDerive(uint8_t *seed, LMS_SeedDerive *derive, bool incrementJ)
+{
+    uint8_t buffer[LMS_PRG_LEN];
+
+    (void)memcpy_s(buffer + LMS_PRG_I_OFFSET, LMS_I_LEN, derive->I, LMS_I_LEN);
+    LmsPutBigendian(buffer + LMS_PRG_Q_OFFSET, derive->q, LMS_Q_LEN);
+    LmsPutBigendian(buffer + LMS_PRG_J_OFFSET, derive->j, LMS_K_LEN);
+    buffer[LMS_PRG_FF_OFFSET] = LMS_PRG_FF_VALUE;
+    (void)memcpy_s(buffer + LMS_PRG_SEED_OFFSET, LMS_SEED_LEN, derive->masterSeed, LMS_SEED_LEN);
+
+    LmsHash(seed, buffer, LMS_PRG_LEN);
+    BSL_SAL_CleanseData(buffer, LMS_PRG_LEN);
+
+    if (incrementJ) {
+        derive->j += 1;
+    }
+    return CRYPT_SUCCESS;
+}
+```
+**Issue**: `LmsSeedDerive()` ignores the return value from `LmsHash()` and always reports success. Its LM-OTS callers immediately copy the derived `tmp`/`randomizer` buffers into chains and signatures, so a hash backend failure turns into silent use of uninitialized stack data. That can produce invalid signatures and leak stack bytes into the output.
+**Fix**:
+```
+/* lms_hash.c */
+int32_t LmsSeedDerive(uint8_t *seed, LMS_SeedDerive *derive, bool incrementJ)
+{
+    uint8_t buffer[LMS_PRG_LEN];
+
+    (void)memcpy_s(buffer + LMS_PRG_I_OFFSET, LMS_I_LEN, derive->I, LMS_I_LEN);
+    LmsPutBigendian(buffer + LMS_PRG_Q_OFFSET, derive->q, LMS_Q_LEN);
+    LmsPutBigendian(buffer + LMS_PRG_J_OFFSET, derive->j, LMS_K_LEN);
+    buffer[LMS_PRG_FF_OFFSET] = LMS_PRG_FF_VALUE;
+    (void)memcpy_s(buffer + LMS_PRG_SEED_OFFSET, LMS_SEED_LEN, derive->masterSeed, LMS_SEED_LEN);
+
+    int32_t ret = LmsHash(seed, buffer, LMS_PRG_LEN);
+    BSL_SAL_CleanseData(buffer, LMS_PRG_LEN);
+    if (ret != CRYPT_SUCCESS) {
+        return ret;
+    }
+
+    if (incrementJ) {
+        derive->j += 1;
+    }
+    return CRYPT_SUCCESS;
+}
+
+/* lms_ots.c: every call site must check the return before using tmp/randomizer */
+ret = LmsSeedDerive(tmp, seed, (i < ctx->p - 1));
 if (ret != CRYPT_SUCCESS) {
+    BSL_SAL_CleanseData(tmp, sizeof(tmp));
     return ret;
 }
 
-...
-
-size_t lmsSigLen = para->levelPara[i].sigLen;
-const uint8_t *lmsSig = signedPubKey;
-const uint8_t *childPubKey = signedPubKey + lmsSigLen;
-
-...
-
-ret = LmsValidateSignature(currentPubKey, message, messageLen, parsed.bottomSig, parsed.bottomSigLen);
-```
-**Issue**: Verification parses each LMS sub-signature using `para->levelPara[i].sigLen` and `para->levelPara[bottomLevel].sigLen`. But `CRYPT_HSS_SetPubKey()` only records level 0 from the public key, so a verifier that imports a public key alone cannot validate a multi-level signature unless the caller separately replays every lower-level LMS/LMOTS parameter out of band. The signature already contains the type words needed to derive each LMS signature length dynamically.
-**Fix**:
-```
-static int32_t HssGetLmsSigLenFromSig(const uint8_t *sig, size_t remaining, size_t *lmsSigLen)
-{
-    LmOtsParams ots;
-    uint32_t h, n, height;
-
-    if (remaining < LMS_Q_LEN + LMS_TYPE_LEN) {
-        return CRYPT_HSS_SIGNATURE_PARSE_FAIL;
-    }
-
-    uint32_t otsType = (uint32_t)LmsGetBigendian(sig + LMS_Q_LEN, LMS_TYPE_LEN);
-    if (LmOtsLookupParamSet(otsType, &ots) != CRYPT_SUCCESS) {
-        return CRYPT_HSS_SIGNATURE_PARSE_FAIL;
-    }
-
-    size_t otsSigLen = LMS_TYPE_LEN + ots.n + ots.p * ots.n;
-    if (remaining < LMS_Q_LEN + otsSigLen + LMS_TYPE_LEN) {
-        return CRYPT_HSS_SIGNATURE_PARSE_FAIL;
-    }
-
-    uint32_t lmsType = (uint32_t)LmsGetBigendian(sig + LMS_Q_LEN + otsSigLen, LMS_TYPE_LEN);
-    if (LmsLookupParamSet(lmsType, &h, &n, &height) != CRYPT_SUCCESS) {
-        return CRYPT_HSS_SIGNATURE_PARSE_FAIL;
-    }
-
-    *lmsSigLen = LMS_Q_LEN + otsSigLen + LMS_TYPE_LEN + height * n;
-    return (*lmsSigLen <= remaining) ? CRYPT_SUCCESS : CRYPT_HSS_SIGNATURE_PARSE_FAIL;
+ret = LmsSeedDerive(randomizer, seed, false);
+if (ret != CRYPT_SUCCESS) {
+    BSL_SAL_CleanseData(randomizer, sizeof(randomizer));
+    return ret;
 }
-
-/* In HssTree_Verify(): walk the signature with HssGetLmsSigLenFromSig()
- * instead of para->levelPara[i].sigLen / para->levelPara[bottomLevel].sigLen. */
 ```
 
 ---
@@ -476,83 +410,95 @@ static int32_t HssGetLmsSigLenFromSig(const uint8_t *sig, size_t remaining, size
 
 ## Medium
 
-### HSS context comparison ignores the master seed
-`crypto/hbs/hss/src/hss_api.c:172-176`
+### LMS getter command IDs overlap the shared EAL control namespace
+`crypto/hbs/include/crypt_lms.h:46-52`
 ```
-// Compare private keys if both present (compare signature counter only, not seed)
-if (ctx1->privateKey != NULL && ctx2->privateKey != NULL) {
-    // Only compare the counter and parameters, not the secret seed
-    if (memcmp(ctx1->privateKey, ctx2->privateKey, HSS_PRVKEY_SEED_OFFSET) != 0) {
-        return CRYPT_HSS_CMP_FALSE;
-    }
-}
+/* LMS control commands */
+#define CRYPT_CTRL_LMS_SET_TYPE        1  /**< Set LMS tree type */
+#define CRYPT_CTRL_LMS_SET_OTS_TYPE    2  /**< Set LM-OTS type */
+#define CRYPT_CTRL_LMS_GET_PUBKEY_LEN  3  /**< Get public key length */
+#define CRYPT_CTRL_LMS_GET_PRVKEY_LEN  4  /**< Get private key length */
+#define CRYPT_CTRL_LMS_GET_SIG_LEN     5  /**< Get signature length */
+#define CRYPT_CTRL_LMS_GET_REMAINING   6  /**< Get remaining signatures */
 ```
-**Issue**: `CRYPT_HSS_Cmp()` compares only the counter and compressed-parameter prefix of the private key and explicitly skips the 32-byte master seed. Two distinct HSS private keys with the same counter therefore compare equal, which makes `CRYPT_EAL_PkeyCmp()` report false positives.
+**Issue**: The LMS getter macros also reuse low control numbers that already mean something else to the generic EAL layer. For example, `CRYPT_CTRL_LMS_GET_PRVKEY_LEN` is `4`, which collides with `CRYPT_CTRL_GET_BITS`; as a result `CRYPT_EAL_PkeyGetKeyLen()` interprets the 64-byte private-key length as a bit count and reports `8` bytes. Generic public/private-key-length queries are likewise unreachable through the standard control IDs.
 **Fix**:
 ```
-/* Compare the full serialized private key. */
-if (ctx1->privateKey != NULL && ctx2->privateKey != NULL) {
-    if (memcmp(ctx1->privateKey, ctx2->privateKey, HSS_PRVKEY_LEN) != 0) {
-        return CRYPT_HSS_CMP_FALSE;
-    }
-}
+#include "crypt_types.h"
+
+/* LMS control commands */
+#define CRYPT_CTRL_LMS_SET_TYPE        1
+#define CRYPT_CTRL_LMS_SET_OTS_TYPE    2
+
+/* Reuse the common EAL getter IDs so generic helpers work. */
+#define CRYPT_CTRL_LMS_GET_PUBKEY_LEN  CRYPT_CTRL_GET_PUBKEY_LEN
+#define CRYPT_CTRL_LMS_GET_PRVKEY_LEN  CRYPT_CTRL_GET_PRVKEY_LEN
+#define CRYPT_CTRL_LMS_GET_SIG_LEN     CRYPT_CTRL_GET_SIGNLEN
+
+/* Keep the LMS-only query out of the shared control range. */
+#define CRYPT_CTRL_LMS_GET_REMAINING   0x1001
 ```
 
 ---
 
-### Public HSS level limit exceeds what the private-key format can encode
-`crypto/hbs/hss/src/hss_params.h:31-65`
+### Failed HSS private-key imports leave the context mutated
+`crypto/hbs/hss/src/hss_api.c:440-460`
 ```
-#define HSS_MAX_LEVELS 8  // Maximum hierarchy levels (RFC 8554)
-#define HSS_MIN_LEVELS 1  // Minimum hierarchy levels (1 = equivalent to LMS)
+// Allocate private key buffer on first import
+if (ctx->privateKey == NULL) {
+    ctx->privateKey = (uint8_t *)BSL_SAL_Calloc(1, HSS_PRVKEY_LEN);
+    if (ctx->privateKey == NULL) {
+        return CRYPT_MEM_ALLOC_FAIL;
+    }
+}
 
-...
+// Copy private key
+(void)memcpy_s(ctx->privateKey, HSS_PRVKEY_LEN, prvKeyParam->value, HSS_PRVKEY_LEN);
 
-#define HSS_COMPRESSED_PARAMS_LEN    8     // Compressed parameter set length (8 bytes)
-#define HSS_MAX_COMPRESSED_LEVELS    3     // Maximum levels that fit in compressed format
+// Extract and cache signature counter
+ctx->signatureIndex = LmsGetBigendian(ctx->privateKey + HSS_PRVKEY_COUNTER_OFFSET, HSS_PRVKEY_COUNTER_LEN);
+
+// Decompress and validate parameters
+uint8_t compressed[8];
+(void)memcpy_s(compressed, sizeof(compressed), ctx->privateKey + HSS_PRVKEY_PARAMS_OFFSET, HSS_PRVKEY_PARAMS_LEN);
+
+int32_t ret = HssDecompressParamSet(ctx->para, compressed);
+if (ret != CRYPT_SUCCESS) {
+    return ret;
+}
 ```
-**Issue**: The new API advertises `HSS_MAX_LEVELS` as 8, but the serialized private key stores the whole hierarchy in an 8-byte compressed parameter block and `HSS_MAX_COMPRESSED_LEVELS` is only 3. Levels 4-8 are accepted by control setup and then fail later during key generation/import, which is a broken contract.
+**Issue**: `CRYPT_HSS_SetPrvKey()` copies the incoming private key into `ctx->privateKey` and updates `ctx->signatureIndex` before validating the compressed parameter block with `HssDecompressParamSet()`. If validation fails, the function returns an error but the context now holds attacker-supplied key bytes and a new counter value. Reusing the same context after a failed import can therefore mix old parameter state with invalid new key material.
 **Fix**:
 ```
-/* Until the private-key encoding is widened, keep the public limit aligned
- * with what the serialized key can actually carry. */
-#define HSS_MAX_LEVELS 3
-#define HSS_MIN_LEVELS 1
+uint8_t tmpPrv[HSS_PRVKEY_LEN];
+HSS_Para tmpPara;
 
-#define HSS_COMPRESSED_PARAMS_LEN    8
-#define HSS_MAX_COMPRESSED_LEVELS    HSS_MAX_LEVELS
-```
+(void)memcpy_s(tmpPrv, sizeof(tmpPrv), prvKeyParam->value, HSS_PRVKEY_LEN);
+(void)memcpy_s(&tmpPara, sizeof(tmpPara), ctx->para, sizeof(tmpPara));
 
----
+uint8_t compressed[HSS_COMPRESSED_PARAMS_LEN];
+(void)memcpy_s(compressed, sizeof(compressed),
+    tmpPrv + HSS_PRVKEY_PARAMS_OFFSET, HSS_PRVKEY_PARAMS_LEN);
 
-### Newly published LMS/HSS parameter IDs cannot be instantiated
-`include/crypto/crypt_algid.h:364-378`
-```
-CRYPT_LMS_SHA256_H15_W4 = BSL_CID_LMS_SHA256_H15_W4,
-CRYPT_LMS_SHA256_H20_W4 = BSL_CID_LMS_SHA256_H20_W4,
-CRYPT_LMS_SHA256_H25_W4 = BSL_CID_LMS_SHA256_H25_W4,
-...
-CRYPT_LMS_SHA256_H15_W8 = BSL_CID_LMS_SHA256_H15_W8,
-CRYPT_LMS_SHA256_H20_W8 = BSL_CID_LMS_SHA256_H20_W8,
-CRYPT_HSS_SHA256_L2_H10_H10 = BSL_CID_HSS_SHA256_L2_H10_H10,
-CRYPT_HSS_SHA256_L2_H15_H15 = BSL_CID_HSS_SHA256_L2_H15_H15,
-CRYPT_HSS_SHA256_L2_H20_H20 = BSL_CID_HSS_SHA256_L2_H20_H20,
-CRYPT_HSS_SHA256_L3_H10_H10_H10 = BSL_CID_HSS_SHA256_L3_H10_H10_H10,
-```
-**Issue**: This PR exports `H20`, `H25`, and `HSS ... H20 ...` parameter IDs as supported public enums, but `LmsParaInit()` in the same change rejects every LMS tree height above 15. Callers can now select official-looking algorithm IDs that the implementation will always reject at runtime.
-**Fix**:
-```
-/* Only publish parameter sets that the current implementation accepts. */
-CRYPT_LMS_SHA256_H5_W4 = BSL_CID_LMS_SHA256_H5_W4,
-CRYPT_LMS_SHA256_H10_W4 = BSL_CID_LMS_SHA256_H10_W4,
-CRYPT_LMS_SHA256_H15_W4 = BSL_CID_LMS_SHA256_H15_W4,
-CRYPT_LMS_SHA256_H10_W2 = BSL_CID_LMS_SHA256_H10_W2,
-CRYPT_LMS_SHA256_H15_W2 = BSL_CID_LMS_SHA256_H15_W2,
-CRYPT_LMS_SHA256_H10_W8 = BSL_CID_LMS_SHA256_H10_W8,
-CRYPT_LMS_SHA256_H15_W8 = BSL_CID_LMS_SHA256_H15_W8,
-CRYPT_HSS_SHA256_L2_H10_H10 = BSL_CID_HSS_SHA256_L2_H10_H10,
-CRYPT_HSS_SHA256_L2_H15_H15 = BSL_CID_HSS_SHA256_L2_H15_H15,
-CRYPT_HSS_SHA256_L3_H10_H10_H10 = BSL_CID_HSS_SHA256_L3_H10_H10_H10,
+int32_t ret = HssDecompressParamSet(&tmpPara, compressed);
+if (ret != CRYPT_SUCCESS) {
+    BSL_SAL_CleanseData(tmpPrv, sizeof(tmpPrv));
+    return ret;
+}
+
+if (ctx->privateKey == NULL) {
+    ctx->privateKey = (uint8_t *)BSL_SAL_Calloc(1, HSS_PRVKEY_LEN);
+    if (ctx->privateKey == NULL) {
+        BSL_SAL_CleanseData(tmpPrv, sizeof(tmpPrv));
+        return CRYPT_MEM_ALLOC_FAIL;
+    }
+}
+
+(void)memcpy_s(ctx->privateKey, HSS_PRVKEY_LEN, tmpPrv, HSS_PRVKEY_LEN);
+(void)memcpy_s(ctx->para, sizeof(*ctx->para), &tmpPara, sizeof(tmpPara));
+ctx->signatureIndex = LmsGetBigendian(ctx->privateKey + HSS_PRVKEY_COUNTER_OFFSET, HSS_PRVKEY_COUNTER_LEN);
+BSL_SAL_CleanseData(tmpPrv, sizeof(tmpPrv));
+return CRYPT_SUCCESS;
 ```
 
 ---
@@ -568,30 +514,53 @@ CRYPT_HSS_SHA256_L3_H10_H10_H10 = BSL_CID_HSS_SHA256_L3_H10_H10_H10,
 
 ## Critical
 
-### Buffer overflow due to integer underflow in destination size calculation for memcpy_s
-`crypto/hbs/hss/src/hss_core.c:237-239`
+### Unhandled LmsHash failure in LmsSeedDerive leads to uninitialized key material usage
+`crypto/hbs/lms/src/lms_hash.c:316`
 ```
-(void)memcpy_s(output->data, *output->len, parentSig, parentSigLen);
-    (void)memcpy_s(output->data + parentSigLen, *output->len - parentSigLen, childPubKey, LMS_PUBKEY_LEN);
-    *output->len = parentSigLen + LMS_PUBKEY_LEN;
+int32_t LmsSeedDerive(uint8_t *seed, LMS_SeedDerive *derive, bool incrementJ)
+{
+    uint8_t buffer[LMS_PRG_LEN];
+
+    (void)memcpy_s(buffer + LMS_PRG_I_OFFSET, LMS_I_LEN, derive->I, LMS_I_LEN);
+    LmsPutBigendian(buffer + LMS_PRG_Q_OFFSET, derive->q, LMS_Q_LEN);
+    LmsPutBigendian(buffer + LMS_PRG_J_OFFSET, derive->j, LMS_K_LEN);
+    buffer[LMS_PRG_FF_OFFSET] = LMS_PRG_FF_VALUE;
+    (void)memcpy_s(buffer + LMS_PRG_SEED_OFFSET, LMS_SEED_LEN, derive->masterSeed, LMS_SEED_LEN);
+
+    LmsHash(seed, buffer, LMS_PRG_LEN);
+    BSL_SAL_CleanseData(buffer, LMS_PRG_LEN);
+
+    if (incrementJ) {
+        derive->j += 1;
+    }
+    return CRYPT_SUCCESS;
+}
 ```
-**Issue**: In `HssGenerateSignedPubKey`, `memcpy_s` is used to copy `parentSig` and `childPubKey` into `output->data` without verifying that `*output->len` is sufficiently large. If `*output->len < parentSigLen`, the expression `*output->len - parentSigLen` will result in an integer underflow, yielding a massive `destMax` value for the second `memcpy_s`. Furthermore, `output->data + parentSigLen` will point to out-of-bounds memory where 56 bytes (`LMS_PUBKEY_LEN`) will be written, leading to a severe buffer overflow. The return values of `memcpy_s` are also unsafely ignored.
+**Issue**: In `LmsSeedDerive`, the return value of `LmsHash` is ignored, and the function unconditionally returns `CRYPT_SUCCESS`. If the underlying hash operation fails (e.g., due to a failed memory allocation or hardware error in `CRYPT_CalcHash`), the `seed` buffer remains unmodified (containing uninitialized or stale memory). Since callers in `lms_ots.c` rely on this function to generate critical cryptographic material (such as OTS private keys and signature randomizers) without checking for errors, they will proceed to use the uninitialized memory. This compromises the cryptographic integrity of the generated keys and signatures.
 **Fix**:
 ```
-if (*output->len < parentSigLen + LMS_PUBKEY_LEN) {
-        BSL_SAL_Free(parentSig);
-        return CRYPT_LMS_BUFFER_TOO_SMALL;
+int32_t LmsSeedDerive(uint8_t *seed, LMS_SeedDerive *derive, bool incrementJ)
+{
+    uint8_t buffer[LMS_PRG_LEN];
+
+    (void)memcpy_s(buffer + LMS_PRG_I_OFFSET, LMS_I_LEN, derive->I, LMS_I_LEN);
+    LmsPutBigendian(buffer + LMS_PRG_Q_OFFSET, derive->q, LMS_Q_LEN);
+    LmsPutBigendian(buffer + LMS_PRG_J_OFFSET, derive->j, LMS_K_LEN);
+    buffer[LMS_PRG_FF_OFFSET] = LMS_PRG_FF_VALUE;
+    (void)memcpy_s(buffer + LMS_PRG_SEED_OFFSET, LMS_SEED_LEN, derive->masterSeed, LMS_SEED_LEN);
+
+    int32_t ret = LmsHash(seed, buffer, LMS_PRG_LEN);
+    BSL_SAL_CleanseData(buffer, LMS_PRG_LEN);
+    
+    if (ret != CRYPT_SUCCESS) {
+        return ret;
     }
 
-    if (memcpy_s(output->data, *output->len, parentSig, parentSigLen) != 0) {
-        BSL_SAL_Free(parentSig);
-        return CRYPT_HSS_SIGN_FAIL;
+    if (incrementJ) {
+        derive->j += 1;
     }
-    if (memcpy_s(output->data + parentSigLen, *output->len - parentSigLen, childPubKey, LMS_PUBKEY_LEN) != 0) {
-        BSL_SAL_Free(parentSig);
-        return CRYPT_HSS_SIGN_FAIL;
-    }
-    *output->len = parentSigLen + LMS_PUBKEY_LEN;
+    return CRYPT_SUCCESS;
+}
 ```
 
 ---
@@ -599,54 +568,77 @@ if (*output->len < parentSigLen + LMS_PUBKEY_LEN) {
 
 ## High
 
-### Unsafe memory function memset used instead of memset_s
-`crypto/hbs/hss/src/hss_tree.c:268`
+### Incorrect sigsPerTree calculation causes divide-by-zero (SIGFPE)
+`crypto/hbs/hss/src/hss_utils.c:387`
 ```
-memset(&parsed, 0, sizeof(parsed));
+for (int32_t i = (int32_t)para->levels - 2; i >= 0; i--) {
+        uint32_t childHeight = para->levelPara[i + 1].height;
+        sigsPerTree[i] = sigsPerTree[i + 1] * (1ULL << childHeight);
+    }
+
+    // Calculate tree and leaf indices for each level
+    for (uint32_t i = 0; i < para->levels; i++) {
+        // Tree index at level i = globalIndex / sigsPerTree[i]
+        treeIndex[i] = globalIndex / sigsPerTree[i];
 ```
-**Issue**: The code uses the unsafe `memset` function instead of the required `memset_s` from `libboundscheck` as per project coding conventions.
+**Issue**: `HssCalculateTreeIndices` incorrectly calculates `sigsPerTree[i]` using `childHeight` instead of the current tree's height. For valid parameter combinations (e.g., `h0=5, h1=5, h2=25, h3=25` where true max signatures is $2^{60}$), the erroneous multiplication `sigsPerTree[i+1] * (1ULL << childHeight)` can easily exceed $2^{64}$, wrapping around to exactly 0. This results in a hardware divide-by-zero exception (`SIGFPE`) at `globalIndex / sigsPerTree[i]`, causing a denial of service. Furthermore, the calculated `treeIndex` and `leafIndex` are entirely unused by the caller `CRYPT_HSS_Sign`, as it recomputes them correctly via `HssTree_CalculateIndices`.
 **Fix**:
 ```
-(void)memset_s(&parsed, sizeof(parsed), 0, sizeof(parsed));
+for (int32_t i = (int32_t)para->levels - 2; i >= 0; i--) {
+        uint32_t currentHeight = para->levelPara[i].height;
+        sigsPerTree[i] = sigsPerTree[i + 1] * (1ULL << currentHeight);
+    }
+
+    // Calculate tree and leaf indices for each level
+    for (uint32_t i = 0; i < para->levels; i++) {
+        if (sigsPerTree[i] == 0) {
+            return CRYPT_HSS_INVALID_PARAM;
+        }
+        // Tree index at level i = globalIndex / sigsPerTree[i]
+        treeIndex[i] = globalIndex / sigsPerTree[i];
 ```
 
 ---
 
-### Unsafe memory function memset used instead of memset_s
-`crypto/hbs/hss/src/hss_utils.c:47`
+
+## Medium
+
+### Missing memory cleanse for sensitive keys in HSSKeyPairCheck
+`crypto/hbs/hss/src/hss_api.c:472`
 ```
-memset(para, 0, sizeof(HSS_Para));
+uint8_t masterSeed[LMS_SEED_LEN];
+    (void)memcpy_s(masterSeed, sizeof(masterSeed), prvKey->privateKey + HSS_PRVKEY_SEED_OFFSET, HSS_PRVKEY_SEED_LEN);
+
+    uint8_t rootI[LMS_I_LEN];
+    uint8_t rootSeed[LMS_SEED_LEN];
+    ret = HssGenerateRootSeed(rootI, rootSeed, masterSeed);
+    if (ret != CRYPT_SUCCESS) {
+        return ret;
+    }
+
+    return HSSVerifyRootHash(pubKey, prvKey, rootI, rootSeed);
 ```
-**Issue**: The code uses the unsafe `memset` function instead of the required `memset_s` from `libboundscheck` as per project coding conventions.
+**Issue**: `masterSeed` (extracted from the private key) and `rootSeed` are sensitive cryptographic materials used to derive all HSS subkeys. They are copied/generated on the stack in `HSSKeyPairCheck` but are not cleansed before the function returns, potentially leading to side-channel leakage or sensitive data exposure through uninitialized stack memory reuse.
 **Fix**:
 ```
-(void)memset_s(para, sizeof(HSS_Para), 0, sizeof(HSS_Para));
-```
+uint8_t masterSeed[LMS_SEED_LEN];
+    (void)memcpy_s(masterSeed, sizeof(masterSeed), prvKey->privateKey + HSS_PRVKEY_SEED_OFFSET, HSS_PRVKEY_SEED_LEN);
 
----
+    uint8_t rootI[LMS_I_LEN];
+    uint8_t rootSeed[LMS_SEED_LEN];
+    ret = HssGenerateRootSeed(rootI, rootSeed, masterSeed);
+    
+    BSL_SAL_CleanseData(masterSeed, sizeof(masterSeed));
 
-### Unsafe memory function memset used instead of memset_s
-`crypto/hbs/hss/src/hss_utils.c:141`
-```
-memset(compressed, 0, HSS_COMPRESSED_PARAMS_LEN);
-```
-**Issue**: The code uses the unsafe `memset` function instead of the required `memset_s` from `libboundscheck` as per project coding conventions.
-**Fix**:
-```
-(void)memset_s(compressed, HSS_COMPRESSED_PARAMS_LEN, 0, HSS_COMPRESSED_PARAMS_LEN);
-```
+    if (ret != CRYPT_SUCCESS) {
+        BSL_SAL_CleanseData(rootSeed, sizeof(rootSeed));
+        return ret;
+    }
 
----
+    ret = HSSVerifyRootHash(pubKey, prvKey, rootI, rootSeed);
+    BSL_SAL_CleanseData(rootSeed, sizeof(rootSeed));
 
-### Unsafe memory function memset used instead of memset_s
-`crypto/hbs/lms/src/lms_hash.c:444`
-```
-memset(para, 0, sizeof(LMS_Para));
-```
-**Issue**: The code uses the unsafe `memset` function instead of the required `memset_s` from `libboundscheck` as per project coding conventions.
-**Fix**:
-```
-(void)memset_s(para, sizeof(LMS_Para), 0, sizeof(LMS_Para));
+    return ret;
 ```
 
 ---

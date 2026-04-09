@@ -4,112 +4,23 @@
 
 ## High
 
-### Integer overflow in tree size allocation
-`crypto/hbs/common/hbs_tree.c:331`
+### Integer overflow in chain iteration loop
+`crypto/hbs/lms/src/lms_ots.c:83`
 ```
-size_t treeSize = 2u * numLeaves * n;
-    uint8_t *tree = (uint8_t *)BSL_SAL_Calloc(treeSize, 1);
+/* Iterate the hash function 'steps' times starting from 'start' */
+    for (uint32_t j = start; j < start + steps; j++) {
+        int32_t ret = ctx->hashFuncs->chainHash(&otsCtx, k, j, buffer, buffer);
 ```
-**Issue**: The tree size calculation `treeSize = 2u * numLeaves * n` could overflow on 32-bit systems for large trees. While LMS_MAX_HEIGHT is 25, the practical limit check (LMS_MAX_PRACTICAL_HEIGHT=15) might not be enforced in all code paths reaching HbsLmsTree_GenerateAuthPath.
+**Issue**: The loop condition `j < start + steps` could overflow if both `start` and `steps` are large values, causing an infinite loop or buffer overflow. While the typical values are bounded by the Winternitz parameter (2^w-1), the code should explicitly validate this.
 **Fix**:
 ```
-/* Check for overflow before calculating tree size */
-    if (numLeaves > (SIZE_MAX / (2 * n))) {
+/* Iterate the hash function 'steps' times starting from 'start' */
+    uint32_t maxSteps = (1U << ctx->w) - 1;
+    if (start > maxSteps || start + steps < start || start + steps > maxSteps + 1) {
         return CRYPT_LMS_INVALID_PARAM;
     }
-    size_t treeSize = 2u * numLeaves * n;
-    uint8_t *tree = (uint8_t *)BSL_SAL_Calloc(treeSize, 1);
-```
-
----
-
-### Integer overflow in tree size allocation
-`crypto/hbs/lms/src/lms_tree.c:156`
-```
-uint32_t numLeaves = 1u << ctx->height;
-    size_t treeSize = 2 * numLeaves * ctx->n;
-    uint8_t *tree = BSL_SAL_Calloc(treeSize, 1);
-```
-**Issue**: The tree size calculation `treeSize = 2 * numLeaves * ctx->n` could overflow on 32-bit systems. While there's a height limit check in LmsParaInit, direct calls to LmsTree_ComputeRoot might bypass this validation.
-**Fix**:
-```
-uint32_t numLeaves = 1u << ctx->height;
-    
-    /* Check for overflow: treeSize = 2 * numLeaves * n */
-    if (numLeaves > (SIZE_MAX / (2 * ctx->n))) {
-        return CRYPT_MEM_ALLOC_FAIL;
-    }
-    size_t treeSize = 2 * numLeaves * ctx->n;
-    uint8_t *tree = BSL_SAL_Calloc(treeSize, 1);
-```
-
----
-
-### Division by zero vulnerability with unchecked w parameter
-`crypto/hbs/lms/src/lms_ots.c:143-149`
-```
-int32_t LmOtsSign(uint32_t otsType, LMS_SeedDerive *seed, const LmsFamilyHashFuncs *hashFuncs,
-    const LMS_InputBuffer *message, LMS_OutputBuffer *signature)
-{
-    LmOtsParams params;
-    int32_t ret = LmOtsLookupParamSet(otsType, &params);
-    if (ret != CRYPT_SUCCESS) {
-        return ret;
-    }
-
-    if (params.w == 0) {
-        return CRYPT_LMS_DIVISION_BY_ZERO;
-    }
-```
-**Issue**: LmOtsLookupParamSet validates w != 0 for known parameter sets, but if an attacker can supply a custom parameter set or if validation is bypassed, the division by later code could crash.
-**Fix**:
-```
-if (params.w == 0 || params.p == 0) {
-        return CRYPT_LMS_DIVISION_BY_ZERO;
-    }
-    
-    if (params.w != 1 && params.w != 2 && params.w != 4 && params.w != 8) {
-        return CRYPT_LMS_INVALID_PARAM;
-    }
-```
-
----
-
-### Integer overflow in HssGetMaxSignatures
-`crypto/hbs/hss/src/hss_utils.c:275-285`
-```
-for (uint32_t i = 0; i < para->levels; i++) {
-        uint32_t height = para->levelPara[i].height;
-
-        // Check for overflow: height must be <= 60 to safely compute (1ULL << height) without overflow
-        // and total must have enough headroom for multiplication
-        if (height > LMS_MAX_SAFE_HEIGHT_FOR_UINT64 || total > (UINT64_MAX >> height)) {
-            return UINT64_MAX;  // Return max to indicate overflow
-        }
-
-        total *= (1ULL << height);
-    }
-```
-**Issue**: The function calculates total signatures as product of (1<<height) for all levels but doesn't properly handle overflow. It returns UINT64_MAX on overflow, but callers might not check for this sentinel value.
-**Fix**:
-```
-for (uint32_t i = 0; i < para->levels; i++) {
-        uint32_t height = para->levelPara[i].height;
-
-        // Check for overflow: height must be <= 60 to safely compute (1ULL << height) without overflow
-        if (height > LMS_MAX_SAFE_HEIGHT_FOR_UINT64) {
-            return 0;  // Invalid - indicates no signatures available
-        }
-        
-        uint64_t signaturesAtLevel = 1ULL << height;
-        
-        // Check if multiplication would overflow
-        if (total > UINT64_MAX / signaturesAtLevel) {
-            return 0;  // Overflow - indicates no signatures available
-        }
-
-        total *= signaturesAtLevel;
-    }
+    for (uint32_t j = start; j < start + steps; j++) {
+        int32_t ret = ctx->hashFuncs->chainHash(&otsCtx, k, j, buffer, buffer);
 ```
 
 ---
@@ -117,176 +28,151 @@ for (uint32_t i = 0; i < para->levels; i++) {
 
 ## Medium
 
-### BaseB function has potential integer overflow
-`crypto/hbs/common/hbs_wots.c:41-50`
+### Timing side-channel vulnerability in root hash comparison
+`crypto/hbs/lms/src/lms_core.c:545`
 ```
-static void BaseB(const uint8_t *x, uint32_t xLen, uint32_t b, uint32_t *out, uint32_t outLen)
-{
-    uint32_t bit = 0;
-    uint32_t o = 0;
-    uint32_t xi = 0;
-    for (uint32_t i = 0; i < outLen; i++) {
-        while (bit < b && xi < xLen) {
-            o = (o << BYTE_BITS) + x[xi];
-            bit += 8;
-            xi++;
-        }
-```
-**Issue**: The BaseB function can overflow the `o` variable when processing input data. The calculation `o = (o << BYTE_BITS) + x[xi]` can overflow if `b` is large and multiple bytes are processed. For W=16 (4-bit chunks), this is unlikely to be an issue, but the function doesn't validate its inputs.
-**Fix**:
-```
-static void BaseB(const uint8_t *x, uint32_t xLen, uint32_t b, uint32_t *out, uint32_t outLen)
-{
-    uint32_t bit = 0;
-    uint32_t o = 0;
-    uint32_t xi = 0;
-    
-    /* Validate input: b must be <= 16 (for W=16) to prevent overflow */
-    if (b > 16 || outLen == 0) {
-        return;
-    }
-    
-    for (uint32_t i = 0; i < outLen; i++) {
-        while (bit < b && xi < xLen) {
-            /* Use 64-bit intermediate to prevent overflow */
-            uint64_t temp = ((uint64_t)o << BYTE_BITS) + x[xi];
-            if (temp > UINT32_MAX) {
-                /* Handle overflow - should not happen with valid inputs */
-                return;
-            }
-            o = (uint32_t)temp;
-            bit += 8;
-            xi++;
-        }
-```
-
----
-
-### Non-constant-time private key comparison
-`crypto/hbs/lms/src/lms_api.c:4598`
-```
-if (ctx1->privateKey != NULL && ctx2->privateKey != NULL) {
-        if (memcmp(ctx1->privateKey, ctx2->privateKey, ctx1->para->prvKeyLen) != 0) {
-            return CRYPT_LMS_CMP_FALSE;
-        }
+if (memcmp(currentHash, info.expectedRoot, info.n) == 0) {
+        return CRYPT_SUCCESS;
     }
 ```
-**Issue**: The CRYPT_LMS_Cmp function uses memcmp to compare private keys. While the comparison is limited to non-secret portions (counter and parameters), the use of memcmp can still leak timing information about private key state.
+**Issue**: The final root hash comparison uses memcmp() which is not constant-time. This could leak information about the expected root hash through timing differences, potentially allowing an attacker to forge signatures by observing verification timing.
 **Fix**:
 ```
-if (ctx1->privateKey != NULL && ctx2->privateKey != NULL) {
-        /* Use constant-time comparison for private keys */
-        if (ctx1->para->prvKeyLen != ctx2->para->prvKeyLen) {
-            return CRYPT_LMS_CMP_FALSE;
-        }
-        int result = CRYPT_Memcmp(ctx1->privateKey, ctx2->privateKey, ctx1->para->prvKeyLen);
-        if (result != 0) {
-            return CRYPT_LMS_CMP_FALSE;
-        }
+/* Use constant-time comparison to prevent timing side-channel */
+    uint8_t diff = 0;
+    for (size_t i = 0; i < info.n; i++) {
+        diff |= currentHash[i] ^ info.expectedRoot[i];
+    }
+    if (diff == 0) {
+        return CRYPT_SUCCESS;
     }
 ```
 
 ---
 
-### Non-constant-time private key metadata comparison
-`crypto/hbs/hss/src/hss_api.c:175`
+### Missing upper bound validation for levels parameter
+`crypto/hbs/hss/src/hss_api.c:498`
 ```
-// Only compare the counter and parameters, not the secret seed
-    if (memcmp(ctx1->privateKey, ctx2->privateKey, HSS_PRVKEY_SEED_OFFSET) != 0) {
-        return CRYPT_HSS_CMP_FALSE;
+if (levels < HSS_MIN_LEVELS || levels > HSS_MAX_COMPRESSED_LEVELS) {
+        return CRYPT_HSS_INVALID_PARAM;
     }
 ```
-**Issue**: The memcmp comparison of private key metadata (counter + params) could leak timing information. While the secret seed is not compared, timing variations could still leak information about the key state.
+**Issue**: The validation only checks against HSS_MAX_COMPRESSED_LEVELS (3) but not against HSS_MAX_LEVELS. An attacker could potentially craft a public key with levels value that passes this check but causes issues later. The comment in hss_params.h clearly states HSS_MAX_LEVELS (3) should be used for API validation.
 **Fix**:
 ```
-// Only compare the counter and parameters, not the secret seed
-    // Use constant-time comparison to prevent timing leaks
-    if (CRYPT_Memcmp(ctx1->privateKey, ctx2->privateKey, HSS_PRVKEY_SEED_OFFSET) != 0) {
-        return CRYPT_HSS_CMP_FALSE;
+if (levels < HSS_MIN_LEVELS || levels > HSS_MAX_LEVELS) {
+        return CRYPT_HSS_INVALID_PARAM;
     }
 ```
 
 ---
 
-### Inconsistent height validation allows bypass
-`crypto/hbs/lms/src/lms_hash.c:438-454`
+### Unbounded recursion could cause stack overflow
+`crypto/hbs/common/hbs_tree.c:94-98`
 ```
-int32_t LmsParaInit(LMS_Para *para, uint32_t lmsType, uint32_t otsType)
-{
-    if (para == NULL) {
-        return CRYPT_NULL_INPUT;
-    }
-
-    memset(para, 0, sizeof(LMS_Para));
-
-    int32_t ret = LmsLookupParamSet(lmsType, &para->h, &para->n, &para->height);
+ret = HbsTree_ComputeNode(leftNode, 2 * idx, height - 1, adrs, ctx, authPath, leafIdx);
     if (ret != CRYPT_SUCCESS) {
         return ret;
     }
-
-    // Validate height to prevent DoS via full tree regeneration on each signature
-    if (para->height > LMS_MAX_PRACTICAL_HEIGHT) {
-        return CRYPT_LMS_INVALID_PARAM;
-    }
+    ret = HbsTree_ComputeNode(rightNode, 2 * idx + 1, height - 1, adrs, ctx, authPath, leafIdx);
 ```
-**Issue**: LmsParaInit validates height against LMS_MAX_PRACTICAL_HEIGHT (15), but the LMS parameter lookup (LmsLookupParamSet) accepts heights up to 25. If LmsParaInit is bypassed, large trees could be allocated, causing potential DoS.
+**Issue**: The HbsTree_ComputeNode function uses recursive calls without any depth limit. For large tree heights (e.g., height=20 or 25), this could cause stack overflow. While LMS limits height to 25, HSS could theoretically have multiple levels.
 **Fix**:
 ```
-int32_t LmsParaInit(LMS_Para *para, uint32_t lmsType, uint32_t otsType)
-{
-    if (para == NULL) {
-        return CRYPT_NULL_INPUT;
+/* Add depth limit to prevent stack overflow */
+    if (height > MAX_TREE_RECURSION_DEPTH) {
+        return CRYPT_INVALID_ARG;
     }
-
-    memset(para, 0, sizeof(LMS_Para));
-
-    int32_t ret = LmsLookupParamSet(lmsType, &para->h, &para->n, &para->height);
+    ret = HbsTree_ComputeNode(leftNode, 2 * idx, height - 1, adrs, ctx, authPath, leafIdx);
     if (ret != CRYPT_SUCCESS) {
         return ret;
     }
+    ret = HbsTree_ComputeNode(rightNode, 2 * idx + 1, height - 1, adrs, ctx, authPath, leafIdx);
+```
 
-    // Validate height to prevent DoS via full tree regeneration on each signature
-    // This check MUST happen before any tree operations
-    if (para->height > LMS_MAX_PRACTICAL_HEIGHT) {
-        return CRYPT_LMS_INVALID_PARAM;
+---
+
+### Missing validation of remainingSigLen in signature parsing
+`crypto/hbs/hss/src/hss_core.c:199-210`
+```
+/* After q + otsSig, need lmsType(4) */
+    if (remaining < LMS_Q_LEN + otsSigLen + LMS_TYPE_LEN) {
+        return CRYPT_HSS_SIGNATURE_PARSE_FAIL;
     }
-    
-    // Add additional check: for tree operations, also verify against LMS_MAX_HEIGHT
-    if (para->height > LMS_MAX_HEIGHT) {
-        return CRYPT_LMS_INVALID_PARAM;
+```
+**Issue**: The signature parsing function parses signature data without properly validating the remainingSigLen between operations, which could lead to out-of-bounds reads if the signature is malformed.
+**Fix**:
+```
+/* After q + otsSig, need lmsType(4) */
+    if (remaining < LMS_Q_LEN + otsSigLen + LMS_TYPE_LEN) {
+        return CRYPT_HSS_SIGNATURE_PARSE_FAIL;
+    }
+    /* Validate we have enough for auth path too */
+    if (otsSigLen < LMS_TYPE_LEN) {
+        return CRYPT_HSS_SIGNATURE_PARSE_FAIL;
     }
 ```
 
 ---
 
-### Missing bounds check in HssCtrlSetLmsType
-`crypto/hbs/hss/src/hss_api.c:71-87`
+### Unvalidated loop iteration over levels array
+`crypto/hbs/hss/src/hss_api.c:60-72`
 ```
-if (levelIdx >= ctx->para->levels) {
-        return CRYPT_HSS_LEVEL_OUT_OF_RANGE;
-    }
+/* Key buffers are allocated on demand (keygen / import), not here. */
+    ctx->publicKey = NULL;
+    ctx->privateKey = NULL;
 
-    if (lmsType < LMS_SHA256_M32_H5 || lmsType > LMS_SHA256_M32_H25) {
-        return CRYPT_HSS_INVALID_PARAM;
-    }
+    ctx->signatureIndex = 0;
+    ctx->libCtx = NULL;
+
+    // Initialize cache arrays
+    for (uint32_t i = 0; i < HSS_LEVELS_ARRAY_SIZE; i++) {
+        ctx->cachedTrees[i] = NULL;
 ```
-**Issue**: The function validates that levelIdx < ctx->para->levels, but doesn't validate that lmsType is within valid bounds before using it to index arrays.
+**Issue**: The CRYPT_HSS_NewCtx function initializes cache arrays without checking the levels value, potentially using uninitialized loop bounds if levels is later set to an invalid value.
 **Fix**:
 ```
-if (levelIdx >= ctx->para->levels || levelIdx >= HSS_MAX_LEVELS) {
-        return CRYPT_HSS_LEVEL_OUT_OF_RANGE;
+/* Key buffers are allocated on demand (keygen / import), not here. */
+    ctx->publicKey = NULL;
+    ctx->privateKey = NULL;
+
+    ctx->signatureIndex = 0;
+    ctx->libCtx = NULL;
+    ctx->para->levels = 0;  /* Initialize to 0 to ensure bounds are valid */
+
+    // Initialize cache arrays
+    for (uint32_t i = 0; i < HSS_LEVELS_ARRAY_SIZE; i++) {
+        ctx->cachedTrees[i] = NULL;
+```
+
+---
+
+### HssGetMaxSignatures lacks overflow validation
+`crypto/hbs/hss/src/hss_utils.c:240-270`
+```
+if (height > LMS_MAX_SAFE_HEIGHT_FOR_UINT64 || total > (UINT64_MAX >> height)) {
+            return 0;  // Return 0 to indicate overflow/unsupported configuration
+        }
+
+        total *= (1ULL << height);
     }
 
-    // Validate against all supported LMS types
-    if (lmsType < LMS_SHA256_M32_H5 || lmsType > LMS_SHA256_M32_H25) {
-        return CRYPT_HSS_INVALID_PARAM;
+    return total;
+```
+**Issue**: While there's overflow checking, the function returns 0 on overflow which is ambiguous - it could also mean no signatures available. This could cause issues if the caller doesn't distinguish between "overflow" and "empty".
+**Fix**:
+```
+if (height > LMS_MAX_SAFE_HEIGHT_FOR_UINT64 || total > (UINT64_MAX >> height)) {
+            return 0;  /* TODO: Should return distinct error code for overflow */
+        }
+
+        total *= (1ULL << height);
     }
-    
-    // Additional validation: ensure the type lookup succeeds
-    uint32_t h, n, height;
-    if (LmsLookupParamSet(lmsType, &h, &n, &height) != CRYPT_SUCCESS) {
-        return CRYPT_HSS_INVALID_PARAM;
+
+    if (total == 0) {
+        return 0;  /* Indicates error - should be documented */
     }
+    return total;
 ```
 
 ---
@@ -294,35 +180,106 @@ if (levelIdx >= ctx->para->levels || levelIdx >= HSS_MAX_LEVELS) {
 
 ## Low
 
-### Missing NULL pointer dereference check
-`crypto/hbs/common/hbs_tree.c:90-92`
+### Missing input length validation in base conversion
+`crypto/hbs/common/hbs_wots.c:77-100`
 ```
-int32_t HbsTree_ComputeNode(uint8_t *node, uint32_t idx, uint32_t height, void *adrs, const HbsTreeCtx *ctx,
-    uint8_t *authPath, uint32_t leafIdx)
+static void HbsWots_MsgToBaseW(const HbsWotsCtx *ctx, const uint8_t *msg, uint32_t msgLen, uint32_t *out)
 {
-    int32_t ret;
     uint32_t n = ctx->n;
-    uint32_t hp = ctx->hp;
+    uint32_t len1 = 2 * n;
+    uint32_t len2 = 3;
 
-    if (node == NULL || adrs == NULL || ctx == NULL) {
-        return CRYPT_NULL_INPUT;
-    }
+    /* Convert message bytes to base-W */
+    BaseB(msg, msgLen, 4, out, len1); /* log2(16) = 4 */
 ```
-**Issue**: In HbsTree_ComputeNode, there's a check for NULL pointers (node, adrs, ctx) but authPath can be NULL, which is handled correctly. However, there's no validation that ctx->hashFuncs.xmss is non-NULL before dereferencing it.
+**Issue**: The HbsWots_MsgToBaseW function uses the msgLen parameter without validating it matches ctx->n. If an attacker provides a different length, it could read out of bounds.
 **Fix**:
 ```
-if (node == NULL || adrs == NULL || ctx == NULL) {
-        return CRYPT_NULL_INPUT;
+static void HbsWots_MsgToBaseW(const HbsWotsCtx *ctx, const uint8_t *msg, uint32_t msgLen, uint32_t *out)
+{
+    uint32_t n = ctx->n;
+    if (msgLen != n) {
+        return; /* or handle error appropriately */
     }
-    
-    /* Validate function pointers are set */
-    if (HBS_IS_XMSS(ctx)) {
-        if (ctx->hashFuncs.xmss == NULL || ctx->hashFuncs.xmss->nodeHash == NULL) {
-            return CRYPT_NULL_INPUT;
+    uint32_t len1 = 2 * n;
+    uint32_t len2 = 3;
+
+    /* Convert message bytes to base-W */
+    BaseB(msg, msgLen, 4, out, len1); /* log2(16) = 4 */
+```
+
+---
+
+### Constant-time comparison uses uint8_t accumulator
+`crypto/hbs/lms/src/lms_api.c:35-42`
+```
+static int32_t LmsConstTimeMemCmp(const uint8_t *a, const uint8_t *b, size_t len)
+{
+    uint8_t diff = 0;
+    for (size_t i = 0; i < len; i++) {
+        diff |= a[i] ^ b[i];
+    }
+    return (int32_t)diff;
+}
+```
+**Issue**: The LmsConstTimeMemCmp function uses a uint8_t accumulator which could saturate and wrap around to 0 for long buffers, potentially causing two different buffers to compare as equal.
+**Fix**:
+```
+static int32_t LmsConstTimeMemCmp(const uint8_t *a, const uint8_t *b, size_t len)
+{
+    volatile uint8_t diff = 0;
+    for (size_t i = 0; i < len; i++) {
+        diff |= a[i] ^ b[i];
+    }
+    /* Use != 0 instead of implicit conversion to ensure non-zero result */
+    return (diff != 0) ? 1 : 0;
+}
+```
+
+---
+
+### Missing NULL check before BSL_SAL_CleanseData
+`crypto/hbs/lms/src/lms_api.c:161-170`
+```
+if (ctx->cachedTree != NULL) {
+        BSL_SAL_CleanseData(ctx->cachedTree, ctx->cachedTreeSize);
+        BSL_SAL_FREE(ctx->cachedTree);
+    }
+```
+**Issue**: The CRYPT_LMS_FreeCtx function calls BSL_SAL_CleanseData on ctx->cachedTree using ctx->cachedTreeSize, but if ctx->cachedTree is NULL while cachedTreeSize is non-zero, this could cause issues.
+**Fix**:
+```
+if (ctx->cachedTree != NULL && ctx->cachedTreeSize > 0) {
+        BSL_SAL_CleanseData(ctx->cachedTree, ctx->cachedTreeSize);
+        BSL_SAL_FREE(ctx->cachedTree);
+    }
+```
+
+---
+
+### BaseB function may read uninitialized bytes
+`crypto/hbs/common/hbs_wots.c:46-67`
+```
+for (uint32_t i = 0; i < outLen; i++) {
+        while (bit < b && xi < xLen) {
+            o = (o << BYTE_BITS) + x[xi];
+            bit += 8;
+            xi++;
         }
-    } else if (ctx->hashFuncs.lms == NULL) {
-        return CRYPT_NULL_INPUT;
-    }
+```
+**Issue**: The BaseB function reads x[xi] without ensuring xi stays within xLen bounds in all cases. While the loop condition should prevent this, the complex bit manipulation logic makes it hard to verify.
+**Fix**:
+```
+for (uint32_t i = 0; i < outLen; i++) {
+        while (bit < b && xi < xLen) {
+            o = (o << BYTE_BITS) + x[xi];
+            bit += 8;
+            xi++;
+        }
+        if (xi >= xLen && bit < b) {
+            /* Not enough input bytes - return error */
+            return;
+        }
 ```
 
 ---

@@ -33,183 +33,177 @@
         <div class="subtitle"></div>
 <div class="section"><div class="section-title high">High</div>
 <div class="issue">
-                <div class="issue-title">HSS key export returns uninitialized buffers and writable aliases to internal key state</div>
-                <div class="issue-location">crypto/hbs/hss/src/hss_api.c:27-53</div>
-                <pre>// Allocate key buffers
-ctx-&gt;publicKey = (uint8_t *)BSL_SAL_Calloc(1, HSS_PUBKEY_LEN);
-ctx-&gt;privateKey = (uint8_t *)BSL_SAL_Calloc(1, HSS_PRVKEY_LEN);
+                <div class="issue-title">HSS getter command IDs collide with generic EAL controls</div>
+                <div class="issue-location">crypto/hbs/include/crypt_hss.h:47-55</div>
+                <pre>/* HSS control commands */
+#define CRYPT_CTRL_HSS_SET_LEVELS        1  /**&lt; Set hierarchy levels (1-8) */
+#define CRYPT_CTRL_HSS_SET_LMS_TYPE      2  /**&lt; Set LMS type for level */
+#define CRYPT_CTRL_HSS_SET_OTS_TYPE      3  /**&lt; Set OTS type for level */
+#define CRYPT_CTRL_HSS_GET_PUBKEY_LEN    4  /**&lt; Get public key length */
+#define CRYPT_CTRL_HSS_GET_PRVKEY_LEN    5  /**&lt; Get private key length */
+#define CRYPT_CTRL_HSS_GET_SIG_LEN       6  /**&lt; Get signature length */
+#define CRYPT_CTRL_HSS_GET_REMAINING     7  /**&lt; Get remaining signatures */
+#define CRYPT_CTRL_HSS_GET_LEVELS        8  /**&lt; Get number of levels */</pre>
+                <div class="problem"><strong>Issue:</strong> The new HSS getter macros reuse low numeric values that are already assigned in the global `CRYPT_CTRL_*` enum. `CRYPT_HSS_Ctrl()` dispatches on those raw numbers, so generic helpers are misrouted: `CRYPT_CTRL_GET_BITS` hits the HSS public-key-length branch, `CRYPT_CTRL_GET_SIGNLEN` hits the private-key-length branch, and `CRYPT_CTRL_GET_PUBKEY_LEN` hits `GET_LEVELS`. In practice that makes `CRYPT_EAL_PkeyGetKeyLen()` report `8` bytes, `CRYPT_EAL_PkeyGetSignLen()` report `48`, and the new HSS CMVP self-test allocates an undersized signature buffer.</div>
+                <div class="fix-label">Fix:</div><pre>#include "crypt_types.h"
 
-...
+/* HSS control commands */
+#define CRYPT_CTRL_HSS_SET_LEVELS        1
+#define CRYPT_CTRL_HSS_SET_LMS_TYPE      2
+#define CRYPT_CTRL_HSS_SET_OTS_TYPE      3
 
-if (ctx-&gt;privateKey == NULL) {
-    return CRYPT_HSS_NO_KEY;
-}
+/* Reuse the common EAL getter IDs so generic helpers work. */
+#define CRYPT_CTRL_HSS_GET_PUBKEY_LEN    CRYPT_CTRL_GET_PUBKEY_LEN
+#define CRYPT_CTRL_HSS_GET_PRVKEY_LEN    CRYPT_CTRL_GET_PRVKEY_LEN
+#define CRYPT_CTRL_HSS_GET_SIG_LEN       CRYPT_CTRL_GET_SIGNLEN
 
-// Set private key parameter
-BSL_PARAM_InitValue(param, CRYPT_PARAM_HSS_PRVKEY, BSL_PARAM_TYPE_OCTETS, ctx-&gt;privateKey, HSS_PRVKEY_LEN);
-
-...
-
-if (ctx-&gt;publicKey == NULL) {
-    return CRYPT_HSS_NO_KEY;
-}
-
-// Set public key parameter
-BSL_PARAM_InitValue(param, CRYPT_PARAM_HSS_PUBKEY, BSL_PARAM_TYPE_OCTETS, ctx-&gt;publicKey, HSS_PUBKEY_LEN);</pre>
-                <div class="problem"><strong>Issue:</strong> `CRYPT_HSS_NewCtx()` allocates zero-filled key buffers before any key is generated or imported, and the export APIs only check for `NULL`. A fresh context can therefore "export" an all-zero key. Worse, `CRYPT_HSS_GetPrvKey()` and `CRYPT_HSS_GetPubKey()` use `BSL_PARAM_InitValue()` to point the caller at `ctx->privateKey`/`ctx->publicKey` instead of copying into caller-owned memory, so the caller can mutate the live key material in place.</div>
-                <div class="fix-label">Fix:</div><pre>/* NewCtx: do not preallocate key buffers. */
-ctx-&gt;publicKey = NULL;
-ctx-&gt;privateKey = NULL;
-
-int32_t CRYPT_HSS_GetPrvKey(CRYPT_HSS_Ctx *ctx, BSL_Param *param)
-{
-    if (ctx == NULL || param == NULL || ctx-&gt;privateKey == NULL) {
-        return (ctx == NULL || param == NULL) ? CRYPT_NULL_INPUT : CRYPT_HSS_NO_KEY;
-    }
-
-    BSL_Param *prv = BSL_PARAM_FindParam(param, CRYPT_PARAM_HSS_PRVKEY);
-    if (prv == NULL || prv-&gt;value == NULL || prv-&gt;valueLen &lt; HSS_PRVKEY_LEN) {
-        return CRYPT_HSS_INVALID_KEY_LEN;
-    }
-
-    (void)memcpy_s(prv-&gt;value, prv-&gt;valueLen, ctx-&gt;privateKey, HSS_PRVKEY_LEN);
-    prv-&gt;useLen = HSS_PRVKEY_LEN;
-    return CRYPT_SUCCESS;
-}
-
-int32_t CRYPT_HSS_GetPubKey(CRYPT_HSS_Ctx *ctx, BSL_Param *param)
-{
-    if (ctx == NULL || param == NULL || ctx-&gt;publicKey == NULL) {
-        return (ctx == NULL || param == NULL) ? CRYPT_NULL_INPUT : CRYPT_HSS_NO_KEY;
-    }
-
-    BSL_Param *pub = BSL_PARAM_FindParam(param, CRYPT_PARAM_HSS_PUBKEY);
-    if (pub == NULL || pub-&gt;value == NULL || pub-&gt;valueLen &lt; HSS_PUBKEY_LEN) {
-        return CRYPT_HSS_INVALID_KEY_LEN;
-    }
-
-    (void)memcpy_s(pub-&gt;value, pub-&gt;valueLen, ctx-&gt;publicKey, HSS_PUBKEY_LEN);
-    pub-&gt;useLen = HSS_PUBKEY_LEN;
-    return CRYPT_SUCCESS;
-}</pre>
+/* Keep HSS-only queries out of the shared control range. */
+#define CRYPT_CTRL_HSS_GET_REMAINING     0x1001
+#define CRYPT_CTRL_HSS_GET_LEVELS        0x1002</pre>
                 <div class="issue-source">Reviewer: codex</div>
             </div>
 <div class="issue">
-                <div class="issue-title">Multi-level HSS verification depends on hidden caller-supplied parameters</div>
-                <div class="issue-location">crypto/hbs/hss/src/hss_tree.c:266-299</div>
-                <pre>int32_t ret = HssParseSignature(&amp;parsed, para, signature, signatureLen);
+                <div class="issue-title">Seed derivation suppresses hash failures and lets callers use uninitialized output</div>
+                <div class="issue-location">crypto/hbs/lms/src/lms_hash.c:316-332</div>
+                <pre>int32_t LmsSeedDerive(uint8_t *seed, LMS_SeedDerive *derive, bool incrementJ)
+{
+    uint8_t buffer[LMS_PRG_LEN];
+
+    (void)memcpy_s(buffer + LMS_PRG_I_OFFSET, LMS_I_LEN, derive-&gt;I, LMS_I_LEN);
+    LmsPutBigendian(buffer + LMS_PRG_Q_OFFSET, derive-&gt;q, LMS_Q_LEN);
+    LmsPutBigendian(buffer + LMS_PRG_J_OFFSET, derive-&gt;j, LMS_K_LEN);
+    buffer[LMS_PRG_FF_OFFSET] = LMS_PRG_FF_VALUE;
+    (void)memcpy_s(buffer + LMS_PRG_SEED_OFFSET, LMS_SEED_LEN, derive-&gt;masterSeed, LMS_SEED_LEN);
+
+    LmsHash(seed, buffer, LMS_PRG_LEN);
+    BSL_SAL_CleanseData(buffer, LMS_PRG_LEN);
+
+    if (incrementJ) {
+        derive-&gt;j += 1;
+    }
+    return CRYPT_SUCCESS;
+}</pre>
+                <div class="problem"><strong>Issue:</strong> `LmsSeedDerive()` ignores the return value from `LmsHash()` and always reports success. Its LM-OTS callers immediately copy the derived `tmp`/`randomizer` buffers into chains and signatures, so a hash backend failure turns into silent use of uninitialized stack data. That can produce invalid signatures and leak stack bytes into the output.</div>
+                <div class="fix-label">Fix:</div><pre>/* lms_hash.c */
+int32_t LmsSeedDerive(uint8_t *seed, LMS_SeedDerive *derive, bool incrementJ)
+{
+    uint8_t buffer[LMS_PRG_LEN];
+
+    (void)memcpy_s(buffer + LMS_PRG_I_OFFSET, LMS_I_LEN, derive-&gt;I, LMS_I_LEN);
+    LmsPutBigendian(buffer + LMS_PRG_Q_OFFSET, derive-&gt;q, LMS_Q_LEN);
+    LmsPutBigendian(buffer + LMS_PRG_J_OFFSET, derive-&gt;j, LMS_K_LEN);
+    buffer[LMS_PRG_FF_OFFSET] = LMS_PRG_FF_VALUE;
+    (void)memcpy_s(buffer + LMS_PRG_SEED_OFFSET, LMS_SEED_LEN, derive-&gt;masterSeed, LMS_SEED_LEN);
+
+    int32_t ret = LmsHash(seed, buffer, LMS_PRG_LEN);
+    BSL_SAL_CleanseData(buffer, LMS_PRG_LEN);
+    if (ret != CRYPT_SUCCESS) {
+        return ret;
+    }
+
+    if (incrementJ) {
+        derive-&gt;j += 1;
+    }
+    return CRYPT_SUCCESS;
+}
+
+/* lms_ots.c: every call site must check the return before using tmp/randomizer */
+ret = LmsSeedDerive(tmp, seed, (i &lt; ctx-&gt;p - 1));
 if (ret != CRYPT_SUCCESS) {
+    BSL_SAL_CleanseData(tmp, sizeof(tmp));
     return ret;
 }
 
-...
-
-size_t lmsSigLen = para-&gt;levelPara[i].sigLen;
-const uint8_t *lmsSig = signedPubKey;
-const uint8_t *childPubKey = signedPubKey + lmsSigLen;
-
-...
-
-ret = LmsValidateSignature(currentPubKey, message, messageLen, parsed.bottomSig, parsed.bottomSigLen);</pre>
-                <div class="problem"><strong>Issue:</strong> Verification parses each LMS sub-signature using `para->levelPara[i].sigLen` and `para->levelPara[bottomLevel].sigLen`. But `CRYPT_HSS_SetPubKey()` only records level 0 from the public key, so a verifier that imports a public key alone cannot validate a multi-level signature unless the caller separately replays every lower-level LMS/LMOTS parameter out of band. The signature already contains the type words needed to derive each LMS signature length dynamically.</div>
-                <div class="fix-label">Fix:</div><pre>static int32_t HssGetLmsSigLenFromSig(const uint8_t *sig, size_t remaining, size_t *lmsSigLen)
-{
-    LmOtsParams ots;
-    uint32_t h, n, height;
-
-    if (remaining &lt; LMS_Q_LEN + LMS_TYPE_LEN) {
-        return CRYPT_HSS_SIGNATURE_PARSE_FAIL;
-    }
-
-    uint32_t otsType = (uint32_t)LmsGetBigendian(sig + LMS_Q_LEN, LMS_TYPE_LEN);
-    if (LmOtsLookupParamSet(otsType, &amp;ots) != CRYPT_SUCCESS) {
-        return CRYPT_HSS_SIGNATURE_PARSE_FAIL;
-    }
-
-    size_t otsSigLen = LMS_TYPE_LEN + ots.n + ots.p * ots.n;
-    if (remaining &lt; LMS_Q_LEN + otsSigLen + LMS_TYPE_LEN) {
-        return CRYPT_HSS_SIGNATURE_PARSE_FAIL;
-    }
-
-    uint32_t lmsType = (uint32_t)LmsGetBigendian(sig + LMS_Q_LEN + otsSigLen, LMS_TYPE_LEN);
-    if (LmsLookupParamSet(lmsType, &amp;h, &amp;n, &amp;height) != CRYPT_SUCCESS) {
-        return CRYPT_HSS_SIGNATURE_PARSE_FAIL;
-    }
-
-    *lmsSigLen = LMS_Q_LEN + otsSigLen + LMS_TYPE_LEN + height * n;
-    return (*lmsSigLen &lt;= remaining) ? CRYPT_SUCCESS : CRYPT_HSS_SIGNATURE_PARSE_FAIL;
-}
-
-/* In HssTree_Verify(): walk the signature with HssGetLmsSigLenFromSig()
- * instead of para-&gt;levelPara[i].sigLen / para-&gt;levelPara[bottomLevel].sigLen. */</pre>
+ret = LmsSeedDerive(randomizer, seed, false);
+if (ret != CRYPT_SUCCESS) {
+    BSL_SAL_CleanseData(randomizer, sizeof(randomizer));
+    return ret;
+}</pre>
                 <div class="issue-source">Reviewer: codex</div>
             </div>
 </div>
 <div class="section"><div class="section-title medium">Medium</div>
 <div class="issue">
-                <div class="issue-title">HSS context comparison ignores the master seed</div>
-                <div class="issue-location">crypto/hbs/hss/src/hss_api.c:172-176</div>
-                <pre>// Compare private keys if both present (compare signature counter only, not seed)
-if (ctx1-&gt;privateKey != NULL &amp;&amp; ctx2-&gt;privateKey != NULL) {
-    // Only compare the counter and parameters, not the secret seed
-    if (memcmp(ctx1-&gt;privateKey, ctx2-&gt;privateKey, HSS_PRVKEY_SEED_OFFSET) != 0) {
-        return CRYPT_HSS_CMP_FALSE;
-    }
-}</pre>
-                <div class="problem"><strong>Issue:</strong> `CRYPT_HSS_Cmp()` compares only the counter and compressed-parameter prefix of the private key and explicitly skips the 32-byte master seed. Two distinct HSS private keys with the same counter therefore compare equal, which makes `CRYPT_EAL_PkeyCmp()` report false positives.</div>
-                <div class="fix-label">Fix:</div><pre>/* Compare the full serialized private key. */
-if (ctx1-&gt;privateKey != NULL &amp;&amp; ctx2-&gt;privateKey != NULL) {
-    if (memcmp(ctx1-&gt;privateKey, ctx2-&gt;privateKey, HSS_PRVKEY_LEN) != 0) {
-        return CRYPT_HSS_CMP_FALSE;
-    }
-}</pre>
+                <div class="issue-title">LMS getter command IDs overlap the shared EAL control namespace</div>
+                <div class="issue-location">crypto/hbs/include/crypt_lms.h:46-52</div>
+                <pre>/* LMS control commands */
+#define CRYPT_CTRL_LMS_SET_TYPE        1  /**&lt; Set LMS tree type */
+#define CRYPT_CTRL_LMS_SET_OTS_TYPE    2  /**&lt; Set LM-OTS type */
+#define CRYPT_CTRL_LMS_GET_PUBKEY_LEN  3  /**&lt; Get public key length */
+#define CRYPT_CTRL_LMS_GET_PRVKEY_LEN  4  /**&lt; Get private key length */
+#define CRYPT_CTRL_LMS_GET_SIG_LEN     5  /**&lt; Get signature length */
+#define CRYPT_CTRL_LMS_GET_REMAINING   6  /**&lt; Get remaining signatures */</pre>
+                <div class="problem"><strong>Issue:</strong> The LMS getter macros also reuse low control numbers that already mean something else to the generic EAL layer. For example, `CRYPT_CTRL_LMS_GET_PRVKEY_LEN` is `4`, which collides with `CRYPT_CTRL_GET_BITS`; as a result `CRYPT_EAL_PkeyGetKeyLen()` interprets the 64-byte private-key length as a bit count and reports `8` bytes. Generic public/private-key-length queries are likewise unreachable through the standard control IDs.</div>
+                <div class="fix-label">Fix:</div><pre>#include "crypt_types.h"
+
+/* LMS control commands */
+#define CRYPT_CTRL_LMS_SET_TYPE        1
+#define CRYPT_CTRL_LMS_SET_OTS_TYPE    2
+
+/* Reuse the common EAL getter IDs so generic helpers work. */
+#define CRYPT_CTRL_LMS_GET_PUBKEY_LEN  CRYPT_CTRL_GET_PUBKEY_LEN
+#define CRYPT_CTRL_LMS_GET_PRVKEY_LEN  CRYPT_CTRL_GET_PRVKEY_LEN
+#define CRYPT_CTRL_LMS_GET_SIG_LEN     CRYPT_CTRL_GET_SIGNLEN
+
+/* Keep the LMS-only query out of the shared control range. */
+#define CRYPT_CTRL_LMS_GET_REMAINING   0x1001</pre>
                 <div class="issue-source">Reviewer: codex</div>
             </div>
 <div class="issue">
-                <div class="issue-title">Public HSS level limit exceeds what the private-key format can encode</div>
-                <div class="issue-location">crypto/hbs/hss/src/hss_params.h:31-65</div>
-                <pre>#define HSS_MAX_LEVELS 8  // Maximum hierarchy levels (RFC 8554)
-#define HSS_MIN_LEVELS 1  // Minimum hierarchy levels (1 = equivalent to LMS)
+                <div class="issue-title">Failed HSS private-key imports leave the context mutated</div>
+                <div class="issue-location">crypto/hbs/hss/src/hss_api.c:440-460</div>
+                <pre>// Allocate private key buffer on first import
+if (ctx-&gt;privateKey == NULL) {
+    ctx-&gt;privateKey = (uint8_t *)BSL_SAL_Calloc(1, HSS_PRVKEY_LEN);
+    if (ctx-&gt;privateKey == NULL) {
+        return CRYPT_MEM_ALLOC_FAIL;
+    }
+}
 
-...
+// Copy private key
+(void)memcpy_s(ctx-&gt;privateKey, HSS_PRVKEY_LEN, prvKeyParam-&gt;value, HSS_PRVKEY_LEN);
 
-#define HSS_COMPRESSED_PARAMS_LEN    8     // Compressed parameter set length (8 bytes)
-#define HSS_MAX_COMPRESSED_LEVELS    3     // Maximum levels that fit in compressed format</pre>
-                <div class="problem"><strong>Issue:</strong> The new API advertises `HSS_MAX_LEVELS` as 8, but the serialized private key stores the whole hierarchy in an 8-byte compressed parameter block and `HSS_MAX_COMPRESSED_LEVELS` is only 3. Levels 4-8 are accepted by control setup and then fail later during key generation/import, which is a broken contract.</div>
-                <div class="fix-label">Fix:</div><pre>/* Until the private-key encoding is widened, keep the public limit aligned
- * with what the serialized key can actually carry. */
-#define HSS_MAX_LEVELS 3
-#define HSS_MIN_LEVELS 1
+// Extract and cache signature counter
+ctx-&gt;signatureIndex = LmsGetBigendian(ctx-&gt;privateKey + HSS_PRVKEY_COUNTER_OFFSET, HSS_PRVKEY_COUNTER_LEN);
 
-#define HSS_COMPRESSED_PARAMS_LEN    8
-#define HSS_MAX_COMPRESSED_LEVELS    HSS_MAX_LEVELS</pre>
-                <div class="issue-source">Reviewer: codex</div>
-            </div>
-<div class="issue">
-                <div class="issue-title">Newly published LMS/HSS parameter IDs cannot be instantiated</div>
-                <div class="issue-location">include/crypto/crypt_algid.h:364-378</div>
-                <pre>CRYPT_LMS_SHA256_H15_W4 = BSL_CID_LMS_SHA256_H15_W4,
-CRYPT_LMS_SHA256_H20_W4 = BSL_CID_LMS_SHA256_H20_W4,
-CRYPT_LMS_SHA256_H25_W4 = BSL_CID_LMS_SHA256_H25_W4,
-...
-CRYPT_LMS_SHA256_H15_W8 = BSL_CID_LMS_SHA256_H15_W8,
-CRYPT_LMS_SHA256_H20_W8 = BSL_CID_LMS_SHA256_H20_W8,
-CRYPT_HSS_SHA256_L2_H10_H10 = BSL_CID_HSS_SHA256_L2_H10_H10,
-CRYPT_HSS_SHA256_L2_H15_H15 = BSL_CID_HSS_SHA256_L2_H15_H15,
-CRYPT_HSS_SHA256_L2_H20_H20 = BSL_CID_HSS_SHA256_L2_H20_H20,
-CRYPT_HSS_SHA256_L3_H10_H10_H10 = BSL_CID_HSS_SHA256_L3_H10_H10_H10,</pre>
-                <div class="problem"><strong>Issue:</strong> This PR exports `H20`, `H25`, and `HSS ... H20 ...` parameter IDs as supported public enums, but `LmsParaInit()` in the same change rejects every LMS tree height above 15. Callers can now select official-looking algorithm IDs that the implementation will always reject at runtime.</div>
-                <div class="fix-label">Fix:</div><pre>/* Only publish parameter sets that the current implementation accepts. */
-CRYPT_LMS_SHA256_H5_W4 = BSL_CID_LMS_SHA256_H5_W4,
-CRYPT_LMS_SHA256_H10_W4 = BSL_CID_LMS_SHA256_H10_W4,
-CRYPT_LMS_SHA256_H15_W4 = BSL_CID_LMS_SHA256_H15_W4,
-CRYPT_LMS_SHA256_H10_W2 = BSL_CID_LMS_SHA256_H10_W2,
-CRYPT_LMS_SHA256_H15_W2 = BSL_CID_LMS_SHA256_H15_W2,
-CRYPT_LMS_SHA256_H10_W8 = BSL_CID_LMS_SHA256_H10_W8,
-CRYPT_LMS_SHA256_H15_W8 = BSL_CID_LMS_SHA256_H15_W8,
-CRYPT_HSS_SHA256_L2_H10_H10 = BSL_CID_HSS_SHA256_L2_H10_H10,
-CRYPT_HSS_SHA256_L2_H15_H15 = BSL_CID_HSS_SHA256_L2_H15_H15,
-CRYPT_HSS_SHA256_L3_H10_H10_H10 = BSL_CID_HSS_SHA256_L3_H10_H10_H10,</pre>
+// Decompress and validate parameters
+uint8_t compressed[8];
+(void)memcpy_s(compressed, sizeof(compressed), ctx-&gt;privateKey + HSS_PRVKEY_PARAMS_OFFSET, HSS_PRVKEY_PARAMS_LEN);
+
+int32_t ret = HssDecompressParamSet(ctx-&gt;para, compressed);
+if (ret != CRYPT_SUCCESS) {
+    return ret;
+}</pre>
+                <div class="problem"><strong>Issue:</strong> `CRYPT_HSS_SetPrvKey()` copies the incoming private key into `ctx->privateKey` and updates `ctx->signatureIndex` before validating the compressed parameter block with `HssDecompressParamSet()`. If validation fails, the function returns an error but the context now holds attacker-supplied key bytes and a new counter value. Reusing the same context after a failed import can therefore mix old parameter state with invalid new key material.</div>
+                <div class="fix-label">Fix:</div><pre>uint8_t tmpPrv[HSS_PRVKEY_LEN];
+HSS_Para tmpPara;
+
+(void)memcpy_s(tmpPrv, sizeof(tmpPrv), prvKeyParam-&gt;value, HSS_PRVKEY_LEN);
+(void)memcpy_s(&amp;tmpPara, sizeof(tmpPara), ctx-&gt;para, sizeof(tmpPara));
+
+uint8_t compressed[HSS_COMPRESSED_PARAMS_LEN];
+(void)memcpy_s(compressed, sizeof(compressed),
+    tmpPrv + HSS_PRVKEY_PARAMS_OFFSET, HSS_PRVKEY_PARAMS_LEN);
+
+int32_t ret = HssDecompressParamSet(&amp;tmpPara, compressed);
+if (ret != CRYPT_SUCCESS) {
+    BSL_SAL_CleanseData(tmpPrv, sizeof(tmpPrv));
+    return ret;
+}
+
+if (ctx-&gt;privateKey == NULL) {
+    ctx-&gt;privateKey = (uint8_t *)BSL_SAL_Calloc(1, HSS_PRVKEY_LEN);
+    if (ctx-&gt;privateKey == NULL) {
+        BSL_SAL_CleanseData(tmpPrv, sizeof(tmpPrv));
+        return CRYPT_MEM_ALLOC_FAIL;
+    }
+}
+
+(void)memcpy_s(ctx-&gt;privateKey, HSS_PRVKEY_LEN, tmpPrv, HSS_PRVKEY_LEN);
+(void)memcpy_s(ctx-&gt;para, sizeof(*ctx-&gt;para), &amp;tmpPara, sizeof(tmpPara));
+ctx-&gt;signatureIndex = LmsGetBigendian(ctx-&gt;privateKey + HSS_PRVKEY_COUNTER_OFFSET, HSS_PRVKEY_COUNTER_LEN);
+BSL_SAL_CleanseData(tmpPrv, sizeof(tmpPrv));
+return CRYPT_SUCCESS;</pre>
                 <div class="issue-source">Reviewer: codex</div>
             </div>
 </div>

@@ -6,14 +6,13 @@ You are reviewing PR #992 for openHiTLS/openhitls.
 ## Local Repository Context
 
 - Repository root: `openhitls-992/openhitls`
-- Base ref: `c683dcba3ff7f18f20d4434b5ef6d22dd4a5d8a2`
+- Base ref: `58ecc387ad39b4a31db0ab9f6e2b271ef45bce92`
 - Head ref: `mr-992`
 - The change under review is already checked out locally in this repository.
 
-## Changed Files (78 files)
+## Changed Files (89 files)
 
-**Source** (65 files):
-  - config/macro_config/hitls_config_layer_crypto.h
+**Source** (64 files):
   - crypto/eal/src/eal_pkey_method.c
   - crypto/hbs/common/hbs_address.h
   - crypto/hbs/common/hbs_common.h
@@ -33,9 +32,11 @@ You are reviewing PR #992 for openHiTLS/openhitls.
   - crypto/hbs/include/crypt_slh_dsa.h
   - crypto/hbs/include/crypt_xmss.h
   - crypto/hbs/lms/src/lms_address.c
-  - ... and 45 more
+  - crypto/hbs/lms/src/lms_address.h
+  - ... and 44 more
 
-**Test** (12 files):
+**Test** (13 files):
+  - crypto/include/crypt_cmvp_selftest.h
   - crypto/provider/src/cmvp/cmvp_utils/cmvp_selftest_hss.c
   - crypto/provider/src/cmvp/cmvp_utils/cmvp_selftest_lms.c
   - testcode/script/build_hitls.sh
@@ -49,17 +50,27 @@ You are reviewing PR #992 for openHiTLS/openhitls.
   - testcode/sdv/testcase/crypto/lms/test_suite_sdv_lms.c
   - testcode/sdv/testcase/crypto/lms/test_suite_sdv_lms.data
 
-**Config** (1 files):
-  - config/json/feature.json
+**Docs** (9 files):
+  - crypto/CMakeLists.txt
+  - crypto/codecskey/CMakeLists.txt
+  - crypto/eal/CMakeLists.txt
+  - crypto/hbs/common/CMakeLists.txt
+  - crypto/hbs/hss/CMakeLists.txt
+  - crypto/hbs/lms/CMakeLists.txt
+  - crypto/hbs/slh_dsa/CMakeLists.txt
+  - crypto/hbs/xmss/CMakeLists.txt
+  - crypto/provider/CMakeLists.txt
+
+**Other** (3 files):
+  - cmake/config.h.in
+  - cmake/hitls_define_dependencies.cmake
+  - cmake/hitls_options.cmake
 
 
 ## Hard Constraints
 
 - Review ONLY the local repository checkout in the current working directory.
 - Use local git/file inspection only.
-- Do NOT search the web.
-- Do NOT open GitHub, GitLab, Gitee, or GitCode pages for this review.
-- Do NOT rely on remote PR pages or web search results for code analysis.
 - If a git command fails, retry with another local command or inspect the changed files directly.
 - If local tooling is limited, continue from the checked-out files and changed-file list instead of switching to network search.
 
@@ -68,11 +79,11 @@ You are reviewing PR #992 for openHiTLS/openhitls.
 Perform a thorough change review by:
 
 1. **Understand the Change**
-   - Read the diff stats: `git diff --stat c683dcba3ff7f18f20d4434b5ef6d22dd4a5d8a2 mr-992`
+   - Read the diff stats: `git diff --stat 58ecc387ad39b4a31db0ab9f6e2b271ef45bce92 mr-992`
    - Understand what this PR is trying to achieve
 
 2. **Review Each File**
-   - For each changed file, view its diff: `git diff c683dcba3ff7f18f20d4434b5ef6d22dd4a5d8a2 mr-992 -- <file>`
+   - For each changed file, view its diff: `git diff 58ecc387ad39b4a31db0ab9f6e2b271ef45bce92 mr-992 -- <file>`
    - If you need more context, read the full file or search for related code
    - Look for: security issues, logic errors, edge cases, error handling
    - Treat assembly files (`.S`, `.s`, `.asm`) as source code and review ABI/calling convention,
