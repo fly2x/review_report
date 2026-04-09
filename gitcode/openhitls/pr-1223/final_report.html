@@ -1,0 +1,352 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Final Report: openHiTLS/openhitls#1223</title>
+    <style>
+        :root { --critical: #dc2626; --high: #ea580c; --medium: #ca8a04; --low: #65a30d;
+                 --trusted: #059669; --likely: #0284c7; --evaluate: #7c3aed; }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: system-ui, sans-serif; background: #f8fafc; color: #1e293b; padding: 2rem; line-height: 1.6; }
+        .container { max-width: 900px; margin: 0 auto; }
+        h1 { font-size: 1.75rem; margin-bottom: 0.5rem; }
+        .subtitle { color: #64748b; margin-bottom: 1rem; }
+        .stats { display: flex; gap: 1rem; margin-bottom: 2rem; flex-wrap: wrap; }
+        .stat { background: white; border: 1px solid #e2e8f0; border-radius: 0.5rem; padding: 1rem; min-width: 100px; text-align: center; }
+        .stat-value { font-size: 1.5rem; font-weight: 700; }
+        .stat-label { font-size: 0.875rem; color: #64748b; }
+        .stat.critical .stat-value { color: var(--critical); }
+        .stat.high .stat-value { color: var(--high); }
+        .stat.medium .stat-value { color: var(--medium); }
+        .stat.low .stat-value { color: var(--low); }
+        .reviewers { background: #e0e7ff; color: #3730a3; padding: 0.5rem 1rem; border-radius: 0.5rem; margin-bottom: 2rem; }
+        .section { margin-bottom: 2rem; }
+        .section-title { font-size: 1.1rem; font-weight: 600; padding: 0.5rem 1rem; border-radius: 0.5rem 0.5rem 0 0; color: white; }
+        .section-title.critical { background: var(--critical); }
+        .section-title.high { background: var(--high); }
+        .section-title.medium { background: var(--medium); }
+        .section-title.low { background: var(--low); }
+        .issue { background: white; border: 1px solid #e2e8f0; border-top: none; padding: 1rem; }
+        .issue:last-child { border-radius: 0 0 0.5rem 0.5rem; }
+        .issue-title { font-weight: 600; margin-bottom: 0.25rem; }
+        .issue-location { font-family: monospace; font-size: 0.875rem; color: #64748b; margin-bottom: 0.5rem; }
+        .issue-meta { font-size: 0.75rem; margin-bottom: 0.75rem; display: flex; gap: 0.75rem; align-items: center; }
+        .issue-meta .reviewers { background: #f1f5f9; color: #475569; padding: 0.25rem 0.5rem; border-radius: 0.25rem; margin: 0; }
+        .confidence-badge { padding: 0.25rem 0.5rem; border-radius: 0.25rem; font-weight: 500; }
+        .confidence-badge.trusted { background: #d1fae5; color: #065f46; }
+        .confidence-badge.likely { background: #dbeafe; color: #1e40af; }
+        .confidence-badge.evaluate { background: #ede9fe; color: #5b21b6; }
+        pre { background: #1e293b; color: #e2e8f0; padding: 0.75rem; border-radius: 0.375rem; overflow-x: auto; font-size: 0.875rem; margin: 0.5rem 0; }
+        .problem { margin: 0.75rem 0; }
+        .fix-label { font-weight: 600; margin-top: 0.75rem; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Final Code Review Report</h1>
+        <div class="subtitle">openHiTLS/openhitls - PR #1223</div>
+        <p style="margin-bottom: 1rem;"></p>
+
+        <div class="stats">
+            <div class="stat"><div class="stat-value">10</div><div class="stat-label">Total</div></div>
+            <div class="stat critical"><div class="stat-value">0</div><div class="stat-label">Critical</div></div>
+            <div class="stat high"><div class="stat-value">3</div><div class="stat-label">High</div></div>
+            <div class="stat medium"><div class="stat-value">5</div><div class="stat-label">Medium</div></div>
+            <div class="stat low"><div class="stat-value">2</div><div class="stat-label">Low</div></div>
+        </div>
+
+        <div class="reviewers">Reviewers: claude, gemini, codex</div>
+<div class="section"><div class="section-title high">High</div>
+<div class="issue">
+                <div class="issue-title">Thread-safety issue in TS_GetDefaultSerial static counter</div>
+                <div class="issue-location">pki/cms/src/hitls_ts_resp.c:364-389</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CLAUDE</span>
+                    <span class="confidence-badge trusted">置信度: 可信</span>
+                </div>
+                <pre>static int32_t TS_GetDefaultSerial(BSL_Buffer *serial)
+{
+    ...
+    static uint32_t g_tsSerialCounter = 0;
+    uint32_t seq = 0;
+    ...
+#if defined(__GNUC__)
+    seq = __atomic_add_fetch(&amp;g_tsSerialCounter, 1, __ATOMIC_RELAXED);
+#else
+    seq = ++g_tsSerialCounter;  // NOT THREAD-SAFE!
+#endif
+    ...
+}</pre>
+                <div class="problem"><strong>Issue:</strong> The static variable g_tsSerialCounter uses GCC atomic operations (__atomic_add_fetch) for thread safety, but on non-GCC platforms it falls back to a simple pre-increment (++g_tsSerialCounter) which is not thread-safe. In multi-threaded environments on non-GCC platforms (e.g., MSVC), this can lead to duplicate serial numbers being generated, which could cause timestamp tokens to have non-unique serial numbers - a critical violation of RFC3161 requirements.</div>
+                <div class="fix-label">Fix:</div><pre>#include &lt;stdatomic.h&gt;
+static atomic_uint g_tsSerialCounter = ATOMIC_VAR_INIT(0);
+...
+seq = atomic_fetch_add_explicit(&amp;g_tsSerialCounter, 1, memory_order_relaxed);</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">Inserting a public CID in the middle renumbers the existing ABI</div>
+                <div class="issue-location">include/bsl/bsl_obj.h:332-351</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CODEX</span>
+                    <span class="confidence-badge trusted">置信度: 可信</span>
+                </div>
+                <pre>BSL_CID_PKCS9_AT_SEQUENCENUMBER = 275,
+BSL_CID_PKCS9_AT_ALGORITHM_PROTECTION = 276,  // NEW ENTRY INSERTED HERE
+
+BSL_CID_MD4 = 277,       // Was 276, now shifted!
+BSL_CID_HMAC_MD4 = 278,  // Was 277, now shifted!
+...
+BSL_CID_AT_DESCRIPTION = 351,  // Was 350, now shifted!</pre>
+                <div class="problem"><strong>Issue:</strong> BslCid is a public SDK enum with many explicitly assigned numeric values. Adding BSL_CID_PKCS9_AT_ALGORITHM_PROTECTION at 276 shifts every later public CID by +1 (BSL_CID_MD4, BSL_CID_RSASSAPSS, BSL_CID_AT_DESCRIPTION, etc.). Any external module, serialized data, or persisted config that relies on the old numeric IDs will silently break.</div>
+                <div class="fix-label">Fix:</div><pre>/* Keep existing public values stable; append the new CID instead of inserting it. */
+BSL_CID_PKCS9_AT_SEQUENCENUMBER = 275,
+
+BSL_CID_MD4 = 276,       // Keep existing values unchanged
+BSL_CID_HMAC_MD4 = 277,
+...
+BSL_CID_AT_DESCRIPTION = 350,
+
+// Append new CIDs at the end before BSL_CID_DECODE_UNKNOWN
+BSL_CID_SM4_CCM,
+BSL_CID_X509CRL,
+BSL_CID_SMIMECAP,
+BSL_CID_PKCS9_AT_ALGORITHM_PROTECTION,  // new CID appended here
+BSL_CID_ID_CT_TSTINFO,
+BSL_CID_ID_AA_TIMESTAMPTOKEN,
+BSL_CID_ID_SMIME_AA_SIGNINGCERTIFICATE,
+BSL_CID_ID_SMIME_AA_SIGNINGCERTIFICATEV2,</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">Timestamp tokens are signed without the mandatory ESS certificate attribute</div>
+                <div class="issue-location">pki/cms/src/hitls_cms_signdata.c:1351-1401</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CODEX</span>
+                    <span class="confidence-badge trusted">置信度: 可信</span>
+                </div>
+                <pre>static int32_t EnsureRequiredAttrsExist(CMS_SignerInfo *signerInfo, uint8_t *digest, uint32_t digestLen,
+    BslCid contentType, bool hasAlgProtection)
+{
+    ...
+    ret = CreateSigningTimeAttr(&amp;stAttr);
+    ret = AddRequiredAttr(signerInfo-&gt;signedAttrs, stAttr);
+
+    if (hasAlgProtection) {
+        HITLS_X509_AttrEntry *algProtectAttr = NULL;
+        ret = CreateAlgorithmProtectionAttr(signerInfo, &amp;algProtectAttr);
+        ret = AddRequiredAttr(signerInfo-&gt;signedAttrs, algProtectAttr);
+    }
+    // Missing: ESS SigningCertificate/SigningCertificateV2 attribute
+    return HITLS_PKI_SUCCESS;
+}</pre>
+                <div class="problem"><strong>Issue:</strong> The new timestamp-response flow signs id-ct-TSTInfo through SignedDataCore, but EnsureRequiredAttrsExist only adds contentType, messageDigest, signingTime, and optional CMSAlgorithmProtection. It never adds SigningCertificate/SigningCertificateV2. Local callers already require that attribute during verification (HITLS_TS_VerifyToken always calls HITLS_TS_VerifySigningCertificateAttr), so tokens generated by HITLS_TS_CreateResponse are not verifiable by this same library.</div>
+                <div class="fix-label">Fix:</div><pre>static int32_t EnsureRequiredAttrsExist(CMS_SignerInfo *signerInfo, uint8_t *digest, uint32_t digestLen,
+    BslCid contentType, bool hasAlgProtection, const BSL_Param *optionalParam)
+{
+    ...
+    if (contentType == BSL_CID_ID_CT_TSTINFO) {
+        const BSL_Param *certParam = BSL_PARAM_FindConstParam(optionalParam, HITLS_CMS_PARAM_DEVICE_CERT);
+        const BSL_Param *hashParam = BSL_PARAM_FindConstParam(optionalParam, HITLS_TS_PARAM_ESS_CERT_HASH_ALG);
+        int32_t essHashAlg = BSL_CID_SHA256;
+        HITLS_X509_AttrEntry *essAttr = NULL;
+
+        if (certParam == NULL || certParam-&gt;valueType != BSL_PARAM_TYPE_CTX_PTR || certParam-&gt;value == NULL) {
+            return HITLS_CMS_ERR_INVALID_PARAM;
+        }
+        if (hashParam != NULL) {
+            if (hashParam-&gt;valueType != BSL_PARAM_TYPE_INT32 || hashParam-&gt;value == NULL ||
+                hashParam-&gt;valueLen != sizeof(int32_t)) {
+                return HITLS_CMS_ERR_INVALID_PARAM;
+            }
+            essHashAlg = *(int32_t *)hashParam-&gt;value;
+        }
+
+        ret = HITLS_TS_BuildSigningCertificateV2Attr((HITLS_X509_Cert *)certParam-&gt;value, essHashAlg, &amp;essAttr);
+        if (ret != HITLS_PKI_SUCCESS) {
+            return ret;
+        }
+        ret = AddRequiredAttr(signerInfo-&gt;signedAttrs, essAttr);
+        if (ret != HITLS_PKI_SUCCESS) {
+            return ret;
+        }
+    }
+    ...
+}</pre>
+            </div>
+</div>
+<div class="section"><div class="section-title medium">Medium</div>
+<div class="issue">
+                <div class="issue-title">Non-constant-time nonce comparison may leak timing information</div>
+                <div class="issue-location">pki/cms/src/hitls_ts_token.c:571-572</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CLAUDE</span>
+                    <span class="confidence-badge trusted">置信度: 可信</span>
+                </div>
+                <pre>if (req-&gt;nonce.dataLen != resp-&gt;tstInfo.nonce.dataLen ||
+    memcmp(req-&gt;nonce.data, resp-&gt;tstInfo.nonce.data, req-&gt;nonce.dataLen) != 0) {
+    return HITLS_TS_ERR_NONCE_MISMATCH;
+}</pre>
+                <div class="problem"><strong>Issue:</strong> The nonce comparison uses memcmp which may leak timing information. While nonces are random values intended to prevent replay attacks, timing variations in the comparison could potentially reveal partial information about nonce correctness to an attacker. For a cryptographic library, best practice is to use constant-time comparison for all security-critical values.</div>
+                <div class="fix-label">Fix:</div><pre>static int TS_ConstantTimeEq(const uint8_t *a, const uint8_t *b, uint32_t len)
+{
+    uint8_t result = 0;
+    for (uint32_t i = 0; i &lt; len; i++) {
+        result |= a[i] ^ b[i];
+    }
+    return result == 0;
+}</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">Non-constant-time certificate hash comparison</div>
+                <div class="issue-location">pki/cms/src/hitls_ts_ess.c:483-484</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CLAUDE</span>
+                    <span class="confidence-badge trusted">置信度: 可信</span>
+                </div>
+                <pre>ret = (actualHash.dataLen == expectedHash.dataLen &amp;&amp;
+    memcmp(actualHash.data, expectedHash.data, actualHash.dataLen) == 0) ?
+    HITLS_PKI_SUCCESS : HITLS_TS_ERR_ESS_CERT_MISMATCH;</pre>
+                <div class="problem"><strong>Issue:</strong> The ESS certificate hash comparison uses memcmp. While certificate hashes are not secret, they are cryptographically derived values that should ideally be compared in constant-time for consistency and to prevent any potential timing side channels.</div>
+                <div class="fix-label">Fix:</div><pre>static int TS_ConstantTimeEq(const uint8_t *a, const uint8_t *b, uint32_t len)
+{
+    uint8_t result = 0;
+    for (uint32_t i = 0; i &lt; len; i++) {
+        result |= a[i] ^ b[i];
+    }
+    return result == 0;
+}</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">Incorrect length check in CheckGeneralizedTimeSuffix rejects valid timestamps</div>
+                <div class="issue-location">bsl/asn1/src/bsl_asn1.c:228</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CLAUDE</span>
+                    <span class="confidence-badge trusted">置信度: 可信</span>
+                </div>
+                <pre>if (len == 14 || (len == 15 &amp;&amp; data[14] == 'Z')) {
+    return BSL_SUCCESS;
+}
+if (len &lt;= 16 || (data[idx] != '.' &amp;&amp; data[idx] != ',')) {
+    return BSL_ASN1_ERR_DECODE_GENERAL_TIME;
+}</pre>
+                <div class="problem"><strong>Issue:</strong> The condition `if (len <= 16 || ...)` incorrectly rejects valid GeneralizedTime values with exactly one fractional digit (len=16: "YYYYMMDDHHMMSS.f"). The condition should be `len < 16` to allow fractional seconds with at least one digit.</div>
+                <div class="fix-label">Fix:</div><pre>if (len == 14 || (len == 15 &amp;&amp; data[14] == 'Z')) {
+    return BSL_SUCCESS;
+}
+if (len &lt; 16 || (data[idx] != '.' &amp;&amp; data[idx] != ',')) {
+    return BSL_ASN1_ERR_DECODE_GENERAL_TIME;
+}</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">Attached token verification drops the original provider context</div>
+                <div class="issue-location">pki/cms/src/hitls_ts_token.c:753-759</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CODEX</span>
+                    <span class="confidence-badge trusted">置信度: 可信</span>
+                </div>
+                <pre>resp = HITLS_TS_RespNew(cms-&gt;ctx.signedData-&gt;libCtx, cms-&gt;ctx.signedData-&gt;attrName);
+if (resp == NULL) {
+    return BSL_MALLOC_FAIL;
+}
+resp-&gt;statusInfo.status = 0;
+ret = HITLS_CMS_ProviderParseBuff(NULL, NULL, NULL, &amp;encode, &amp;resp-&gt;tokenCms);</pre>
+                <div class="problem"><strong>Issue:</strong> HITLS_CMS_VerifySignatureTimeStampToken creates the response object with the parent CMS libCtx/attrName, then ignores both and reparses the embedded token with NULL, NULL. That silently switches verification to the default provider context, which can break custom providers or custom algorithm profiles.</div>
+                <div class="fix-label">Fix:</div><pre>resp = HITLS_TS_RespNew(cms-&gt;ctx.signedData-&gt;libCtx, cms-&gt;ctx.signedData-&gt;attrName);
+if (resp == NULL) {
+    return BSL_MALLOC_FAIL;
+}
+resp-&gt;statusInfo.status = 0;
+ret = HITLS_CMS_ProviderParseBuff(cms-&gt;ctx.signedData-&gt;libCtx, cms-&gt;ctx.signedData-&gt;attrName,
+    NULL, &amp;encode, &amp;resp-&gt;tokenCms);</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">ESS certificate lookup ignores trusted CA certificate inputs</div>
+                <div class="issue-location">pki/cms/src/hitls_ts_ess.c:466-474</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CODEX</span>
+                    <span class="confidence-badge trusted">置信度: 可信</span>
+                </div>
+                <pre>signerCert = TS_FindSignerCertInList(signedData-&gt;certs, signerInfo);
+if (signerCert == NULL) {
+    HITLS_X509_List *certs = TS_GetVerifyCertList(verifyParam, HITLS_CMS_PARAM_UNTRUSTED_CERT_LISTS,
+        HITLS_CMS_PARAM_TS_UNTRUSTED_CERT_LISTS);
+    signerCert = TS_FindSignerCertInList(certs, signerInfo);
+}
+if (signerCert == NULL) {
+    return HITLS_TS_ERR_ESS_CERT_MISMATCH;  // Fails without checking CA_CERT_LISTS
+}</pre>
+                <div class="problem"><strong>Issue:</strong> After signature verification succeeds, ESS certificate binding is checked only against embedded certs and UNTRUSTED_CERT_LISTS. If the TSA signing cert is supplied only through CA_CERT_LISTS/TS_CA_CERT_LISTS (for example, a trusted self-signed TSA), this code returns HITLS_TS_ERR_ESS_CERT_MISMATCH even though chain verification already had the cert it needed.</div>
+                <div class="fix-label">Fix:</div><pre>signerCert = TS_FindSignerCertInList(signedData-&gt;certs, signerInfo);
+if (signerCert == NULL) {
+    HITLS_X509_List *certs = TS_GetVerifyCertList(verifyParam, HITLS_CMS_PARAM_UNTRUSTED_CERT_LISTS,
+        HITLS_CMS_PARAM_TS_UNTRUSTED_CERT_LISTS);
+    signerCert = TS_FindSignerCertInList(certs, signerInfo);
+}
+if (signerCert == NULL) {
+    HITLS_X509_List *certs = TS_GetVerifyCertList(verifyParam, HITLS_CMS_PARAM_CA_CERT_LISTS,
+        HITLS_CMS_PARAM_TS_CA_CERT_LISTS);
+    signerCert = TS_FindSignerCertInList(certs, signerInfo);
+}
+if (signerCert == NULL) {
+    return HITLS_TS_ERR_ESS_CERT_MISMATCH;
+}</pre>
+            </div>
+</div>
+<div class="section"><div class="section-title low">Low</div>
+<div class="issue">
+                <div class="issue-title">Timestamp imprint algorithm parameter is read without length/null validation</div>
+                <div class="issue-location">pki/cms/src/hitls_ts_token.c:130-135</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CODEX</span>
+                    <span class="confidence-badge trusted">置信度: 可信</span>
+                </div>
+                <pre>if (mdParam != NULL) {
+    if (mdParam-&gt;valueType != BSL_PARAM_TYPE_INT32) {
+        return HITLS_CMS_ERR_INVALID_PARAM;
+    }
+    *mdAlg = *(int32_t *)mdParam-&gt;value;  // No NULL or valueLen check
+}</pre>
+                <div class="problem"><strong>Issue:</strong> The new public timestamp-request path trusts BSL_Param too much. It only checks valueType, then dereferences mdParam->value as an int32_t without validating value != NULL or valueLen == sizeof(int32_t). A malformed caller-provided parameter can trigger an invalid read through HITLS_CMS_GenSignatureTimeStampReq.</div>
+                <div class="fix-label">Fix:</div><pre>if (mdParam != NULL) {
+    if (mdParam-&gt;valueType != BSL_PARAM_TYPE_INT32 || mdParam-&gt;value == NULL ||
+        mdParam-&gt;valueLen != sizeof(int32_t)) {
+        return HITLS_CMS_ERR_INVALID_PARAM;
+    }
+    *mdAlg = *(int32_t *)mdParam-&gt;value;
+}</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">Non-constant-time algorithm parameter comparison</div>
+                <div class="issue-location">pki/cms/src/hitls_cms_signdata.c:323-332</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CLAUDE</span>
+                    <span class="confidence-badge trusted">置信度: 可信</span>
+                </div>
+                <pre>static bool IsAlgParamEqual(const BSL_Buffer *lhs, const BSL_Buffer *rhs)
+{
+    if (lhs-&gt;dataLen != rhs-&gt;dataLen) {
+        return false;
+    }
+    if (lhs-&gt;dataLen == 0) {
+        return true;
+    }
+    return memcmp(lhs-&gt;data, rhs-&gt;data, lhs-&gt;dataLen) == 0;
+}</pre>
+                <div class="problem"><strong>Issue:</strong> The IsAlgParamEqual function uses memcmp to compare algorithm parameters. While algorithm parameters are typically public and not secret, using constant-time comparison would be more consistent with cryptographic best practices.</div>
+                <div class="fix-label">Fix:</div><pre>static bool IsAlgParamEqual(const BSL_Buffer *lhs, const BSL_Buffer *rhs)
+{
+    if (lhs-&gt;dataLen != rhs-&gt;dataLen) {
+        return false;
+    }
+    if (lhs-&gt;dataLen == 0) {
+        return true;
+    }
+    uint8_t result = 0;
+    for (uint32_t i = 0; i &lt; lhs-&gt;dataLen; i++) {
+        result |= lhs-&gt;data[i] ^ rhs-&gt;data[i];
+    }
+    return result == 0;
+}</pre>
+            </div>
+</div>
+</div></body></html>

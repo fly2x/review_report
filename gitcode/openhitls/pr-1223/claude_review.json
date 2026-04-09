@@ -1,0 +1,50 @@
+[
+  {
+    "source": "claude",
+    "file": "pki/cms/src/hitls_ts_resp.c",
+    "line": "364-389",
+    "severity": "high",
+    "title": "Thread-safety issue in TS_GetDefaultSerial static counter",
+    "problem": "The static variable g_tsSerialCounter uses GCC atomic operations (__atomic_add_fetch) for thread safety, but on non-GCC platforms it falls back to a simple pre-increment (++g_tsSerialCounter) which is not thread-safe. In multi-threaded environments on non-GCC platforms, this can lead to duplicate serial numbers being generated, which could cause timestamp tokens to have non-unique serial numbers - a critical violation of RFC3161 requirements.",
+    "code": "static int32_t TS_GetDefaultSerial(BSL_Buffer *serial)\n{\n    ...\n    static uint32_t g_tsSerialCounter = 0;\n    uint32_t seq = 0;\n    ...\n#if defined(__GNUC__)\n    seq = __atomic_add_fetch(&g_tsSerialCounter, 1, __ATOMIC_RELAXED);\n#else\n    seq = ++g_tsSerialCounter;  // NOT THREAD-SAFE!\n#endif\n    ...\n}",
+    "fix": "#include <stdatomic.h>\nstatic atomic_uint g_tsSerialCounter = ATOMIC_VAR_INIT(0);\n...\nseq = atomic_fetch_add_explicit(&g_tsSerialCounter, 1, memory_order_relaxed);"
+  },
+  {
+    "source": "claude",
+    "file": "pki/cms/src/hitls_ts_token.c",
+    "line": "571-572",
+    "severity": "medium",
+    "title": "Non-constant-time nonce comparison may leak timing information",
+    "problem": "The nonce comparison uses memcmp which may leak timing information. While nonces are random values intended to prevent replay attacks, timing variations in the comparison could potentially reveal partial information about nonce correctness to an attacker. For a cryptographic library, best practice is to use constant-time comparison for all security-critical values.",
+    "code": "if (req->nonce.dataLen != resp->tstInfo.nonce.dataLen ||\n    memcmp(req->nonce.data, resp->tstInfo.nonce.data, req->nonce.dataLen) != 0) {\n    return HITLS_TS_ERR_NONCE_MISMATCH;\n}",
+    "fix": "static int TS_ConstantTimeEq(const uint8_t *a, const uint8_t *b, uint32_t len)\n{\n    uint8_t result = 0;\n    for (uint32_t i = 0; i < len; i++) {\n        result |= a[i] ^ b[i];\n    }\n    return result == 0;\n}"
+  },
+  {
+    "source": "claude",
+    "file": "pki/cms/src/hitls_ts_ess.c",
+    "line": "483-484",
+    "severity": "medium",
+    "title": "Non-constant-time certificate hash comparison",
+    "problem": "The ESS certificate hash comparison uses memcmp. While certificate hashes are not secret, they are cryptographically derived values that should ideally be compared in constant-time for consistency and to prevent any potential timing side channels.",
+    "code": "ret = (actualHash.dataLen == expectedHash.dataLen &&\n    memcmp(actualHash.data, expectedHash.data, actualHash.dataLen) == 0) ?\n    HITLS_PKI_SUCCESS : HITLS_TS_ERR_ESS_CERT_MISMATCH;"
+  },
+  {
+    "source": "claude",
+    "file": "bsl/asn1/src/bsl_asn1.c",
+    "line": "228",
+    "severity": "medium",
+    "title": "Incorrect length check in CheckGeneralizedTimeSuffix rejects valid timestamps",
+    "problem": "The condition `if (len <= 16 || ...)` incorrectly rejects valid GeneralizedTime values with exactly one fractional digit (len=16: \"YYYYMMDDHHMMSS.f\"). The condition should be `len < 16` to allow fractional seconds with at least one digit.",
+    "code": "if (len <= 16 || (data[idx] != '.' && data[idx] != ',')) {\n    return BSL_ASN1_ERR_DECODE_GENERAL_TIME;\n}",
+    "fix": "if (len < 16 || (data[idx] != '.' && data[idx] != ',')) {\n    return BSL_ASN1_ERR_DECODE_GENERAL_TIME;\n}"
+  },
+  {
+    "source": "claude",
+    "file": "pki/cms/src/hitls_cms_signdata.c",
+    "line": "323-327",
+    "severity": "low",
+    "title": "Non-constant-time algorithm parameter comparison",
+    "problem": "The IsAlgParamEqual function uses memcmp to compare algorithm parameters. While algorithm parameters are typically public and not secret, using constant-time comparison would be more consistent with cryptographic best practices.",
+    "code": "static bool IsAlgParamEqual(const BSL_Buffer *lhs, const BSL_Buffer *rhs)\n{\n    if (lhs->dataLen != rhs->dataLen) {\n        return false;\n    }\n    if (lhs->dataLen == 0) {\n        return true;\n    }\n    return memcmp(lhs->data, rhs->data, lhs->dataLen) == 0;\n}"
+  }
+]

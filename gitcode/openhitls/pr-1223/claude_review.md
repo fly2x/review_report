@@ -1,0 +1,108 @@
+# Code Review: openHiTLS/openhitls#1223
+**Reviewer**: CLAUDE
+
+
+## High
+
+### Thread-safety issue in TS_GetDefaultSerial static counter
+`pki/cms/src/hitls_ts_resp.c:364-389`
+```
+static int32_t TS_GetDefaultSerial(BSL_Buffer *serial)
+{
+    ...
+    static uint32_t g_tsSerialCounter = 0;
+    uint32_t seq = 0;
+    ...
+#if defined(__GNUC__)
+    seq = __atomic_add_fetch(&g_tsSerialCounter, 1, __ATOMIC_RELAXED);
+#else
+    seq = ++g_tsSerialCounter;  // NOT THREAD-SAFE!
+#endif
+    ...
+}
+```
+**Issue**: The static variable g_tsSerialCounter uses GCC atomic operations (__atomic_add_fetch) for thread safety, but on non-GCC platforms it falls back to a simple pre-increment (++g_tsSerialCounter) which is not thread-safe. In multi-threaded environments on non-GCC platforms, this can lead to duplicate serial numbers being generated, which could cause timestamp tokens to have non-unique serial numbers - a critical violation of RFC3161 requirements.
+**Fix**:
+```
+#include <stdatomic.h>
+static atomic_uint g_tsSerialCounter = ATOMIC_VAR_INIT(0);
+...
+seq = atomic_fetch_add_explicit(&g_tsSerialCounter, 1, memory_order_relaxed);
+```
+
+---
+
+
+## Medium
+
+### Non-constant-time nonce comparison may leak timing information
+`pki/cms/src/hitls_ts_token.c:571-572`
+```
+if (req->nonce.dataLen != resp->tstInfo.nonce.dataLen ||
+    memcmp(req->nonce.data, resp->tstInfo.nonce.data, req->nonce.dataLen) != 0) {
+    return HITLS_TS_ERR_NONCE_MISMATCH;
+}
+```
+**Issue**: The nonce comparison uses memcmp which may leak timing information. While nonces are random values intended to prevent replay attacks, timing variations in the comparison could potentially reveal partial information about nonce correctness to an attacker. For a cryptographic library, best practice is to use constant-time comparison for all security-critical values.
+**Fix**:
+```
+static int TS_ConstantTimeEq(const uint8_t *a, const uint8_t *b, uint32_t len)
+{
+    uint8_t result = 0;
+    for (uint32_t i = 0; i < len; i++) {
+        result |= a[i] ^ b[i];
+    }
+    return result == 0;
+}
+```
+
+---
+
+### Non-constant-time certificate hash comparison
+`pki/cms/src/hitls_ts_ess.c:483-484`
+```
+ret = (actualHash.dataLen == expectedHash.dataLen &&
+    memcmp(actualHash.data, expectedHash.data, actualHash.dataLen) == 0) ?
+    HITLS_PKI_SUCCESS : HITLS_TS_ERR_ESS_CERT_MISMATCH;
+```
+**Issue**: The ESS certificate hash comparison uses memcmp. While certificate hashes are not secret, they are cryptographically derived values that should ideally be compared in constant-time for consistency and to prevent any potential timing side channels.
+
+---
+
+### Incorrect length check in CheckGeneralizedTimeSuffix rejects valid timestamps
+`bsl/asn1/src/bsl_asn1.c:228`
+```
+if (len <= 16 || (data[idx] != '.' && data[idx] != ',')) {
+    return BSL_ASN1_ERR_DECODE_GENERAL_TIME;
+}
+```
+**Issue**: The condition `if (len <= 16 || ...)` incorrectly rejects valid GeneralizedTime values with exactly one fractional digit (len=16: "YYYYMMDDHHMMSS.f"). The condition should be `len < 16` to allow fractional seconds with at least one digit.
+**Fix**:
+```
+if (len < 16 || (data[idx] != '.' && data[idx] != ',')) {
+    return BSL_ASN1_ERR_DECODE_GENERAL_TIME;
+}
+```
+
+---
+
+
+## Low
+
+### Non-constant-time algorithm parameter comparison
+`pki/cms/src/hitls_cms_signdata.c:323-327`
+```
+static bool IsAlgParamEqual(const BSL_Buffer *lhs, const BSL_Buffer *rhs)
+{
+    if (lhs->dataLen != rhs->dataLen) {
+        return false;
+    }
+    if (lhs->dataLen == 0) {
+        return true;
+    }
+    return memcmp(lhs->data, rhs->data, lhs->dataLen) == 0;
+}
+```
+**Issue**: The IsAlgParamEqual function uses memcmp to compare algorithm parameters. While algorithm parameters are typically public and not secret, using constant-time comparison would be more consistent with cryptographic best practices.
+
+---

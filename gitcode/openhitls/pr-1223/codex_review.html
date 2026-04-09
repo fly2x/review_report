@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Code Review: openHiTLS/openhitls#1223 - CODEX</title>
+    <style>
+        :root { --critical: #dc2626; --high: #ea580c; --medium: #ca8a04; --low: #65a30d; }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: system-ui, sans-serif; background: #f8fafc; color: #1e293b; padding: 2rem; line-height: 1.6; }
+        .container { max-width: 900px; margin: 0 auto; }
+        h1 { font-size: 1.5rem; margin-bottom: 0.5rem; }
+        .subtitle { color: #64748b; margin-bottom: 2rem; }
+        .section { margin-bottom: 2rem; }
+        .section-title { font-size: 1.1rem; font-weight: 600; padding: 0.5rem 1rem; border-radius: 0.5rem 0.5rem 0 0; color: white; }
+        .section-title.critical { background: var(--critical); }
+        .section-title.high { background: var(--high); }
+        .section-title.medium { background: var(--medium); }
+        .section-title.low { background: var(--low); }
+        .issue { background: white; border: 1px solid #e2e8f0; border-top: none; padding: 1rem; }
+        .issue:last-child { border-radius: 0 0 0.5rem 0.5rem; }
+        .issue-title { font-weight: 600; margin-bottom: 0.25rem; }
+        .issue-location { font-family: monospace; font-size: 0.875rem; color: #64748b; margin-bottom: 0.75rem; }
+        .issue-source { font-size: 0.75rem; color: #94a3b8; margin-top: 0.5rem; }
+        pre { background: #1e293b; color: #e2e8f0; padding: 0.75rem; border-radius: 0.375rem; overflow-x: auto; font-size: 0.875rem; margin: 0.5rem 0; }
+        .problem { margin: 0.75rem 0; }
+        .fix-label { font-weight: 600; margin-top: 0.75rem; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Code Review: openHiTLS/openhitls#1223 - CODEX</h1>
+        <div class="subtitle"></div>
+<div class="section"><div class="section-title high">High</div>
+<div class="issue">
+                <div class="issue-title">Inserting a public CID in the middle renumbers the existing ABI</div>
+                <div class="issue-location">include/bsl/bsl_obj.h:332-416</div>
+                <pre>BSL_CID_PKCS9_AT_SEQUENCENUMBER = 275,    /* identifies PKCS9 Sequence number */
+BSL_CID_PKCS9_AT_ALGORITHM_PROTECTION = 276, /* identifies PKCS9 Algorithm Protection (RFC 6211) */
+
+BSL_CID_MD4 = 277,       /* identifies MD4 hash algorithm */
+BSL_CID_HMAC_MD4 = 278,  /* identifies hmac with MD4 */
+...
+BSL_CID_HARDWAREMODULENAME = 350,
+BSL_CID_AT_DESCRIPTION = 351,</pre>
+                <div class="problem"><strong>Issue:</strong> `BslCid` is a public SDK enum with many explicitly assigned numeric values. Adding `BSL_CID_PKCS9_AT_ALGORITHM_PROTECTION` at `276` shifts every later public CID by `+1` (`BSL_CID_MD4`, `BSL_CID_RSASSAPSS`, `BSL_CID_AT_DESCRIPTION`, etc.). Any external module, serialized data, or persisted config that relies on the old numeric IDs will silently break.</div>
+                <div class="fix-label">Fix:</div><pre>/* Keep existing public values stable; append the new CID instead of inserting it. */
+BSL_CID_PKCS9_AT_SEQUENCENUMBER = 275,    /* identifies PKCS9 Sequence number */
+
+BSL_CID_MD4 = 276,       /* identifies MD4 hash algorithm */
+BSL_CID_HMAC_MD4 = 277,  /* identifies hmac with MD4 */
+/* keep the pre-existing numbering unchanged through BSL_CID_AT_DESCRIPTION = 350 */
+
+...
+
+BSL_CID_AES128_CCM8,
+BSL_CID_AES256_CCM8,
+BSL_CID_PBKDF1,
+BSL_CID_SM4_CCM,
+BSL_CID_X509CRL,
+BSL_CID_SMIMECAP,
+BSL_CID_PKCS9_AT_ALGORITHM_PROTECTION, /* new CID appended here */
+BSL_CID_ID_CT_TSTINFO,
+BSL_CID_ID_AA_TIMESTAMPTOKEN,
+BSL_CID_ID_SMIME_AA_SIGNINGCERTIFICATE,
+BSL_CID_ID_SMIME_AA_SIGNINGCERTIFICATEV2,</pre>
+                <div class="issue-source">Reviewer: codex</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">Timestamp tokens are signed without the mandatory ESS certificate attribute</div>
+                <div class="issue-location">pki/cms/src/hitls_cms_signdata.c:1353-1553</div>
+                <pre>static int32_t EnsureRequiredAttrsExist(CMS_SignerInfo *signerInfo, uint8_t *digest, uint32_t digestLen,
+    BslCid contentType, bool hasAlgProtection)
+{
+    ...
+    HITLS_X509_AttrEntry *stAttr = NULL;
+    ret = CreateSigningTimeAttr(&amp;stAttr);
+    if (ret != HITLS_PKI_SUCCESS) {
+        return ret;
+    }
+    ret = AddRequiredAttr(signerInfo-&gt;signedAttrs, stAttr);
+    if (ret != HITLS_PKI_SUCCESS) {
+        return ret;
+    }
+
+    if (hasAlgProtection) {
+        HITLS_X509_AttrEntry *algProtectAttr = NULL;
+        ret = CreateAlgorithmProtectionAttr(signerInfo, &amp;algProtectAttr);
+        if (ret != HITLS_PKI_SUCCESS) {
+            return ret;
+        }
+        ret = AddRequiredAttr(signerInfo-&gt;signedAttrs, algProtectAttr);
+    }
+    return ret;
+}
+
+...
+
+ret = EnsureRequiredAttrsExist(signerInfo, digest, digestLen, signedData-&gt;encapCont.contentType,
+    hasAlgProtection);</pre>
+                <div class="problem"><strong>Issue:</strong> The new timestamp-response flow signs `id-ct-TSTInfo` through `SignedDataCore`, but `EnsureRequiredAttrsExist` only adds `contentType`, `messageDigest`, `signingTime`, and optional `CMSAlgorithmProtection`. It never adds `SigningCertificate`/`SigningCertificateV2`. Local callers already require that attribute during verification (`HITLS_TS_VerifyToken` always calls `HITLS_TS_VerifySigningCertificateAttr`), so tokens generated by `HITLS_TS_CreateResponse` are not verifiable by this same library.</div>
+                <div class="fix-label">Fix:</div><pre>static int32_t EnsureRequiredAttrsExist(CMS_SignerInfo *signerInfo, uint8_t *digest, uint32_t digestLen,
+    BslCid contentType, bool hasAlgProtection, const BSL_Param *optionalParam)
+{
+    ...
+    HITLS_X509_AttrEntry *stAttr = NULL;
+    ret = CreateSigningTimeAttr(&amp;stAttr);
+    if (ret != HITLS_PKI_SUCCESS) {
+        return ret;
+    }
+    ret = AddRequiredAttr(signerInfo-&gt;signedAttrs, stAttr);
+    if (ret != HITLS_PKI_SUCCESS) {
+        return ret;
+    }
+
+    if (contentType == BSL_CID_ID_CT_TSTINFO) {
+        const BSL_Param *certParam = BSL_PARAM_FindConstParam(optionalParam, HITLS_CMS_PARAM_DEVICE_CERT);
+        const BSL_Param *hashParam = BSL_PARAM_FindConstParam(optionalParam, HITLS_TS_PARAM_ESS_CERT_HASH_ALG);
+        int32_t essHashAlg = BSL_CID_SHA256;
+        HITLS_X509_AttrEntry *essAttr = NULL;
+
+        if (certParam == NULL || certParam-&gt;valueType != BSL_PARAM_TYPE_CTX_PTR || certParam-&gt;value == NULL) {
+            return HITLS_CMS_ERR_INVALID_PARAM;
+        }
+        if (hashParam != NULL) {
+            if (hashParam-&gt;valueType != BSL_PARAM_TYPE_INT32 || hashParam-&gt;value == NULL ||
+                hashParam-&gt;valueLen != sizeof(int32_t)) {
+                return HITLS_CMS_ERR_INVALID_PARAM;
+            }
+            essHashAlg = *(int32_t *)hashParam-&gt;value;
+        }
+
+        ret = HITLS_TS_BuildSigningCertificateV2Attr((HITLS_X509_Cert *)certParam-&gt;value, essHashAlg, &amp;essAttr);
+        if (ret != HITLS_PKI_SUCCESS) {
+            return ret;
+        }
+        ret = AddRequiredAttr(signerInfo-&gt;signedAttrs, essAttr);
+        if (ret != HITLS_PKI_SUCCESS) {
+            return ret;
+        }
+    }
+
+    if (hasAlgProtection) {
+        HITLS_X509_AttrEntry *algProtectAttr = NULL;
+        ret = CreateAlgorithmProtectionAttr(signerInfo, &amp;algProtectAttr);
+        if (ret != HITLS_PKI_SUCCESS) {
+            return ret;
+        }
+        ret = AddRequiredAttr(signerInfo-&gt;signedAttrs, algProtectAttr);
+        if (ret != HITLS_PKI_SUCCESS) {
+            return ret;
+        }
+    }
+    return HITLS_PKI_SUCCESS;
+}
+
+...
+
+ret = EnsureRequiredAttrsExist(signerInfo, digest, digestLen, signedData-&gt;encapCont.contentType,
+    hasAlgProtection, optionalParam);</pre>
+                <div class="issue-source">Reviewer: codex</div>
+            </div>
+</div>
+<div class="section"><div class="section-title medium">Medium</div>
+<div class="issue">
+                <div class="issue-title">Attached token verification drops the original provider context</div>
+                <div class="issue-location">pki/cms/src/hitls_ts_token.c:753-759</div>
+                <pre>resp = HITLS_TS_RespNew(cms-&gt;ctx.signedData-&gt;libCtx, cms-&gt;ctx.signedData-&gt;attrName);
+if (resp == NULL) {
+    return BSL_MALLOC_FAIL;
+}
+resp-&gt;statusInfo.status = 0;
+ret = HITLS_CMS_ProviderParseBuff(NULL, NULL, NULL, &amp;encode, &amp;resp-&gt;tokenCms);</pre>
+                <div class="problem"><strong>Issue:</strong> `HITLS_CMS_VerifySignatureTimeStampToken` creates the response object with the parent CMS `libCtx`/`attrName`, then ignores both and reparses the embedded token with `NULL, NULL`. That silently switches verification to the default provider context, which can break custom providers or custom algorithm profiles.</div>
+                <div class="fix-label">Fix:</div><pre>resp = HITLS_TS_RespNew(cms-&gt;ctx.signedData-&gt;libCtx, cms-&gt;ctx.signedData-&gt;attrName);
+if (resp == NULL) {
+    return BSL_MALLOC_FAIL;
+}
+resp-&gt;statusInfo.status = 0;
+ret = HITLS_CMS_ProviderParseBuff(cms-&gt;ctx.signedData-&gt;libCtx, cms-&gt;ctx.signedData-&gt;attrName,
+    NULL, &amp;encode, &amp;resp-&gt;tokenCms);</pre>
+                <div class="issue-source">Reviewer: codex</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">ESS certificate lookup ignores trusted CA certificate inputs</div>
+                <div class="issue-location">pki/cms/src/hitls_ts_ess.c:466-470</div>
+                <pre>signerCert = TS_FindSignerCertInList(signedData-&gt;certs, signerInfo);
+if (signerCert == NULL) {
+    HITLS_X509_List *certs = TS_GetVerifyCertList(verifyParam, HITLS_CMS_PARAM_UNTRUSTED_CERT_LISTS,
+        HITLS_CMS_PARAM_TS_UNTRUSTED_CERT_LISTS);
+    signerCert = TS_FindSignerCertInList(certs, signerInfo);
+}</pre>
+                <div class="problem"><strong>Issue:</strong> After signature verification succeeds, ESS certificate binding is checked only against embedded certs and `UNTRUSTED_CERT_LISTS`. If the TSA signing cert is supplied only through `CA_CERT_LISTS`/`TS_CA_CERT_LISTS` (for example, a trusted self-signed TSA), this code returns `HITLS_TS_ERR_ESS_CERT_MISMATCH` even though chain verification already had the cert it needed.</div>
+                <div class="fix-label">Fix:</div><pre>signerCert = TS_FindSignerCertInList(signedData-&gt;certs, signerInfo);
+if (signerCert == NULL) {
+    HITLS_X509_List *certs = TS_GetVerifyCertList(verifyParam, HITLS_CMS_PARAM_UNTRUSTED_CERT_LISTS,
+        HITLS_CMS_PARAM_TS_UNTRUSTED_CERT_LISTS);
+    signerCert = TS_FindSignerCertInList(certs, signerInfo);
+}
+if (signerCert == NULL) {
+    HITLS_X509_List *certs = TS_GetVerifyCertList(verifyParam, HITLS_CMS_PARAM_CA_CERT_LISTS,
+        HITLS_CMS_PARAM_TS_CA_CERT_LISTS);
+    signerCert = TS_FindSignerCertInList(certs, signerInfo);
+}</pre>
+                <div class="issue-source">Reviewer: codex</div>
+            </div>
+</div>
+<div class="section"><div class="section-title low">Low</div>
+<div class="issue">
+                <div class="issue-title">Timestamp imprint algorithm parameter is read without length/null validation</div>
+                <div class="issue-location">pki/cms/src/hitls_ts_token.c:130-134</div>
+                <pre>if (mdParam != NULL) {
+    if (mdParam-&gt;valueType != BSL_PARAM_TYPE_INT32) {
+        return HITLS_CMS_ERR_INVALID_PARAM;
+    }
+    *mdAlg = *(int32_t *)mdParam-&gt;value;
+}</pre>
+                <div class="problem"><strong>Issue:</strong> The new public timestamp-request path trusts `BSL_Param` too much here. It only checks `valueType`, then dereferences `mdParam->value` as an `int32_t` without validating `value != NULL` or `valueLen == sizeof(int32_t)`. A malformed caller-provided parameter can trigger an invalid read through `HITLS_CMS_GenSignatureTimeStampReq`.</div>
+                <div class="fix-label">Fix:</div><pre>if (mdParam != NULL) {
+    if (mdParam-&gt;valueType != BSL_PARAM_TYPE_INT32 || mdParam-&gt;value == NULL ||
+        mdParam-&gt;valueLen != sizeof(int32_t)) {
+        return HITLS_CMS_ERR_INVALID_PARAM;
+    }
+    *mdAlg = *(int32_t *)mdParam-&gt;value;
+}</pre>
+                <div class="issue-source">Reviewer: codex</div>
+            </div>
+</div>
+</div></body></html>

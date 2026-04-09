@@ -1,0 +1,416 @@
+# Change Review Consolidation Task
+
+You are consolidating change review findings from multiple AI reviewers.
+
+## Context
+- Repository: openHiTLS/openhitls
+- PR: #1223
+- Title: 
+
+## Individual Review Reports
+
+## CLAUDE Review
+
+# Code Review: openHiTLS/openhitls#1223
+**Reviewer**: CLAUDE
+
+
+## High
+
+### Thread-safety issue in TS_GetDefaultSerial static counter
+`pki/cms/src/hitls_ts_resp.c:364-389`
+```
+static int32_t TS_GetDefaultSerial(BSL_Buffer *serial)
+{
+    ...
+    static uint32_t g_tsSerialCounter = 0;
+    uint32_t seq = 0;
+    ...
+#if defined(__GNUC__)
+    seq = __atomic_add_fetch(&g_tsSerialCounter, 1, __ATOMIC_RELAXED);
+#else
+    seq = ++g_tsSerialCounter;  // NOT THREAD-SAFE!
+#endif
+    ...
+}
+```
+**Issue**: The static variable g_tsSerialCounter uses GCC atomic operations (__atomic_add_fetch) for thread safety, but on non-GCC platforms it falls back to a simple pre-increment (++g_tsSerialCounter) which is not thread-safe. In multi-threaded environments on non-GCC platforms, this can lead to duplicate serial numbers being generated, which could cause timestamp tokens to have non-unique serial numbers - a critical violation of RFC3161 requirements.
+**Fix**:
+```
+#include <stdatomic.h>
+static atomic_uint g_tsSerialCounter = ATOMIC_VAR_INIT(0);
+...
+seq = atomic_fetch_add_explicit(&g_tsSerialCounter, 1, memory_order_relaxed);
+```
+
+---
+
+
+## Medium
+
+### Non-constant-time nonce comparison may leak timing information
+`pki/cms/src/hitls_ts_token.c:571-572`
+```
+if (req->nonce.dataLen != resp->tstInfo.nonce.dataLen ||
+    memcmp(req->nonce.data, resp->tstInfo.nonce.data, req->nonce.dataLen) != 0) {
+    return HITLS_TS_ERR_NONCE_MISMATCH;
+}
+```
+**Issue**: The nonce comparison uses memcmp which may leak timing information. While nonces are random values intended to prevent replay attacks, timing variations in the comparison could potentially reveal partial information about nonce correctness to an attacker. For a cryptographic library, best practice is to use constant-time comparison for all security-critical values.
+**Fix**:
+```
+static int TS_ConstantTimeEq(const uint8_t *a, const uint8_t *b, uint32_t len)
+{
+    uint8_t result = 0;
+    for (uint32_t i = 0; i < len; i++) {
+        result |= a[i] ^ b[i];
+    }
+    return result == 0;
+}
+```
+
+---
+
+### Non-constant-time certificate hash comparison
+`pki/cms/src/hitls_ts_ess.c:483-484`
+```
+ret = (actualHash.dataLen == expectedHash.dataLen &&
+    memcmp(actualHash.data, expectedHash.data, actualHash.dataLen) == 0) ?
+    HITLS_PKI_SUCCESS : HITLS_TS_ERR_ESS_CERT_MISMATCH;
+```
+**Issue**: The ESS certificate hash comparison uses memcmp. While certificate hashes are not secret, they are cryptographically derived values that should ideally be compared in constant-time for consistency and to prevent any potential timing side channels.
+
+---
+
+### Incorrect length check in CheckGeneralizedTimeSuffix rejects valid timestamps
+`bsl/asn1/src/bsl_asn1.c:228`
+```
+if (len <= 16 || (data[idx] != '.' && data[idx] != ',')) {
+    return BSL_ASN1_ERR_DECODE_GENERAL_TIME;
+}
+```
+**Issue**: The condition `if (len <= 16 || ...)` incorrectly rejects valid GeneralizedTime values with exactly one fractional digit (len=16: "YYYYMMDDHHMMSS.f"). The condition should be `len < 16` to allow fractional seconds with at least one digit.
+**Fix**:
+```
+if (len < 16 || (data[idx] != '.' && data[idx] != ',')) {
+    return BSL_ASN1_ERR_DECODE_GENERAL_TIME;
+}
+```
+
+---
+
+
+## Low
+
+### Non-constant-time algorithm parameter comparison
+`pki/cms/src/hitls_cms_signdata.c:323-327`
+```
+static bool IsAlgParamEqual(const BSL_Buffer *lhs, const BSL_Buffer *rhs)
+{
+    if (lhs->dataLen != rhs->dataLen) {
+        return false;
+    }
+    if (lhs->dataLen == 0) {
+        return true;
+    }
+    return memcmp(lhs->data, rhs->data, lhs->dataLen) == 0;
+}
+```
+**Issue**: The IsAlgParamEqual function uses memcmp to compare algorithm parameters. While algorithm parameters are typically public and not secret, using constant-time comparison would be more consistent with cryptographic best practices.
+
+---
+
+
+---
+
+## CODEX Review
+
+# Code Review: openHiTLS/openhitls#1223
+**Reviewer**: CODEX
+
+
+## High
+
+### Inserting a public CID in the middle renumbers the existing ABI
+`include/bsl/bsl_obj.h:332-416`
+```
+BSL_CID_PKCS9_AT_SEQUENCENUMBER = 275,    /* identifies PKCS9 Sequence number */
+BSL_CID_PKCS9_AT_ALGORITHM_PROTECTION = 276, /* identifies PKCS9 Algorithm Protection (RFC 6211) */
+
+BSL_CID_MD4 = 277,       /* identifies MD4 hash algorithm */
+BSL_CID_HMAC_MD4 = 278,  /* identifies hmac with MD4 */
+...
+BSL_CID_HARDWAREMODULENAME = 350,
+BSL_CID_AT_DESCRIPTION = 351,
+```
+**Issue**: `BslCid` is a public SDK enum with many explicitly assigned numeric values. Adding `BSL_CID_PKCS9_AT_ALGORITHM_PROTECTION` at `276` shifts every later public CID by `+1` (`BSL_CID_MD4`, `BSL_CID_RSASSAPSS`, `BSL_CID_AT_DESCRIPTION`, etc.). Any external module, serialized data, or persisted config that relies on the old numeric IDs will silently break.
+**Fix**:
+```
+/* Keep existing public values stable; append the new CID instead of inserting it. */
+BSL_CID_PKCS9_AT_SEQUENCENUMBER = 275,    /* identifies PKCS9 Sequence number */
+
+BSL_CID_MD4 = 276,       /* identifies MD4 hash algorithm */
+BSL_CID_HMAC_MD4 = 277,  /* identifies hmac with MD4 */
+/* keep the pre-existing numbering unchanged through BSL_CID_AT_DESCRIPTION = 350 */
+
+...
+
+BSL_CID_AES128_CCM8,
+BSL_CID_AES256_CCM8,
+BSL_CID_PBKDF1,
+BSL_CID_SM4_CCM,
+BSL_CID_X509CRL,
+BSL_CID_SMIMECAP,
+BSL_CID_PKCS9_AT_ALGORITHM_PROTECTION, /* new CID appended here */
+BSL_CID_ID_CT_TSTINFO,
+BSL_CID_ID_AA_TIMESTAMPTOKEN,
+BSL_CID_ID_SMIME_AA_SIGNINGCERTIFICATE,
+BSL_CID_ID_SMIME_AA_SIGNINGCERTIFICATEV2,
+```
+
+---
+
+### Timestamp tokens are signed without the mandatory ESS certificate attribute
+`pki/cms/src/hitls_cms_signdata.c:1353-1553`
+```
+static int32_t EnsureRequiredAttrsExist(CMS_SignerInfo *signerInfo, uint8_t *digest, uint32_t digestLen,
+    BslCid contentType, bool hasAlgProtection)
+{
+    ...
+    HITLS_X509_AttrEntry *stAttr = NULL;
+    ret = CreateSigningTimeAttr(&stAttr);
+    if (ret != HITLS_PKI_SUCCESS) {
+        return ret;
+    }
+    ret = AddRequiredAttr(signerInfo->signedAttrs, stAttr);
+    if (ret != HITLS_PKI_SUCCESS) {
+        return ret;
+    }
+
+    if (hasAlgProtection) {
+        HITLS_X509_AttrEntry *algProtectAttr = NULL;
+        ret = CreateAlgorithmProtectionAttr(signerInfo, &algProtectAttr);
+        if (ret != HITLS_PKI_SUCCESS) {
+            return ret;
+        }
+        ret = AddRequiredAttr(signerInfo->signedAttrs, algProtectAttr);
+    }
+    return ret;
+}
+
+...
+
+ret = EnsureRequiredAttrsExist(signerInfo, digest, digestLen, signedData->encapCont.contentType,
+    hasAlgProtection);
+```
+**Issue**: The new timestamp-response flow signs `id-ct-TSTInfo` through `SignedDataCore`, but `EnsureRequiredAttrsExist` only adds `contentType`, `messageDigest`, `signingTime`, and optional `CMSAlgorithmProtection`. It never adds `SigningCertificate`/`SigningCertificateV2`. Local callers already require that attribute during verification (`HITLS_TS_VerifyToken` always calls `HITLS_TS_VerifySigningCertificateAttr`), so tokens generated by `HITLS_TS_CreateResponse` are not verifiable by this same library.
+**Fix**:
+```
+static int32_t EnsureRequiredAttrsExist(CMS_SignerInfo *signerInfo, uint8_t *digest, uint32_t digestLen,
+    BslCid contentType, bool hasAlgProtection, const BSL_Param *optionalParam)
+{
+    ...
+    HITLS_X509_AttrEntry *stAttr = NULL;
+    ret = CreateSigningTimeAttr(&stAttr);
+    if (ret != HITLS_PKI_SUCCESS) {
+        return ret;
+    }
+    ret = AddRequiredAttr(signerInfo->signedAttrs, stAttr);
+    if (ret != HITLS_PKI_SUCCESS) {
+        return ret;
+    }
+
+    if (contentType == BSL_CID_ID_CT_TSTINFO) {
+        const BSL_Param *certParam = BSL_PARAM_FindConstParam(optionalParam, HITLS_CMS_PARAM_DEVICE_CERT);
+        const BSL_Param *hashParam = BSL_PARAM_FindConstParam(optionalParam, HITLS_TS_PARAM_ESS_CERT_HASH_ALG);
+        int32_t essHashAlg = BSL_CID_SHA256;
+        HITLS_X509_AttrEntry *essAttr = NULL;
+
+        if (certParam == NULL || certParam->valueType != BSL_PARAM_TYPE_CTX_PTR || certParam->value == NULL) {
+            return HITLS_CMS_ERR_INVALID_PARAM;
+        }
+        if (hashParam != NULL) {
+            if (hashParam->valueType != BSL_PARAM_TYPE_INT32 || hashParam->value == NULL ||
+                hashParam->valueLen != sizeof(int32_t)) {
+                return HITLS_CMS_ERR_INVALID_PARAM;
+            }
+            essHashAlg = *(int32_t *)hashParam->value;
+        }
+
+        ret = HITLS_TS_BuildSigningCertificateV2Attr((HITLS_X509_Cert *)certParam->value, essHashAlg, &essAttr);
+        if (ret != HITLS_PKI_SUCCESS) {
+            return ret;
+        }
+        ret = AddRequiredAttr(signerInfo->signedAttrs, essAttr);
+        if (ret != HITLS_PKI_SUCCESS) {
+            return ret;
+        }
+    }
+
+    if (hasAlgProtection) {
+        HITLS_X509_AttrEntry *algProtectAttr = NULL;
+        ret = CreateAlgorithmProtectionAttr(signerInfo, &algProtectAttr);
+        if (ret != HITLS_PKI_SUCCESS) {
+            return ret;
+        }
+        ret = AddRequiredAttr(signerInfo->signedAttrs, algProtectAttr);
+        if (ret != HITLS_PKI_SUCCESS) {
+            return ret;
+        }
+    }
+    return HITLS_PKI_SUCCESS;
+}
+
+...
+
+ret = EnsureRequiredAttrsExist(signerInfo, digest, digestLen, signedData->encapCont.contentType,
+    hasAlgProtection, optionalParam);
+```
+
+---
+
+
+## Medium
+
+### Attached token verification drops the original provider context
+`pki/cms/src/hitls_ts_token.c:753-759`
+```
+resp = HITLS_TS_RespNew(cms->ctx.signedData->libCtx, cms->ctx.signedData->attrName);
+if (resp == NULL) {
+    return BSL_MALLOC_FAIL;
+}
+resp->statusInfo.status = 0;
+ret = HITLS_CMS_ProviderParseBuff(NULL, NULL, NULL, &encode, &resp->tokenCms);
+```
+**Issue**: `HITLS_CMS_VerifySignatureTimeStampToken` creates the response object with the parent CMS `libCtx`/`attrName`, then ignores both and reparses the embedded token with `NULL, NULL`. That silently switches verification to the default provider context, which can break custom providers or custom algorithm profiles.
+**Fix**:
+```
+resp = HITLS_TS_RespNew(cms->ctx.signedData->libCtx, cms->ctx.signedData->attrName);
+if (resp == NULL) {
+    return BSL_MALLOC_FAIL;
+}
+resp->statusInfo.status = 0;
+ret = HITLS_CMS_ProviderParseBuff(cms->ctx.signedData->libCtx, cms->ctx.signedData->attrName,
+    NULL, &encode, &resp->tokenCms);
+```
+
+---
+
+### ESS certificate lookup ignores trusted CA certificate inputs
+`pki/cms/src/hitls_ts_ess.c:466-470`
+```
+signerCert = TS_FindSignerCertInList(signedData->certs, signerInfo);
+if (signerCert == NULL) {
+    HITLS_X509_List *certs = TS_GetVerifyCertList(verifyParam, HITLS_CMS_PARAM_UNTRUSTED_CERT_LISTS,
+        HITLS_CMS_PARAM_TS_UNTRUSTED_CERT_LISTS);
+    signerCert = TS_FindSignerCertInList(certs, signerInfo);
+}
+```
+**Issue**: After signature verification succeeds, ESS certificate binding is checked only against embedded certs and `UNTRUSTED_CERT_LISTS`. If the TSA signing cert is supplied only through `CA_CERT_LISTS`/`TS_CA_CERT_LISTS` (for example, a trusted self-signed TSA), this code returns `HITLS_TS_ERR_ESS_CERT_MISMATCH` even though chain verification already had the cert it needed.
+**Fix**:
+```
+signerCert = TS_FindSignerCertInList(signedData->certs, signerInfo);
+if (signerCert == NULL) {
+    HITLS_X509_List *certs = TS_GetVerifyCertList(verifyParam, HITLS_CMS_PARAM_UNTRUSTED_CERT_LISTS,
+        HITLS_CMS_PARAM_TS_UNTRUSTED_CERT_LISTS);
+    signerCert = TS_FindSignerCertInList(certs, signerInfo);
+}
+if (signerCert == NULL) {
+    HITLS_X509_List *certs = TS_GetVerifyCertList(verifyParam, HITLS_CMS_PARAM_CA_CERT_LISTS,
+        HITLS_CMS_PARAM_TS_CA_CERT_LISTS);
+    signerCert = TS_FindSignerCertInList(certs, signerInfo);
+}
+```
+
+---
+
+
+## Low
+
+### Timestamp imprint algorithm parameter is read without length/null validation
+`pki/cms/src/hitls_ts_token.c:130-134`
+```
+if (mdParam != NULL) {
+    if (mdParam->valueType != BSL_PARAM_TYPE_INT32) {
+        return HITLS_CMS_ERR_INVALID_PARAM;
+    }
+    *mdAlg = *(int32_t *)mdParam->value;
+}
+```
+**Issue**: The new public timestamp-request path trusts `BSL_Param` too much here. It only checks `valueType`, then dereferences `mdParam->value` as an `int32_t` without validating `value != NULL` or `valueLen == sizeof(int32_t)`. A malformed caller-provided parameter can trigger an invalid read through `HITLS_CMS_GenSignatureTimeStampReq`.
+**Fix**:
+```
+if (mdParam != NULL) {
+    if (mdParam->valueType != BSL_PARAM_TYPE_INT32 || mdParam->value == NULL ||
+        mdParam->valueLen != sizeof(int32_t)) {
+        return HITLS_CMS_ERR_INVALID_PARAM;
+    }
+    *mdAlg = *(int32_t *)mdParam->value;
+}
+```
+
+---
+
+
+## Your Task
+
+1. **Analyze All Reports**
+   - Read each reviewer's findings carefully
+   - Identify duplicate issues reported by multiple reviewers
+   - Note issues unique to each reviewer
+
+2. **Validate Issues**
+   - For each issue, verify it's a real problem by checking the file (code or docs)
+   - Use `git diff` and file reads to confirm
+   - Remove false positives
+   - Adjust severity if needed
+
+3. **Consolidate Findings**
+   - Merge duplicate issues (note which reviewers found it)
+   - Keep unique valid issues
+   - Prioritize by actual impact
+
+4. **Output Format**
+
+For each validated issue, output:
+
+===ISSUE===
+FILE: <filepath>
+LINE: <line number or range>
+SEVERITY: critical|high|medium|low
+TITLE: <concise title>
+REVIEWERS: <comma-separated list of reviewers who found this>
+CONFIDENCE: trusted|likely|evaluate
+PROBLEM: <consolidated description>
+CODE:
+```
+<problematic code>
+```
+FIX:
+```
+<best suggested fix>
+```
+===END===
+
+## Confidence Levels
+
+- **trusted** (可信): Multiple reviewers found this issue AND you verified it in the code
+- **likely** (较可信): Found by one reviewer AND you verified it exists in the code
+- **evaluate** (需评估): Found by reviewer(s) but needs human review to confirm impact/fix
+
+## Important
+
+- SEVERITY indicates impact level (critical/high/medium/low)
+- CONFIDENCE indicates how certain we are about this issue
+- Only include issues you've verified in the changed files (code or docs)
+- Prefer fixes that are most complete and correct
+- Add REVIEWERS field showing which AIs found this issue
+
+## CRITICAL OUTPUT REQUIREMENT
+
+You MUST output each issue in the exact ===ISSUE===...===END=== format shown above.
+Do NOT output summary tables or prose descriptions.
+Each issue MUST be a separate ===ISSUE=== block.
+If there are 5 validated issues, output 5 ===ISSUE=== blocks.
+
+Start consolidation now. Output each validated issue in the required format.
