@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Code Review: openHiTLS/openhitls#1234 - CODEX</title>
+    <style>
+        :root { --critical: #dc2626; --high: #ea580c; --medium: #ca8a04; --low: #65a30d; }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: system-ui, sans-serif; background: #f8fafc; color: #1e293b; padding: 2rem; line-height: 1.6; }
+        .container { max-width: 900px; margin: 0 auto; }
+        h1 { font-size: 1.5rem; margin-bottom: 0.5rem; }
+        .subtitle { color: #64748b; margin-bottom: 2rem; }
+        .section { margin-bottom: 2rem; }
+        .section-title { font-size: 1.1rem; font-weight: 600; padding: 0.5rem 1rem; border-radius: 0.5rem 0.5rem 0 0; color: white; }
+        .section-title.critical { background: var(--critical); }
+        .section-title.high { background: var(--high); }
+        .section-title.medium { background: var(--medium); }
+        .section-title.low { background: var(--low); }
+        .issue { background: white; border: 1px solid #e2e8f0; border-top: none; padding: 1rem; }
+        .issue:last-child { border-radius: 0 0 0.5rem 0.5rem; }
+        .issue-title { font-weight: 600; margin-bottom: 0.25rem; }
+        .issue-location { font-family: monospace; font-size: 0.875rem; color: #64748b; margin-bottom: 0.75rem; }
+        .issue-source { font-size: 0.75rem; color: #94a3b8; margin-top: 0.5rem; }
+        pre { background: #1e293b; color: #e2e8f0; padding: 0.75rem; border-radius: 0.375rem; overflow-x: auto; font-size: 0.875rem; margin: 0.5rem 0; }
+        .problem { margin: 0.75rem 0; }
+        .fix-label { font-weight: 600; margin-top: 0.75rem; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Code Review: openHiTLS/openhitls#1234 - CODEX</h1>
+        <div class="subtitle"></div>
+<div class="section"><div class="section-title high">High</div>
+<div class="issue">
+                <div class="issue-title">DecryptInit reports success after decryption context setup fails</div>
+                <div class="issue-location">pki/cms/src/hitls_cms_envelopeddata.c:3413-3420</div>
+                <pre>ret = SetDecryCtx(envData);
+    if (ret != HITLS_PKI_SUCCESS) {
+        BSL_SAL_ClearFree(envData-&gt;streamKey, envData-&gt;streamKeyLen);
+        envData-&gt;streamKey = NULL;
+        envData-&gt;streamKeyLen = 0;
+    }
+    envData-&gt;state = HITLS_CMS_DECRYPT_INIT;
+    return HITLS_PKI_SUCCESS;</pre>
+                <div class="problem"><strong>Issue:</strong> `EnvelopedData_DecryptInit()` clears the CEK when `SetDecryCtx()` fails, but then still marks the object as initialized and returns success. Callers will continue with a half-initialized decrypt state and only fail later in `Update`/`Final`.</div>
+                <div class="fix-label">Fix:</div><pre>ret = SetDecryCtx(envData);
+    if (ret != HITLS_PKI_SUCCESS) {
+        BSL_SAL_ClearFree(envData-&gt;streamKey, envData-&gt;streamKeyLen);
+        envData-&gt;streamKey = NULL;
+        envData-&gt;streamKeyLen = 0;
+        return ret;
+    }
+    envData-&gt;state = HITLS_CMS_DECRYPT_INIT;
+    return HITLS_PKI_SUCCESS;</pre>
+                <div class="issue-source">Reviewer: codex</div>
+            </div>
+</div>
+<div class="section"><div class="section-title medium">Medium</div>
+<div class="issue">
+                <div class="issue-title">Generator emits EnvelopedData with an empty RecipientInfos set</div>
+                <div class="issue-location">pki/cms/src/hitls_cms_envelopeddata.c:2614-2619</div>
+                <pre>uint32_t count = (uint32_t)BSL_LIST_COUNT(list);
+    if (count == 0) {
+        encode-&gt;buff = NULL;
+        encode-&gt;len = 0;
+        encode-&gt;tag = BSL_ASN1_TAG_CONSTRUCTED | BSL_ASN1_TAG_SET;
+        return HITLS_PKI_SUCCESS;
+    }</pre>
+                <div class="problem"><strong>Issue:</strong> RFC 5652 requires `RecipientInfos ::= SET SIZE (1..MAX) OF RecipientInfo`. This code returns success for `count == 0`, so one-shot and streaming encryption can generate an invalid CMS object that nobody can decrypt and that `ParseRecipientList()` rejects.</div>
+                <div class="fix-label">Fix:</div><pre>uint32_t count = (uint32_t)BSL_LIST_COUNT(list);
+    if (count == 0) {
+        BSL_ERR_PUSH_ERROR(HITLS_CMS_ERR_INVALID_PARAM);
+        return HITLS_CMS_ERR_INVALID_PARAM;
+    }</pre>
+                <div class="issue-source">Reviewer: codex</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">KEM KEK derivation ignores the CMS provider context</div>
+                <div class="issue-location">pki/cms/src/hitls_cms_envelopeddata.c:881-883</div>
+                <pre>uint8_t *kek = NULL;
+    ret = DeriveKek(kemri-&gt;libCtx, kemri-&gt;attrName, kemri, sharedSecret, sharedSecretLen, &amp;kek);
+    BSL_SAL_CleanseData(sharedSecret, sizeof(sharedSecret));</pre>
+                <div class="problem"><strong>Issue:</strong> `EncryptCekForKemri()` derives the KEK from `kemri->libCtx` and `kemri->attrName`, but those runtime fields are never populated when KEM recipients are created or parsed. ML-KEM EnvelopedData therefore falls back to a NULL/default provider context and breaks non-default-provider flows.</div>
+                <div class="fix-label">Fix:</div><pre>static void CMS_SetRecipientRuntimeCtx(CMS_RecipientInfo *recip, CMS_EnvelopedData *envData)
+{
+    if (recip-&gt;type == CMS_RECIPIENT_TYPE_KEMRI &amp;&amp; recip-&gt;d.kemri != NULL) {
+        recip-&gt;d.kemri-&gt;libCtx = envData-&gt;libCtx;
+        recip-&gt;d.kemri-&gt;attrName = envData-&gt;attrName;
+    }
+}
+
+/* Call this after creating or parsing each recipient. */</pre>
+                <div class="issue-source">Reviewer: codex</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">Parser accepts IV-based content-encryption algorithms without parameters</div>
+                <div class="issue-location">pki/cms/src/hitls_cms_envelopeddata.c:2018-2028</div>
+                <pre>if (asnArr[HITLS_CMS_ENCRYCONTENTINFO_CONTENTENCRYALG_PARAM_IDX].len &gt; 0) {
+        item-&gt;algParams = BSL_SAL_Calloc(1, sizeof(BSL_Buffer));
+        if (item-&gt;algParams == NULL) {
+            BSL_ERR_PUSH_ERROR(BSL_MALLOC_FAIL);
+            return BSL_MALLOC_FAIL;
+        }
+        item-&gt;algParams-&gt;data = asnArr[HITLS_CMS_ENCRYCONTENTINFO_CONTENTENCRYALG_PARAM_IDX].buff;
+        item-&gt;algParams-&gt;dataLen = asnArr[HITLS_CMS_ENCRYCONTENTINFO_CONTENTENCRYALG_PARAM_IDX].len;
+    } else {
+        item-&gt;algParams = NULL;
+    }</pre>
+                <div class="problem"><strong>Issue:</strong> For algorithms such as AES-CBC, `AlgorithmIdentifier.parameters` carries the IV and is required. This branch silently accepts a missing parameter block and leaves `item->algParams = NULL`, so malformed input is only rejected later, or worse, is decrypted with a NULL/zero-length IV.</div>
+                <div class="fix-label">Fix:</div><pre>uint32_t ivLen = 0;
+    int32_t infoRet = CRYPT_EAL_CipherGetInfo((CRYPT_CIPHER_AlgId)cid, CRYPT_INFO_IV_LEN, &amp;ivLen);
+    bool needIv = (infoRet == CRYPT_SUCCESS &amp;&amp; ivLen &gt; 0);
+
+    if (needIv) {
+        if (asnArr[HITLS_CMS_ENCRYCONTENTINFO_CONTENTENCRYALG_PARAM_IDX].tag == BSL_ASN1_TAG_EMPTY ||
+            asnArr[HITLS_CMS_ENCRYCONTENTINFO_CONTENTENCRYALG_PARAM_IDX].len != ivLen) {
+            BSL_ERR_PUSH_ERROR(HITLS_CMS_ERR_PARSE_TYPE);
+            return HITLS_CMS_ERR_PARSE_TYPE;
+        }
+    }
+
+    if (asnArr[HITLS_CMS_ENCRYCONTENTINFO_CONTENTENCRYALG_PARAM_IDX].tag != BSL_ASN1_TAG_EMPTY) {
+        item-&gt;algParams = BSL_SAL_Calloc(1, sizeof(BSL_Buffer));
+        if (item-&gt;algParams == NULL) {
+            BSL_ERR_PUSH_ERROR(BSL_MALLOC_FAIL);
+            return BSL_MALLOC_FAIL;
+        }
+        item-&gt;algParams-&gt;data =
+            asnArr[HITLS_CMS_ENCRYCONTENTINFO_CONTENTENCRYALG_PARAM_IDX].buff;
+        item-&gt;algParams-&gt;dataLen =
+            asnArr[HITLS_CMS_ENCRYCONTENTINFO_CONTENTENCRYALG_PARAM_IDX].len;
+    }</pre>
+                <div class="issue-source">Reviewer: codex</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">Decrypt final trusts CRYPT_PARAM_DECODE_BUFFER_DATA without type checking</div>
+                <div class="issue-location">pki/cms/src/hitls_cms_envelopeddata.c:3612-3618</div>
+                <pre>const BSL_Param *p = BSL_PARAM_FindConstParam(param, CRYPT_PARAM_DECODE_BUFFER_DATA);
+        if (p == NULL || p-&gt;value == NULL) {
+            BSL_ERR_PUSH_ERROR(HITLS_CMS_ERR_NULL_POINTER);
+            return HITLS_CMS_ERR_NULL_POINTER;
+        }
+        BSL_Buffer *output = (BSL_Buffer *)p-&gt;value;
+        return EnvelopedData_DecryptFinal(cms, output);</pre>
+                <div class="problem"><strong>Issue:</strong> The decrypt-final path only checks that `p->value` is non-NULL and then casts it to `BSL_Buffer *`. A caller can pass the right key with the wrong `valueType` or `valueLen` and trigger an invalid cast and write into unrelated memory.</div>
+                <div class="fix-label">Fix:</div><pre>const BSL_Param *p = BSL_PARAM_FindConstParam(param, CRYPT_PARAM_DECODE_BUFFER_DATA);
+        if (p == NULL || p-&gt;value == NULL) {
+            BSL_ERR_PUSH_ERROR(HITLS_CMS_ERR_NULL_POINTER);
+            return HITLS_CMS_ERR_NULL_POINTER;
+        }
+        if (p-&gt;valueType != BSL_PARAM_TYPE_CTX_PTR || p-&gt;valueLen != sizeof(BSL_Buffer)) {
+            BSL_ERR_PUSH_ERROR(HITLS_CMS_ERR_INVALID_PARAM);
+            return HITLS_CMS_ERR_INVALID_PARAM;
+        }
+        BSL_Buffer *output = (BSL_Buffer *)p-&gt;value;
+        return EnvelopedData_DecryptFinal(cms, output);</pre>
+                <div class="issue-source">Reviewer: codex</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">EnvelopedData feature omits required crypto and X509 dependencies</div>
+                <div class="issue-location">cmake/hitls_define_dependencies.cmake:583</div>
+                <pre>hitls_define_dependency(HITLS_PKI_CMS_ENVELOPEDDATA     DEPS HITLS_PKI_CMS HITLS_BSL_ASN1)</pre>
+                <div class="problem"><strong>Issue:</strong> `hitls_cms_envelopeddata.c` now uses X509 cert/CRL parse/generate helpers, HKDF, cipher code, RSA key transport, and ML-KEM, but the feature dependency only enables `HITLS_PKI_CMS` and `HITLS_BSL_ASN1`. Feature combinations that turn on `HITLS_PKI_CMS_ENVELOPEDDATA` without those subfeatures can build into missing symbols or a nonfunctional binary.</div>
+                <div class="fix-label">Fix:</div><pre>hitls_define_dependency(HITLS_PKI_CMS_ENVELOPEDDATA     DEPS HITLS_PKI_CMS HITLS_BSL_ASN1
+    HITLS_PKI_X509_CRL_GEN HITLS_PKI_X509_CRL_PARSE
+    HITLS_PKI_X509_CRT_GEN HITLS_PKI_X509_CRT_PARSE
+    HITLS_CRYPTO_CIPHER HITLS_CRYPTO_AES HITLS_CRYPTO_HKDF
+    HITLS_CRYPTO_RSA_ENCRYPT HITLS_CRYPTO_RSA_DECRYPT HITLS_CRYPTO_RSAES_PKCSV15
+    HITLS_CRYPTO_MLKEM
+)</pre>
+                <div class="issue-source">Reviewer: codex</div>
+            </div>
+</div>
+</div></body></html>

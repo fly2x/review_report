@@ -1,0 +1,12 @@
+[
+  {
+    "source": "gemini",
+    "file": "pki/cms/src/hitls_cms_envelopeddata.c",
+    "line": "3455-3461",
+    "severity": "high",
+    "title": "Memory leak on reallocation failure in EnvelopedData_DecryptUpdate",
+    "problem": "When updating the decryption state, `output->data` is passed directly to `BSL_SAL_Realloc` and the result is assigned back to `output->data`. If the reallocation fails (returns `NULL`), the original `output->data` is overwritten with `NULL` without freeing it, leading to a memory leak of the previously accumulated decrypted data.",
+    "code": "if (output->data == NULL) {\n        output->data = BSL_SAL_Malloc(totalOutLen);\n    } else {\n        output->data = BSL_SAL_Realloc(output->data, totalOutLen, curOutLen);\n    }\n    if (output->data == NULL) {\n        BSL_ERR_PUSH_ERROR(BSL_MALLOC_FAIL);",
+    "fix": "uint8_t *newBuf;\n    if (output->data == NULL) {\n        newBuf = BSL_SAL_Malloc(totalOutLen);\n    } else {\n        newBuf = BSL_SAL_Realloc(output->data, totalOutLen, curOutLen);\n    }\n    if (newBuf == NULL) {\n        BSL_ERR_PUSH_ERROR(BSL_MALLOC_FAIL);"
+  }
+]

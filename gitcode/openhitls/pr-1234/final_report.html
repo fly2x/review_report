@@ -1,0 +1,443 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Final Report: openHiTLS/openhitls#1234</title>
+    <style>
+        :root { --critical: #dc2626; --high: #ea580c; --medium: #ca8a04; --low: #65a30d;
+                 --trusted: #059669; --likely: #0284c7; --evaluate: #7c3aed; }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: system-ui, sans-serif; background: #f8fafc; color: #1e293b; padding: 2rem; line-height: 1.6; }
+        .container { max-width: 900px; margin: 0 auto; }
+        h1 { font-size: 1.75rem; margin-bottom: 0.5rem; }
+        .subtitle { color: #64748b; margin-bottom: 1rem; }
+        .stats { display: flex; gap: 1rem; margin-bottom: 2rem; flex-wrap: wrap; }
+        .stat { background: white; border: 1px solid #e2e8f0; border-radius: 0.5rem; padding: 1rem; min-width: 100px; text-align: center; }
+        .stat-value { font-size: 1.5rem; font-weight: 700; }
+        .stat-label { font-size: 0.875rem; color: #64748b; }
+        .stat.critical .stat-value { color: var(--critical); }
+        .stat.high .stat-value { color: var(--high); }
+        .stat.medium .stat-value { color: var(--medium); }
+        .stat.low .stat-value { color: var(--low); }
+        .reviewers { background: #e0e7ff; color: #3730a3; padding: 0.5rem 1rem; border-radius: 0.5rem; margin-bottom: 2rem; }
+        .section { margin-bottom: 2rem; }
+        .section-title { font-size: 1.1rem; font-weight: 600; padding: 0.5rem 1rem; border-radius: 0.5rem 0.5rem 0 0; color: white; }
+        .section-title.critical { background: var(--critical); }
+        .section-title.high { background: var(--high); }
+        .section-title.medium { background: var(--medium); }
+        .section-title.low { background: var(--low); }
+        .issue { background: white; border: 1px solid #e2e8f0; border-top: none; padding: 1rem; }
+        .issue:last-child { border-radius: 0 0 0.5rem 0.5rem; }
+        .issue-title { font-weight: 600; margin-bottom: 0.25rem; }
+        .issue-location { font-family: monospace; font-size: 0.875rem; color: #64748b; margin-bottom: 0.5rem; }
+        .issue-meta { font-size: 0.75rem; margin-bottom: 0.75rem; display: flex; gap: 0.75rem; align-items: center; }
+        .issue-meta .reviewers { background: #f1f5f9; color: #475569; padding: 0.25rem 0.5rem; border-radius: 0.25rem; margin: 0; }
+        .confidence-badge { padding: 0.25rem 0.5rem; border-radius: 0.25rem; font-weight: 500; }
+        .confidence-badge.trusted { background: #d1fae5; color: #065f46; }
+        .confidence-badge.likely { background: #dbeafe; color: #1e40af; }
+        .confidence-badge.evaluate { background: #ede9fe; color: #5b21b6; }
+        pre { background: #1e293b; color: #e2e8f0; padding: 0.75rem; border-radius: 0.375rem; overflow-x: auto; font-size: 0.875rem; margin: 0.5rem 0; }
+        .problem { margin: 0.75rem 0; }
+        .fix-label { font-weight: 600; margin-top: 0.75rem; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Final Code Review Report</h1>
+        <div class="subtitle">openHiTLS/openhitls - PR #1234</div>
+        <p style="margin-bottom: 1rem;"></p>
+
+        <div class="stats">
+            <div class="stat"><div class="stat-value">14</div><div class="stat-label">Total</div></div>
+            <div class="stat critical"><div class="stat-value">0</div><div class="stat-label">Critical</div></div>
+            <div class="stat high"><div class="stat-value">4</div><div class="stat-label">High</div></div>
+            <div class="stat medium"><div class="stat-value">8</div><div class="stat-label">Medium</div></div>
+            <div class="stat low"><div class="stat-value">2</div><div class="stat-label">Low</div></div>
+        </div>
+
+        <div class="reviewers">Reviewers: claude, gemini, codex</div>
+<div class="section"><div class="section-title high">High</div>
+<div class="issue">
+                <div class="issue-title">Integer overflow in DecryptContentCore allocation</div>
+                <div class="issue-location">pki/cms/src/hitls_cms_envelopeddata.c:1265</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CLAUDE</span>
+                    <span class="confidence-badge trusted">置信度: 可信</span>
+                </div>
+                <pre>uint32_t blockSize;
+ret = CRYPT_EAL_CipherCtrl(ctx, CRYPT_CTRL_GET_BLOCKSIZE, &amp;blockSize, sizeof(blockSize));
+if (ret != CRYPT_SUCCESS) {
+    BSL_ERR_PUSH_ERROR(ret);
+    return ret;
+}
+uint32_t maxPlaintextLen = encInfo-&gt;encryptedContent.dataLen + blockSize;
+uint8_t *plaintextData = BSL_SAL_Malloc(maxPlaintextLen);</pre>
+                <div class="problem"><strong>Issue:</strong> When decrypting CMS EnvelopedData, the code adds blockSize to encryptedContent.dataLen without checking for overflow. An attacker could craft a CMS message with encryptedContent.dataLen close to UINT32_MAX, causing integer overflow and allocating a buffer that is too small, leading to heap buffer overflow during decryption.</div>
+                <div class="fix-label">Fix:</div><pre>uint32_t blockSize;
+ret = CRYPT_EAL_CipherCtrl(ctx, CRYPT_CTRL_GET_BLOCKSIZE, &amp;blockSize, sizeof(blockSize));
+if (ret != CRYPT_SUCCESS) {
+    BSL_ERR_PUSH_ERROR(ret);
+    return ret;
+}
+if (encInfo-&gt;encryptedContent.dataLen &gt; UINT32_MAX - blockSize) {
+    BSL_ERR_PUSH_ERROR(HITLS_CMS_ERR_INVALID_DATA);
+    return HITLS_CMS_ERR_INVALID_DATA;
+}
+uint32_t maxPlaintextLen = encInfo-&gt;encryptedContent.dataLen + blockSize;
+uint8_t *plaintextData = BSL_SAL_Malloc(maxPlaintextLen);</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">Integer overflow in EnvelopedData_DecryptUpdate buffer allocation</div>
+                <div class="issue-location">pki/cms/src/hitls_cms_envelopeddata.c:3454-3455</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CLAUDE</span>
+                    <span class="confidence-badge trusted">置信度: 可信</span>
+                </div>
+                <pre>uint32_t curOutLen = output-&gt;dataLen;
+uint32_t maxOutLen = input-&gt;dataLen + blockSize;
+uint32_t totalOutLen = curOutLen + maxOutLen;
+uint8_t *newBuf;</pre>
+                <div class="problem"><strong>Issue:</strong> The code adds blockSize to input->dataLen and then adds curOutLen without checking for overflow. An attacker could provide large input data sizes to cause integer overflow, leading to undersized buffer allocation and heap overflow.</div>
+                <div class="fix-label">Fix:</div><pre>uint32_t curOutLen = output-&gt;dataLen;
+if (input-&gt;dataLen &gt; UINT32_MAX - blockSize) {
+    BSL_ERR_PUSH_ERROR(HITLS_CMS_ERR_INVALID_DATA);
+    return HITLS_CMS_ERR_INVALID_DATA;
+}
+uint32_t maxOutLen = input-&gt;dataLen + blockSize;
+if (curOutLen &gt; UINT32_MAX - maxOutLen) {
+    BSL_ERR_PUSH_ERROR(HITLS_CMS_ERR_INVALID_DATA);
+    return HITLS_CMS_ERR_INVALID_DATA;
+}
+uint32_t totalOutLen = curOutLen + maxOutLen;
+uint8_t *newBuf;</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">Integer overflow in TransferAccumulatedData buffer allocation</div>
+                <div class="issue-location">pki/cms/src/hitls_cms_envelopeddata.c:3483</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CLAUDE</span>
+                    <span class="confidence-badge trusted">置信度: 可信</span>
+                </div>
+                <pre>uint32_t curOutLen = output-&gt;dataLen;
+uint32_t accDataLen = envData-&gt;streamPlaintext-&gt;dataLen;
+uint32_t newOutLen = curOutLen + accDataLen;</pre>
+                <div class="problem"><strong>Issue:</strong> The code adds curOutLen and accDataLen without checking for overflow, which could lead to undersized buffer allocation during data transfer in the streaming decryption path.</div>
+                <div class="fix-label">Fix:</div><pre>uint32_t curOutLen = output-&gt;dataLen;
+uint32_t accDataLen = envData-&gt;streamPlaintext-&gt;dataLen;
+if (curOutLen &gt; UINT32_MAX - accDataLen) {
+    BSL_ERR_PUSH_ERROR(HITLS_CMS_ERR_INVALID_DATA);
+    return HITLS_CMS_ERR_INVALID_DATA;
+}
+uint32_t newOutLen = curOutLen + accDataLen;</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">DecryptInit reports success after decryption context setup fails</div>
+                <div class="issue-location">pki/cms/src/hitls_cms_envelopeddata.c:3413-3420</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CODEX</span>
+                    <span class="confidence-badge trusted">置信度: 可信</span>
+                </div>
+                <pre>ret = SetDecryCtx(envData);
+if (ret != HITLS_PKI_SUCCESS) {
+    BSL_SAL_ClearFree(envData-&gt;streamKey, envData-&gt;streamKeyLen);
+    envData-&gt;streamKey = NULL;
+    envData-&gt;streamKeyLen = 0;
+}
+envData-&gt;state = HITLS_CMS_DECRYPT_INIT;
+return HITLS_PKI_SUCCESS;</pre>
+                <div class="problem"><strong>Issue:</strong> EnvelopedData_DecryptInit() clears the CEK when SetDecryCtx() fails, but then still marks the object as initialized and returns success. Callers will continue with a half-initialized decrypt state and only fail later in Update/Final.</div>
+                <div class="fix-label">Fix:</div><pre>ret = SetDecryCtx(envData);
+if (ret != HITLS_PKI_SUCCESS) {
+    BSL_SAL_ClearFree(envData-&gt;streamKey, envData-&gt;streamKeyLen);
+    envData-&gt;streamKey = NULL;
+    envData-&gt;streamKeyLen = 0;
+    return ret;
+}
+envData-&gt;state = HITLS_CMS_DECRYPT_INIT;
+return HITLS_PKI_SUCCESS;</pre>
+            </div>
+</div>
+<div class="section"><div class="section-title medium">Medium</div>
+<div class="issue">
+                <div class="issue-title">Generator emits EnvelopedData with an empty RecipientInfos set</div>
+                <div class="issue-location">pki/cms/src/hitls_cms_envelopeddata.c:2614-2619</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CODEX</span>
+                    <span class="confidence-badge trusted">置信度: 可信</span>
+                </div>
+                <pre>static int32_t EncodeRecipientList(CMS_RecipientInfos *list, BSL_ASN1_Buffer *encode)
+{
+    uint32_t count = (uint32_t)BSL_LIST_COUNT(list);
+    if (count == 0) {
+        encode-&gt;buff = NULL;
+        encode-&gt;len = 0;
+        encode-&gt;tag = BSL_ASN1_TAG_CONSTRUCTED | BSL_ASN1_TAG_SET;
+        return HITLS_PKI_SUCCESS;
+    }</pre>
+                <div class="problem"><strong>Issue:</strong> RFC 5652 section 6.1 requires RecipientInfos ::= SET SIZE (1..MAX) OF RecipientInfo. This code returns success for count == 0, so encryption can generate an invalid CMS object that cannot be decrypted and that ParseRecipientList() would reject.</div>
+                <div class="fix-label">Fix:</div><pre>static int32_t EncodeRecipientList(CMS_RecipientInfos *list, BSL_ASN1_Buffer *encode)
+{
+    uint32_t count = (uint32_t)BSL_LIST_COUNT(list);
+    if (count == 0) {
+        BSL_ERR_PUSH_ERROR(HITLS_CMS_ERR_INVALID_PARAM);
+        return HITLS_CMS_ERR_INVALID_PARAM;
+    }</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">KEM KEK derivation ignores the CMS provider context</div>
+                <div class="issue-location">pki/cms/src/hitls_cms_envelopeddata.c:882</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CODEX</span>
+                    <span class="confidence-badge trusted">置信度: 可信</span>
+                </div>
+                <pre>uint8_t *kek = NULL;
+ret = DeriveKek(kemri-&gt;libCtx, kemri-&gt;attrName, kemri, sharedSecret, sharedSecretLen, &amp;kek);
+BSL_SAL_CleanseData(sharedSecret, sizeof(sharedSecret));</pre>
+                <div class="problem"><strong>Issue:</strong> EncryptCekForKemri() derives the KEK from kemri->libCtx and kemri->attrName, but those runtime fields are never populated when KEM recipients are created (CMS_KemriNew) or parsed (ParseKemri). ML-KEM EnvelopedData therefore falls back to a NULL/default provider context and breaks non-default-provider flows.</div>
+                <div class="fix-label">Fix:</div><pre>static void CMS_SetRecipientRuntimeCtx(CMS_RecipientInfo *recip, CMS_EnvelopedData *envData)
+{
+    if (recip-&gt;type == CMS_RECIPIENT_TYPE_KEMRI &amp;&amp; recip-&gt;d.kemri != NULL) {
+        recip-&gt;d.kemri-&gt;libCtx = envData-&gt;libCtx;
+        recip-&gt;d.kemri-&gt;attrName = envData-&gt;attrName;
+    }
+}
+
+/* Call CMS_SetRecipientRuntimeCtx() after creating or parsing each recipient. */
+/* In HITLS_CMS_AddRecipientCert(), after CreateRecipientInfoFromCert(): */
+CMS_SetRecipientRuntimeCtx(recipient, cms-&gt;ctx.envelopedData);
+
+/* In ParseRecipientList(), after ParseRecipientListItem(): */
+CMS_SetRecipientRuntimeCtx(recipInfo, envData);</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">Parser accepts IV-based content-encryption algorithms without parameters</div>
+                <div class="issue-location">pki/cms/src/hitls_cms_envelopeddata.c:2018-2028</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CODEX</span>
+                    <span class="confidence-badge trusted">置信度: 可信</span>
+                </div>
+                <pre>static int32_t ParseEncryptionAlgAndParams(BSL_ASN1_Buffer *asnArr, CMS_EncryptedContentInfo *item)
+{
+    BslCid cid = BSL_OBJ_GetCidFromOidBuff(asnArr[HITLS_CMS_ENCRYCONTENTINFO_CONTENTENCRYALG_OID_IDX].buff,
+                                           asnArr[HITLS_CMS_ENCRYCONTENTINFO_CONTENTENCRYALG_PARAM_IDX].len);
+    if (cid == BSL_CID_UNKNOWN) {
+        BSL_ERR_PUSH_ERROR(HITLS_CMS_ERR_PARSE_TYPE);
+        return HITLS_CMS_ERR_PARSE_TYPE;
+    }
+    item-&gt;contentEncryAlg = cid;
+
+    if (asnArr[HITLS_CMS_ENCRYCONTENTINFO_CONTENTENCRYALG_PARAM_IDX].len &gt; 0) {
+        item-&gt;algParams = BSL_SAL_Calloc(1, sizeof(BSL_Buffer));
+        if (item-&gt;algParams == NULL) {
+            BSL_ERR_PUSH_ERROR(BSL_MALLOC_FAIL);
+            return BSL_MALLOC_FAIL;
+        }
+        item-&gt;algParams-&gt;data = asnArr[HITLS_CMS_ENCRYCONTENTINFO_CONTENTENCRYALG_PARAM_IDX].buff;
+        item-&gt;algParams-&gt;dataLen = asnArr[HITLS_CMS_ENCRYCONTENTINFO_CONTENTENCRYALG_PARAM_IDX].len;
+    } else {
+        item-&gt;algParams = NULL;
+    }
+    return HITLS_PKI_SUCCESS;
+}</pre>
+                <div class="problem"><strong>Issue:</strong> For algorithms such as AES-CBC, AlgorithmIdentifier.parameters carries the IV and is required. This branch silently accepts a missing parameter block and leaves item->algParams = NULL, so malformed input is only rejected later, or worse, is decrypted with a NULL/zero-length IV.</div>
+                <div class="fix-label">Fix:</div><pre>static int32_t ParseEncryptionAlgAndParams(BSL_ASN1_Buffer *asnArr, CMS_EncryptedContentInfo *item)
+{
+    BslCid cid = BSL_OBJ_GetCidFromOidBuff(asnArr[HITLS_CMS_ENCRYCONTENTINFO_CONTENTENCRYALG_OID_IDX].buff,
+                                           asnArr[HITLS_CMS_ENCRYCONTENTINFO_CONTENTENCRYALG_PARAM_IDX].len);
+    if (cid == BSL_CID_UNKNOWN) {
+        BSL_ERR_PUSH_ERROR(HITLS_CMS_ERR_PARSE_TYPE);
+        return HITLS_CMS_ERR_PARSE_TYPE;
+    }
+    item-&gt;contentEncryAlg = cid;
+
+    /* Check if algorithm requires IV parameter */
+    uint32_t ivLen = 0;
+    int32_t infoRet = CRYPT_EAL_CipherGetInfo((CRYPT_CIPHER_AlgId)cid, CRYPT_INFO_IV_LEN, &amp;ivLen);
+    bool needIv = (infoRet == CRYPT_SUCCESS &amp;&amp; ivLen &gt; 0);
+
+    if (needIv) {
+        if (asnArr[HITLS_CMS_ENCRYCONTENTINFO_CONTENTENCRYALG_PARAM_IDX].tag == BSL_ASN1_TAG_EMPTY ||
+            asnArr[HITLS_CMS_ENCRYCONTENTINFO_CONTENTENCRYALG_PARAM_IDX].len != ivLen) {
+            BSL_ERR_PUSH_ERROR(HITLS_CMS_ERR_PARSE_TYPE);
+            return HITLS_CMS_ERR_PARSE_TYPE;
+        }
+    }
+
+    if (asnArr[HITLS_CMS_ENCRYCONTENTINFO_CONTENTENCRYALG_PARAM_IDX].tag != BSL_ASN1_TAG_EMPTY) {
+        item-&gt;algParams = BSL_SAL_Calloc(1, sizeof(BSL_Buffer));
+        if (item-&gt;algParams == NULL) {
+            BSL_ERR_PUSH_ERROR(BSL_MALLOC_FAIL);
+            return BSL_MALLOC_FAIL;
+        }
+        item-&gt;algParams-&gt;data = asnArr[HITLS_CMS_ENCRYCONTENTINFO_CONTENTENCRYALG_PARAM_IDX].buff;
+        item-&gt;algParams-&gt;dataLen = asnArr[HITLS_CMS_ENCRYCONTENTINFO_CONTENTENCRYALG_PARAM_IDX].len;
+    } else {
+        item-&gt;algParams = NULL;
+    }
+    return HITLS_PKI_SUCCESS;
+}</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">Decrypt final trusts CRYPT_PARAM_DECODE_BUFFER_DATA without type checking</div>
+                <div class="issue-location">pki/cms/src/hitls_cms_envelopeddata.c:3613-3618</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CODEX</span>
+                    <span class="confidence-badge trusted">置信度: 可信</span>
+                </div>
+                <pre>const BSL_Param *p = BSL_PARAM_FindConstParam(param, CRYPT_PARAM_DECODE_BUFFER_DATA);
+if (p == NULL || p-&gt;value == NULL) {
+    BSL_ERR_PUSH_ERROR(HITLS_CMS_ERR_NULL_POINTER);
+    return HITLS_CMS_ERR_NULL_POINTER;
+}
+BSL_Buffer *output = (BSL_Buffer *)p-&gt;value;
+return EnvelopedData_DecryptFinal(cms, output);</pre>
+                <div class="problem"><strong>Issue:</strong> The decrypt-final path only checks that p->value is non-NULL and then casts it to BSL_Buffer *. A caller can pass the right key with the wrong valueType or valueLen and trigger an invalid cast and write into unrelated memory.</div>
+                <div class="fix-label">Fix:</div><pre>const BSL_Param *p = BSL_PARAM_FindConstParam(param, CRYPT_PARAM_DECODE_BUFFER_DATA);
+if (p == NULL || p-&gt;value == NULL) {
+    BSL_ERR_PUSH_ERROR(HITLS_CMS_ERR_NULL_POINTER);
+    return HITLS_CMS_ERR_NULL_POINTER;
+}
+if (p-&gt;valueType != BSL_PARAM_TYPE_CTX_PTR || p-&gt;valueLen != sizeof(BSL_Buffer)) {
+    BSL_ERR_PUSH_ERROR(HITLS_CMS_ERR_INVALID_PARAM);
+    return HITLS_CMS_ERR_INVALID_PARAM;
+}
+BSL_Buffer *output = (BSL_Buffer *)p-&gt;value;
+return EnvelopedData_DecryptFinal(cms, output);</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">EnvelopedData feature omits required crypto and X509 dependencies</div>
+                <div class="issue-location">cmake/hitls_define_dependencies.cmake:583</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CODEX</span>
+                    <span class="confidence-badge trusted">置信度: 可信</span>
+                </div>
+                <pre>hitls_define_dependency(HITLS_PKI_CMS_ENVELOPEDDATA     DEPS HITLS_PKI_CMS HITLS_BSL_ASN1)</pre>
+                <div class="problem"><strong>Issue:</strong> hitls_cms_envelopeddata.c uses X509 cert/CRL parse/generate helpers (HITLS_X509_CertCtrl, HITLS_X509_SetNameList, HITLS_X509_ParseAttrList), cipher code (CRYPT_EAL_Cipher*), HKDF (CRYPT_EAL_KdfDerive), RSA encryption/decryption (CRYPT_EAL_PkeyEncrypt/Decrypt), and ML-KEM, but the feature dependency only enables HITLS_PKI_CMS and HITLS_BSL_ASN1. Feature combinations that turn on HITLS_PKI_CMS_ENVELOPEDDATA without those subfeatures can build into missing symbols or a nonfunctional binary.</div>
+                <div class="fix-label">Fix:</div><pre>hitls_define_dependency(HITLS_PKI_CMS_ENVELOPEDDATA     DEPS HITLS_PKI_CMS HITLS_BSL_ASN1
+    HITLS_PKI_X509_CRT_PARSE HITLS_CRYPTO_CIPHER HITLS_CRYPTO_HKDF
+    HITLS_CRYPTO_RSA_ENCRYPT HITLS_CRYPTO_RSA_DECRYPT HITLS_CRYPTO_RSAES_PKCSV15
+    HITLS_CRYPTO_PKEY_KEM
+)</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">Integer overflow in EnvelopedData_EncryptUpdate buffer allocation</div>
+                <div class="issue-location">pki/cms/src/hitls_cms_envelopeddata.c:3204-3205</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CLAUDE</span>
+                    <span class="confidence-badge trusted">置信度: 可信</span>
+                </div>
+                <pre>uint32_t currentLen = envData-&gt;encryptedContentInfo.encryptedContent.dataLen;
+uint32_t newDataLen = input-&gt;dataLen + blockSize;
+uint32_t totalLen = currentLen + newDataLen;</pre>
+                <div class="problem"><strong>Issue:</strong> The code adds blockSize to input->dataLen and then adds currentLen without checking for overflow. While this is in the encryption path (not parsing), it could still cause issues with very large inputs.</div>
+                <div class="fix-label">Fix:</div><pre>uint32_t currentLen = envData-&gt;encryptedContentInfo.encryptedContent.dataLen;
+if (input-&gt;dataLen &gt; UINT32_MAX - blockSize) {
+    BSL_ERR_PUSH_ERROR(HITLS_CMS_ERR_INVALID_DATA);
+    return HITLS_CMS_ERR_INVALID_DATA;
+}
+uint32_t newDataLen = input-&gt;dataLen + blockSize;
+if (currentLen &gt; UINT32_MAX - newDataLen) {
+    BSL_ERR_PUSH_ERROR(HITLS_CMS_ERR_INVALID_DATA);
+    return HITLS_CMS_ERR_INVALID_DATA;
+}
+uint32_t totalLen = currentLen + newDataLen;</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">Integer overflow in EncryptContentCore buffer allocation</div>
+                <div class="issue-location">pki/cms/src/hitls_cms_envelopeddata.c:347</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CLAUDE</span>
+                    <span class="confidence-badge trusted">置信度: 可信</span>
+                </div>
+                <pre>uint32_t blockSize;
+ret = CRYPT_EAL_CipherCtrl(ctx, CRYPT_CTRL_GET_BLOCKSIZE, &amp;blockSize, sizeof(blockSize));
+if (ret != CRYPT_SUCCESS) {
+    BSL_ERR_PUSH_ERROR(ret);
+    return ret;
+}
+uint32_t ciphertextLen = plaintext-&gt;dataLen + blockSize;
+uint8_t *ciphertext = BSL_SAL_Malloc(ciphertextLen);</pre>
+                <div class="problem"><strong>Issue:</strong> The code adds blockSize to plaintext->dataLen without checking for overflow. While this is in the encryption path, it could cause issues with very large plaintext inputs.</div>
+                <div class="fix-label">Fix:</div><pre>uint32_t blockSize;
+ret = CRYPT_EAL_CipherCtrl(ctx, CRYPT_CTRL_GET_BLOCKSIZE, &amp;blockSize, sizeof(blockSize));
+if (ret != CRYPT_SUCCESS) {
+    BSL_ERR_PUSH_ERROR(ret);
+    return ret;
+}
+if (plaintext-&gt;dataLen &gt; UINT32_MAX - blockSize) {
+    BSL_ERR_PUSH_ERROR(HITLS_CMS_ERR_INVALID_DATA);
+    return HITLS_CMS_ERR_INVALID_DATA;
+}
+uint32_t ciphertextLen = plaintext-&gt;dataLen + blockSize;
+uint8_t *ciphertext = BSL_SAL_Malloc(ciphertextLen);</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">Potential buffer underflow in ParseRecipientList</div>
+                <div class="issue-location">pki/cms/src/hitls_cms_envelopeddata.c:1947-1948</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CLAUDE</span>
+                    <span class="confidence-badge likely">置信度: 较可信</span>
+                </div>
+                <pre>// value
+ret = ParseRecipientListItem(tag, buff, valueLen, list);
+if (ret != BSL_SUCCESS) {
+    break;
+}
+buff += valueLen;
+buffLen -= valueLen;</pre>
+                <div class="problem"><strong>Issue:</strong> The code subtracts valueLen from buffLen without verifying that valueLen <= buffLen. If BSL_ASN1_DecodeLen returns a valid valueLen but valueLen > buffLen due to malformed ASN.1 data, this would cause unsigned integer underflow. The BSL_ASN1_DecodeLen function does not guarantee that the decoded length fits in the remaining buffer.</div>
+                <div class="fix-label">Fix:</div><pre>// value
+if (valueLen &gt; buffLen) {
+    BSL_ERR_PUSH_ERROR(HITLS_CMS_ERR_INVALID_DATA);
+    return HITLS_CMS_ERR_INVALID_DATA;
+}
+ret = ParseRecipientListItem(tag, buff, valueLen, list);
+if (ret != BSL_SUCCESS) {
+    break;
+}
+buff += valueLen;
+buffLen -= valueLen;</pre>
+            </div>
+</div>
+<div class="section"><div class="section-title low">Low</div>
+<div class="issue">
+                <div class="issue-title">Integer overflow in FinalizeEncry buffer allocation</div>
+                <div class="issue-location">pki/cms/src/hitls_cms_envelopeddata.c:3238</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CLAUDE</span>
+                    <span class="confidence-badge likely">置信度: 较可信</span>
+                </div>
+                <pre>uint32_t currentLen = envData-&gt;encryptedContentInfo.encryptedContent.dataLen;
+uint32_t totalLen = currentLen + blockSize;
+uint8_t *newBuf = BSL_SAL_Realloc(envData-&gt;encryptedContentInfo.encryptedContent.data, totalLen, currentLen);</pre>
+                <div class="problem"><strong>Issue:</strong> The code adds blockSize to currentLen without checking for overflow during encryption finalization.</div>
+                <div class="fix-label">Fix:</div><pre>uint32_t currentLen = envData-&gt;encryptedContentInfo.encryptedContent.dataLen;
+if (currentLen &gt; UINT32_MAX - blockSize) {
+    BSL_ERR_PUSH_ERROR(HITLS_CMS_ERR_INVALID_DATA);
+    return HITLS_CMS_ERR_INVALID_DATA;
+}
+uint32_t totalLen = currentLen + blockSize;
+uint8_t *newBuf = BSL_SAL_Realloc(envData-&gt;encryptedContentInfo.encryptedContent.data, totalLen, currentLen);</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">Integer overflow in EnvelopedData_DecryptFinal buffer allocation</div>
+                <div class="issue-location">pki/cms/src/hitls_cms_envelopeddata.c:3538</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CLAUDE</span>
+                    <span class="confidence-badge likely">置信度: 较可信</span>
+                </div>
+                <pre>uint32_t currentLen = output-&gt;dataLen;
+uint32_t totalLen = currentLen + blockSize;
+uint8_t *newBuf = BSL_SAL_Realloc(output-&gt;data, totalLen, currentLen);</pre>
+                <div class="problem"><strong>Issue:</strong> The code adds blockSize to currentLen without checking for overflow during decryption finalization.</div>
+                <div class="fix-label">Fix:</div><pre>uint32_t currentLen = output-&gt;dataLen;
+if (currentLen &gt; UINT32_MAX - blockSize) {
+    BSL_ERR_PUSH_ERROR(HITLS_CMS_ERR_INVALID_DATA);
+    return HITLS_CMS_ERR_INVALID_DATA;
+}
+uint32_t totalLen = currentLen + blockSize;
+uint8_t *newBuf = BSL_SAL_Realloc(output-&gt;data, totalLen, currentLen);</pre>
+            </div>
+</div>
+</div></body></html>

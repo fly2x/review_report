@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Code Review: openHiTLS/openhitls#1234 - CLAUDE</title>
+    <style>
+        :root { --critical: #dc2626; --high: #ea580c; --medium: #ca8a04; --low: #65a30d; }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: system-ui, sans-serif; background: #f8fafc; color: #1e293b; padding: 2rem; line-height: 1.6; }
+        .container { max-width: 900px; margin: 0 auto; }
+        h1 { font-size: 1.5rem; margin-bottom: 0.5rem; }
+        .subtitle { color: #64748b; margin-bottom: 2rem; }
+        .section { margin-bottom: 2rem; }
+        .section-title { font-size: 1.1rem; font-weight: 600; padding: 0.5rem 1rem; border-radius: 0.5rem 0.5rem 0 0; color: white; }
+        .section-title.critical { background: var(--critical); }
+        .section-title.high { background: var(--high); }
+        .section-title.medium { background: var(--medium); }
+        .section-title.low { background: var(--low); }
+        .issue { background: white; border: 1px solid #e2e8f0; border-top: none; padding: 1rem; }
+        .issue:last-child { border-radius: 0 0 0.5rem 0.5rem; }
+        .issue-title { font-weight: 600; margin-bottom: 0.25rem; }
+        .issue-location { font-family: monospace; font-size: 0.875rem; color: #64748b; margin-bottom: 0.75rem; }
+        .issue-source { font-size: 0.75rem; color: #94a3b8; margin-top: 0.5rem; }
+        pre { background: #1e293b; color: #e2e8f0; padding: 0.75rem; border-radius: 0.375rem; overflow-x: auto; font-size: 0.875rem; margin: 0.5rem 0; }
+        .problem { margin: 0.75rem 0; }
+        .fix-label { font-weight: 600; margin-top: 0.75rem; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Code Review: openHiTLS/openhitls#1234 - CLAUDE</h1>
+        <div class="subtitle"></div>
+<div class="section"><div class="section-title high">High</div>
+<div class="issue">
+                <div class="issue-title">Integer overflow in DecryptContentCore allocation</div>
+                <div class="issue-location">pki/cms/src/hitls_cms_envelopeddata.c:1265</div>
+                <pre>uint32_t maxPlaintextLen = encInfo-&gt;encryptedContent.dataLen + blockSize;
+uint8_t *plaintextData = BSL_SAL_Malloc(maxPlaintextLen);</pre>
+                <div class="problem"><strong>Issue:</strong> When decrypting CMS EnvelopedData, the code adds blockSize to encryptedContent.dataLen without checking for overflow. An attacker could craft a CMS message with encryptedContent.dataLen close to UINT32_MAX, causing integer overflow and allocating a buffer that is too small, leading to heap buffer overflow during decryption.</div>
+                <div class="fix-label">Fix:</div><pre>if (encInfo-&gt;encryptedContent.dataLen &gt; UINT32_MAX - blockSize) {
+    BSL_ERR_PUSH_ERROR(HITLS_CMS_ERR_INVALID_DATA);
+    return HITLS_CMS_ERR_INVALID_DATA;
+}
+uint32_t maxPlaintextLen = encInfo-&gt;encryptedContent.dataLen + blockSize;
+uint8_t *plaintextData = BSL_SAL_Malloc(maxPlaintextLen);</pre>
+                <div class="issue-source">Reviewer: claude</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">Integer overflow in EnvelopedData_DecryptUpdate</div>
+                <div class="issue-location">pki/cms/src/hitls_cms_envelopeddata.c:3454-3455</div>
+                <pre>uint32_t maxOutLen = input-&gt;dataLen + blockSize;
+uint32_t totalOutLen = curOutLen + maxOutLen;</pre>
+                <div class="problem"><strong>Issue:</strong> The code adds blockSize to input->dataLen and then adds curOutLen without checking for overflow. An attacker could provide large input data sizes to cause integer overflow, leading to undersized buffer allocation and heap overflow.</div>
+                <div class="fix-label">Fix:</div><pre>if (input-&gt;dataLen &gt; UINT32_MAX - blockSize) {
+    BSL_ERR_PUSH_ERROR(HITLS_CMS_ERR_INVALID_DATA);
+    return HITLS_CMS_ERR_INVALID_DATA;
+}
+uint32_t maxOutLen = input-&gt;dataLen + blockSize;
+if (curOutLen &gt; UINT32_MAX - maxOutLen) {
+    BSL_ERR_PUSH_ERROR(HITLS_CMS_ERR_INVALID_DATA);
+    return HITLS_CMS_ERR_INVALID_DATA;
+}
+uint32_t totalOutLen = curOutLen + maxOutLen;</pre>
+                <div class="issue-source">Reviewer: claude</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">Integer overflow in TransferAccumulatedData</div>
+                <div class="issue-location">pki/cms/src/hitls_cms_envelopeddata.c:3482</div>
+                <pre>uint32_t newOutLen = curOutLen + accDataLen;</pre>
+                <div class="problem"><strong>Issue:</strong> The code adds curOutLen and accDataLen without checking for overflow, which could lead to undersized buffer allocation.</div>
+                <div class="fix-label">Fix:</div><pre>if (curOutLen &gt; UINT32_MAX - accDataLen) {
+    BSL_ERR_PUSH_ERROR(HITLS_CMS_ERR_INVALID_DATA);
+    return HITLS_CMS_ERR_INVALID_DATA;
+}
+uint32_t newOutLen = curOutLen + accDataLen;</pre>
+                <div class="issue-source">Reviewer: claude</div>
+            </div>
+</div>
+<div class="section"><div class="section-title medium">Medium</div>
+<div class="issue">
+                <div class="issue-title">Integer overflow in EnvelopedData_EncryptUpdate</div>
+                <div class="issue-location">pki/cms/src/hitls_cms_envelopeddata.c:3204-3205</div>
+                <pre>uint32_t newDataLen = input-&gt;dataLen + blockSize;
+uint32_t totalLen = currentLen + newDataLen;</pre>
+                <div class="problem"><strong>Issue:</strong> The code adds blockSize to input->dataLen and then adds currentLen without checking for overflow. While this is in the encryption path (not parsing), it could still cause issues with very large inputs.</div>
+                <div class="fix-label">Fix:</div><pre>if (input-&gt;dataLen &gt; UINT32_MAX - blockSize) {
+    BSL_ERR_PUSH_ERROR(HITLS_CMS_ERR_INVALID_DATA);
+    return HITLS_CMS_ERR_INVALID_DATA;
+}
+uint32_t newDataLen = input-&gt;dataLen + blockSize;
+if (currentLen &gt; UINT32_MAX - newDataLen) {
+    BSL_ERR_PUSH_ERROR(HITLS_CMS_ERR_INVALID_DATA);
+    return HITLS_CMS_ERR_INVALID_DATA;
+}
+uint32_t totalLen = currentLen + newDataLen;</pre>
+                <div class="issue-source">Reviewer: claude</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">Integer overflow in EncryptContentCore</div>
+                <div class="issue-location">pki/cms/src/hitls_cms_envelopeddata.c:347</div>
+                <pre>uint32_t ciphertextLen = plaintext-&gt;dataLen + blockSize;</pre>
+                <div class="problem"><strong>Issue:</strong> The code adds blockSize to plaintext->dataLen without checking for overflow. While this is in the encryption path, it could cause issues with very large plaintext inputs.</div>
+                <div class="fix-label">Fix:</div><pre>if (plaintext-&gt;dataLen &gt; UINT32_MAX - blockSize) {
+    BSL_ERR_PUSH_ERROR(HITLS_CMS_ERR_INVALID_DATA);
+    return HITLS_CMS_ERR_INVALID_DATA;
+}
+uint32_t ciphertextLen = plaintext-&gt;dataLen + blockSize;</pre>
+                <div class="issue-source">Reviewer: claude</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">Potential buffer underflow in ParseRecipientList</div>
+                <div class="issue-location">pki/cms/src/hitls_cms_envelopeddata.c:1947-1948</div>
+                <pre>buff += valueLen;
+buffLen -= valueLen;</pre>
+                <div class="problem"><strong>Issue:</strong> The code subtracts valueLen from buffLen without verifying that valueLen <= buffLen. If BSL_ASN1_DecodeLen returns a valid valueLen but valueLen > buffLen, this would cause unsigned integer underflow.</div>
+                <div class="fix-label">Fix:</div><pre>if (valueLen &gt; buffLen) {
+    BSL_ERR_PUSH_ERROR(HITLS_CMS_ERR_INVALID_DATA);
+    return HITLS_CMS_ERR_INVALID_DATA;
+}
+buff += valueLen;
+buffLen -= valueLen;</pre>
+                <div class="issue-source">Reviewer: claude</div>
+            </div>
+</div>
+<div class="section"><div class="section-title low">Low</div>
+<div class="issue">
+                <div class="issue-title">Integer overflow in FinalizeEncry</div>
+                <div class="issue-location">pki/cms/src/hitls_cms_envelopeddata.c:3238</div>
+                <pre>uint32_t totalLen = currentLen + blockSize;</pre>
+                <div class="problem"><strong>Issue:</strong> The code adds blockSize to currentLen without checking for overflow.</div>
+                <div class="fix-label">Fix:</div><pre>if (currentLen &gt; UINT32_MAX - blockSize) {
+    BSL_ERR_PUSH_ERROR(HITLS_CMS_ERR_INVALID_DATA);
+    return HITLS_CMS_ERR_INVALID_DATA;
+}
+uint32_t totalLen = currentLen + blockSize;</pre>
+                <div class="issue-source">Reviewer: claude</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">Integer overflow in EnvelopedData_DecryptFinal</div>
+                <div class="issue-location">pki/cms/src/hitls_cms_envelopeddata.c:3538</div>
+                <pre>uint32_t totalLen = currentLen + blockSize;</pre>
+                <div class="problem"><strong>Issue:</strong> The code adds blockSize to currentLen without checking for overflow.</div>
+                <div class="fix-label">Fix:</div><pre>if (currentLen &gt; UINT32_MAX - blockSize) {
+    BSL_ERR_PUSH_ERROR(HITLS_CMS_ERR_INVALID_DATA);
+    return HITLS_CMS_ERR_INVALID_DATA;
+}
+uint32_t totalLen = currentLen + blockSize;</pre>
+                <div class="issue-source">Reviewer: claude</div>
+            </div>
+</div>
+</div></body></html>
