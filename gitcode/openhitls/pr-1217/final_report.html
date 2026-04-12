@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Final Report: openHiTLS/openhitls#1217</title>
+    <style>
+        :root { --critical: #dc2626; --high: #ea580c; --medium: #ca8a04; --low: #65a30d;
+                 --trusted: #059669; --likely: #0284c7; --evaluate: #7c3aed; }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: system-ui, sans-serif; background: #f8fafc; color: #1e293b; padding: 2rem; line-height: 1.6; }
+        .container { max-width: 900px; margin: 0 auto; }
+        h1 { font-size: 1.75rem; margin-bottom: 0.5rem; }
+        .subtitle { color: #64748b; margin-bottom: 1rem; }
+        .stats { display: flex; gap: 1rem; margin-bottom: 2rem; flex-wrap: wrap; }
+        .stat { background: white; border: 1px solid #e2e8f0; border-radius: 0.5rem; padding: 1rem; min-width: 100px; text-align: center; }
+        .stat-value { font-size: 1.5rem; font-weight: 700; }
+        .stat-label { font-size: 0.875rem; color: #64748b; }
+        .stat.critical .stat-value { color: var(--critical); }
+        .stat.high .stat-value { color: var(--high); }
+        .stat.medium .stat-value { color: var(--medium); }
+        .stat.low .stat-value { color: var(--low); }
+        .reviewers { background: #e0e7ff; color: #3730a3; padding: 0.5rem 1rem; border-radius: 0.5rem; margin-bottom: 2rem; }
+        .section { margin-bottom: 2rem; }
+        .section-title { font-size: 1.1rem; font-weight: 600; padding: 0.5rem 1rem; border-radius: 0.5rem 0.5rem 0 0; color: white; }
+        .section-title.critical { background: var(--critical); }
+        .section-title.high { background: var(--high); }
+        .section-title.medium { background: var(--medium); }
+        .section-title.low { background: var(--low); }
+        .issue { background: white; border: 1px solid #e2e8f0; border-top: none; padding: 1rem; }
+        .issue:last-child { border-radius: 0 0 0.5rem 0.5rem; }
+        .issue-title { font-weight: 600; margin-bottom: 0.25rem; }
+        .issue-location { font-family: monospace; font-size: 0.875rem; color: #64748b; margin-bottom: 0.5rem; }
+        .issue-meta { font-size: 0.75rem; margin-bottom: 0.75rem; display: flex; gap: 0.75rem; align-items: center; }
+        .issue-meta .reviewers { background: #f1f5f9; color: #475569; padding: 0.25rem 0.5rem; border-radius: 0.25rem; margin: 0; }
+        .confidence-badge { padding: 0.25rem 0.5rem; border-radius: 0.25rem; font-weight: 500; }
+        .confidence-badge.trusted { background: #d1fae5; color: #065f46; }
+        .confidence-badge.likely { background: #dbeafe; color: #1e40af; }
+        .confidence-badge.evaluate { background: #ede9fe; color: #5b21b6; }
+        pre { background: #1e293b; color: #e2e8f0; padding: 0.75rem; border-radius: 0.375rem; overflow-x: auto; font-size: 0.875rem; margin: 0.5rem 0; }
+        .problem { margin: 0.75rem 0; }
+        .fix-label { font-weight: 600; margin-top: 0.75rem; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Final Code Review Report</h1>
+        <div class="subtitle">openHiTLS/openhitls - PR #1217</div>
+        <p style="margin-bottom: 1rem;"></p>
+
+        <div class="stats">
+            <div class="stat"><div class="stat-value">7</div><div class="stat-label">Total</div></div>
+            <div class="stat critical"><div class="stat-value">5</div><div class="stat-label">Critical</div></div>
+            <div class="stat high"><div class="stat-value">1</div><div class="stat-label">High</div></div>
+            <div class="stat medium"><div class="stat-value">1</div><div class="stat-label">Medium</div></div>
+            <div class="stat low"><div class="stat-value">0</div><div class="stat-label">Low</div></div>
+        </div>
+
+        <div class="reviewers">Reviewers: claude, gemini, codex</div>
+<div class="section"><div class="section-title critical">Critical</div>
+<div class="issue">
+                <div class="issue-title">Undefined option HITLS_CRYPTO_PKEY_KEM prevents source compilation</div>
+                <div class="issue-location">crypto/eal/CMakeLists.txt:60</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CLAUDE</span>
+                    <span class="confidence-badge trusted">置信度: 可信</span>
+                </div>
+                <pre>if(HITLS_CRYPTO_PKEY_KEM)
+    list(APPEND _eal_sources ${CMAKE_CURRENT_SOURCE_DIR}/src/eal_pkey_kem.c)
+endif()</pre>
+                <div class="problem"><strong>Issue:</strong> The condition `if(HITLS_CRYPTO_PKEY_KEM)` checks an option that is never defined in cmake/hitls_options.cmake or set anywhere. In CMake, undefined variables are falsy, so `eal_pkey_kem.c` will never be compiled even when KEM algorithms like MLKEM, FRODOKEM, MCELIECE, or HYBRIDKEM are enabled. This causes undefined references at link time for any code depending on symbols from this file.</div>
+                <div class="fix-label">Fix:</div><pre>if(HITLS_CRYPTO_MLKEM OR HITLS_CRYPTO_FRODOKEM OR HITLS_CRYPTO_HPKE OR HITLS_CRYPTO_HYBRIDKEM OR HITLS_CRYPTO_MCELIECE)
+    list(APPEND _eal_sources ${CMAKE_CURRENT_SOURCE_DIR}/src/eal_pkey_kem.c)
+endif()</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">Undefined option HITLS_CRYPTO_PKEY_KEM prevents source compilation</div>
+                <div class="issue-location">crypto/provider/CMakeLists.txt:42-44</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CLAUDE</span>
+                    <span class="confidence-badge trusted">置信度: 可信</span>
+                </div>
+                <pre>if(HITLS_CRYPTO_PKEY_KEM)
+    list(APPEND _default_sources ${CMAKE_CURRENT_SOURCE_DIR}/src/default/crypt_default_kem.c)
+endif()</pre>
+                <div class="problem"><strong>Issue:</strong> The condition `if(HITLS_CRYPTO_PKEY_KEM)` checks an option that is never defined in cmake/hitls_options.cmake. This causes `crypt_default_kem.c` to never be compiled, breaking KEM functionality for MLKEM, FRODOKEM, MCELIECE, HYBRIDKEM, and HPKE algorithms.</div>
+                <div class="fix-label">Fix:</div><pre>if(HITLS_CRYPTO_MLKEM OR HITLS_CRYPTO_FRODOKEM OR HITLS_CRYPTO_HPKE OR HITLS_CRYPTO_HYBRIDKEM OR HITLS_CRYPTO_MCELIECE)
+    list(APPEND _default_sources ${CMAKE_CURRENT_SOURCE_DIR}/src/default/crypt_default_kem.c)
+endif()</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">Undefined option HITLS_CRYPTO_PKEY_EXCH prevents source compilation</div>
+                <div class="issue-location">crypto/provider/CMakeLists.txt:45-47</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CLAUDE</span>
+                    <span class="confidence-badge trusted">置信度: 可信</span>
+                </div>
+                <pre>if(HITLS_CRYPTO_PKEY_EXCH)
+    list(APPEND _default_sources ${CMAKE_CURRENT_SOURCE_DIR}/src/default/crypt_default_keyexch.c)
+endif()</pre>
+                <div class="problem"><strong>Issue:</strong> The condition `if(HITLS_CRYPTO_PKEY_EXCH)` checks an option that is never defined. This causes `crypt_default_keyexch.c` to never be compiled, breaking key exchange functionality for ECDH, SM2, SM9, X25519, and DH algorithms.</div>
+                <div class="fix-label">Fix:</div><pre>if(HITLS_CRYPTO_ECDH OR HITLS_CRYPTO_SM2_EXCH OR HITLS_CRYPTO_SM9_EXCH OR HITLS_CRYPTO_X25519 OR HITLS_CRYPTO_DH)
+    list(APPEND _default_sources ${CMAKE_CURRENT_SOURCE_DIR}/src/default/crypt_default_keyexch.c)
+endif()</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">Undefined option HITLS_CRYPTO_PKEY_CRYPT prevents source compilation</div>
+                <div class="issue-location">crypto/provider/CMakeLists.txt:48-50</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CLAUDE</span>
+                    <span class="confidence-badge trusted">置信度: 可信</span>
+                </div>
+                <pre>if(HITLS_CRYPTO_PKEY_CRYPT)
+    list(APPEND _default_sources ${CMAKE_CURRENT_SOURCE_DIR}/src/default/crypt_default_pkeycipher.c)
+endif()</pre>
+                <div class="problem"><strong>Issue:</strong> The condition `if(HITLS_CRYPTO_PKEY_CRYPT)` checks an option that is never defined. This causes `crypt_default_pkeycipher.c` to never be compiled, breaking public key encryption/decryption functionality for RSA, SM2, SM9, and Paillier.</div>
+                <div class="fix-label">Fix:</div><pre>if(HITLS_CRYPTO_RSA_ENCRYPT OR HITLS_CRYPTO_RSA_DECRYPT OR HITLS_CRYPTO_SM2_CRYPT OR HITLS_CRYPTO_SM9_CRYPT OR HITLS_CRYPTO_PAILLIER)
+    list(APPEND _default_sources ${CMAKE_CURRENT_SOURCE_DIR}/src/default/crypt_default_pkeycipher.c)
+endif()</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">Undefined option HITLS_CRYPTO_PKEY_SIGN prevents source compilation</div>
+                <div class="issue-location">crypto/provider/CMakeLists.txt:51-53</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CLAUDE</span>
+                    <span class="confidence-badge trusted">置信度: 可信</span>
+                </div>
+                <pre>if(HITLS_CRYPTO_PKEY_SIGN)
+    list(APPEND _default_sources ${CMAKE_CURRENT_SOURCE_DIR}/src/default/crypt_default_sign.c)
+endif()</pre>
+                <div class="problem"><strong>Issue:</strong> The condition `if(HITLS_CRYPTO_PKEY_SIGN)` checks an option that is never defined. This causes `crypt_default_sign.c` to never be compiled, breaking signature functionality for RSA, DSA, ECDSA, Ed25519, SM2, SM9, XMSS, and MLDSA.</div>
+                <div class="fix-label">Fix:</div><pre>if(HITLS_CRYPTO_RSA_SIGN OR HITLS_CRYPTO_RSA_VERIFY OR HITLS_CRYPTO_DSA OR HITLS_CRYPTO_ECDSA OR HITLS_CRYPTO_ED25519 OR HITLS_CRYPTO_SM2_SIGN OR HITLS_CRYPTO_SM9_SIGN OR HITLS_CRYPTO_XMSS OR HITLS_CRYPTO_MLDSA)
+    list(APPEND _default_sources ${CMAKE_CURRENT_SOURCE_DIR}/src/default/crypt_default_sign.c)
+endif()</pre>
+            </div>
+</div>
+<div class="section"><div class="section-title high">High</div>
+<div class="issue">
+                <div class="issue-title">PQC-only builds can drop the CRYPT_RandEx implementation</div>
+                <div class="issue-location">crypto/util/CMakeLists.txt:26-27</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CODEX</span>
+                    <span class="confidence-badge trusted">置信度: 可信</span>
+                </div>
+                <pre>if(HITLS_CRYPTO_DRBG OR HITLS_CRYPTO_CURVE25519 OR HITLS_CRYPTO_RSA OR HITLS_CRYPTO_BN_RAND OR HITLS_CRYPTO_SM9)
+    list(APPEND _util_sources ${CMAKE_CURRENT_SOURCE_DIR}/crypt_util_rand.c)
+endif()</pre>
+                <div class="problem"><strong>Issue:</strong> The gate only pulls in `crypt_util_rand.c` for `DRBG`, `CURVE25519`, `RSA`, `BN_RAND`, or `SM9`. However, PQC algorithms also depend on this file: MLKEM (ml_kem.c:694,696,732), MLDSA (ml_dsa.c:417,840), XMSS (xmss_core.c:59,65,71), MCELIECE (mceliece.c:191), and FRODOKEM (frodokem.c:43). A PQC-only build (e.g., `HITLS_CRYPTO_MLKEM=ON` with others disabled) will generate object files that call `CRYPT_RandEx()` or `CRYPT_Rand()` without compiling the implementation, causing link failures.</div>
+                <div class="fix-label">Fix:</div><pre>if(HITLS_CRYPTO_DRBG OR HITLS_CRYPTO_CURVE25519 OR HITLS_CRYPTO_RSA OR HITLS_CRYPTO_BN_RAND OR
+   HITLS_CRYPTO_SM9 OR HITLS_CRYPTO_MLKEM OR HITLS_CRYPTO_MLDSA OR HITLS_CRYPTO_SLH_DSA OR
+   HITLS_CRYPTO_XMSS OR HITLS_CRYPTO_MCELIECE OR HITLS_CRYPTO_FRODOKEM)
+    list(APPEND _util_sources ${CMAKE_CURRENT_SOURCE_DIR}/crypt_util_rand.c)
+endif()</pre>
+            </div>
+</div>
+<div class="section"><div class="section-title medium">Medium</div>
+<div class="issue">
+                <div class="issue-title">XMSS builds can drop the CRYPT_CalcHash implementation</div>
+                <div class="issue-location">crypto/util/CMakeLists.txt:23-24</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CODEX</span>
+                    <span class="confidence-badge trusted">置信度: 可信</span>
+                </div>
+                <pre>if(HITLS_CRYPTO_RSA_EMSA_PSS OR HITLS_CRYPTO_RSAES_OAEP OR HITLS_CRYPTO_SLH_DSA)
+    list(APPEND _util_sources ${CMAKE_CURRENT_SOURCE_DIR}/crypt_util_mgf.c)
+endif()</pre>
+                <div class="problem"><strong>Issue:</strong> The file `crypt_util_mgf.c` provides both MGF1 padding and `CRYPT_CalcHash()`. XMSS uses `CRYPT_CalcHash()` in `crypto/xmss/src/xmss_hash.c:43`, but the condition only includes the file for RSA PSS/OAEP or SLH-DSA. A build with `HITLS_CRYPTO_XMSS=ON` and those three flags off will build `xmss_hash.c.o` without `crypt_util_mgf.c.o`, causing an undefined reference to `CRYPT_CalcHash`.</div>
+                <div class="fix-label">Fix:</div><pre>if(HITLS_CRYPTO_RSA_EMSA_PSS OR HITLS_CRYPTO_RSAES_OAEP OR HITLS_CRYPTO_SLH_DSA OR HITLS_CRYPTO_XMSS)
+    list(APPEND _util_sources ${CMAKE_CURRENT_SOURCE_DIR}/crypt_util_mgf.c)
+endif()</pre>
+            </div>
+</div>
+</div></body></html>

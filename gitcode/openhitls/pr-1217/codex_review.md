@@ -1,0 +1,44 @@
+# Code Review: openHiTLS/openhitls#1217
+**Reviewer**: CODEX
+
+
+## High
+
+### PQC-only builds can drop the `CRYPT_RandEx` implementation
+`crypto/util/CMakeLists.txt:26-27`
+```
+if(HITLS_CRYPTO_DRBG OR HITLS_CRYPTO_CURVE25519 OR HITLS_CRYPTO_RSA OR HITLS_CRYPTO_BN_RAND OR HITLS_CRYPTO_SM9)
+    list(APPEND _util_sources ${CMAKE_CURRENT_SOURCE_DIR}/crypt_util_rand.c)
+endif()
+```
+**Issue**: This gate only pulls in `crypt_util_rand.c` for `DRBG`, `CURVE25519`, `RSA`, `BN_RAND`, or `SM9`, but several other valid feature combinations still call `CRYPT_RandEx()` or `CRYPT_Rand()`. For example, `crypto/mlkem/src/ml_kem.c:694`, `crypto/xmss/src/xmss_core.c:59`, `crypto/mldsa/src/ml_dsa.c:417`, `crypto/mceliece/src/mceliece.c:191`, and `crypto/frodokem/src/frodokem.c:43` all depend on that source. With this PR, a configure-only `HITLS_CRYPTO_MLKEM=ON` build can generate `ml_kem.c.o` without `crypt_util_rand.c.o`, which leaves undefined references at link time.
+**Fix**:
+```
+if(HITLS_CRYPTO_DRBG OR HITLS_CRYPTO_CURVE25519 OR HITLS_CRYPTO_RSA OR HITLS_CRYPTO_BN_RAND OR
+   HITLS_CRYPTO_SM9 OR HITLS_CRYPTO_MLKEM OR HITLS_CRYPTO_MLDSA OR HITLS_CRYPTO_SLH_DSA OR
+   HITLS_CRYPTO_XMSS OR HITLS_CRYPTO_MCELIECE OR HITLS_CRYPTO_FRODOKEM)
+    list(APPEND _util_sources ${CMAKE_CURRENT_SOURCE_DIR}/crypt_util_rand.c)
+endif()
+```
+
+---
+
+
+## Medium
+
+### XMSS builds can drop the `CRYPT_CalcHash` implementation
+`crypto/util/CMakeLists.txt:23-24`
+```
+if(HITLS_CRYPTO_RSA_EMSA_PSS OR HITLS_CRYPTO_RSAES_OAEP OR HITLS_CRYPTO_SLH_DSA)
+    list(APPEND _util_sources ${CMAKE_CURRENT_SOURCE_DIR}/crypt_util_mgf.c)
+endif()
+```
+**Issue**: `crypt_util_mgf.c` does more than MGF1: it also defines `CRYPT_CalcHash()`. XMSS uses that helper in `crypto/xmss/src/xmss_hash.c:43`, but the new condition only includes the file for RSA PSS/OAEP or SLH-DSA. In a valid `HITLS_CRYPTO_XMSS=ON` build with those three flags off, `xmss_hash.c.o` is still built while `crypt_util_mgf.c.o` is omitted, causing an undefined reference to `CRYPT_CalcHash`.
+**Fix**:
+```
+if(HITLS_CRYPTO_RSA_EMSA_PSS OR HITLS_CRYPTO_RSAES_OAEP OR HITLS_CRYPTO_SLH_DSA OR HITLS_CRYPTO_XMSS)
+    list(APPEND _util_sources ${CMAKE_CURRENT_SOURCE_DIR}/crypt_util_mgf.c)
+endif()
+```
+
+---
