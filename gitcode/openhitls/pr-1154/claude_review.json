@@ -1,0 +1,82 @@
+[
+  {
+    "source": "claude",
+    "file": "include/tls/hitls_cert_type.h",
+    "line": "170",
+    "severity": "critical",
+    "title": "Undefined BSL_CID_COMPOSITE constant",
+    "problem": "The code uses BSL_CID_COMPOSITE but this constant is not defined anywhere in the codebase. This will cause a compilation error.",
+    "code": "TLS_CERT_KEY_TYPE_COMPOSITE = BSL_CID_COMPOSITE",
+    "fix": "Define BSL_CID_COMPOSITE in include/bsl/bsl_obj.h (or appropriate header) with a unique value, e.g.:\n    BSL_CID_COMPOSITE = 256,  /* identifies composite signature algorithms */"
+  },
+  {
+    "source": "claude",
+    "file": "include/tls/hitls_crypt_type.h",
+    "line": "173",
+    "severity": "critical",
+    "title": "Undefined BSL_CID_COMPOSITE constant",
+    "problem": "The code uses BSL_CID_COMPOSITE but this constant is not defined anywhere in the codebase. This will cause a compilation error.",
+    "code": "HITLS_SIGN_COMPOSITE = BSL_CID_COMPOSITE,",
+    "fix": "Define BSL_CID_COMPOSITE in include/bsl/bsl_obj.h (or appropriate header) with a unique value, e.g.:\n    BSL_CID_COMPOSITE = 256,  /* identifies composite signature algorithms */"
+  },
+  {
+    "source": "claude",
+    "file": "tls/config/src/config_sign.c",
+    "line": "117-311",
+    "severity": "critical",
+    "title": "Undefined CRYPT_COMPOSITE_* and BSL_CID_MLDSA_* constants",
+    "problem": "The code uses multiple undefined constants: CRYPT_COMPOSITE_MLDSA44_RSA2048_PSS_SHA256, BSL_CID_MLDSA44_RSA2048_PSS_SHA256, etc. These are used in TLS_SigSchemeInfo structures but are not defined anywhere.",
+    "code": "{\n        CONST_CAST(\"composite_mldsa44_rsa2048_pss_sha256\"),\n        CERT_SIG_SCHEME_COMPOSITE_MLDSA44_RSA2048_PSS_SHA256,\n        TLS_CERT_KEY_TYPE_COMPOSITE,\n        CRYPT_COMPOSITE_MLDSA44_RSA2048_PSS_SHA256,  /* UNDEFINED */\n        BSL_CID_MLDSA44_RSA2048_PSS_SHA256,           /* UNDEFINED */\n        ...\n    },",
+    "fix": "Add the following definitions in include/crypto/crypt_algid.h:"
+  },
+  {
+    "source": "claude",
+    "file": "tls/config/src/config_sign.c",
+    "line": "112-311",
+    "severity": "critical",
+    "title": "Missing HITLS_CRYPTO_COMPOSITE feature definition",
+    "problem": "The code is wrapped in `#ifdef HITLS_CRYPTO_COMPOSITE` but this feature macro is not defined in the configuration headers. This will cause the composite signature support to never be compiled.",
+    "code": "#ifdef HITLS_CRYPTO_COMPOSITE\n    {\n        CONST_CAST(\"composite_mldsa44_rsa2048_pss_sha256\"),\n        ...\n    },\n#endif /* HITLS_CRYPTO_COMPOSITE */",
+    "fix": "Add HITLS_CRYPTO_COMPOSITE feature definition in config/macro_config/hitls_config_layer_crypto.h:"
+  },
+  {
+    "source": "claude",
+    "file": "crypto/provider/src/default/crypt_default_provider.c",
+    "line": "904-1114",
+    "severity": "critical",
+    "title": "Duplicate undefined constants in provider",
+    "problem": "The same undefined CRYPT_COMPOSITE_* and BSL_CID_MLDSA44_* constants are used in the crypto provider. Once defined, they will work here too, but the issue must be fixed at the definition source.",
+    "code": "{\n        CONST_CAST(\"composite_mldsa44_rsa2048_pss_sha256\"),\n        CERT_SIG_SCHEME_COMPOSITE_MLDSA44_RSA2048_PSS_SHA256,\n        TLS_CERT_KEY_TYPE_COMPOSITE,\n        CRYPT_COMPOSITE_MLDSA44_RSA2048_PSS_SHA256,  /* UNDEFINED */\n        BSL_CID_MLDSA44_RSA2048_PSS_SHA256,           /* UNDEFINED */\n        ...\n    },",
+    "fix": "Same fix as for tls/config/src/config_sign.c - define the constants in the appropriate headers (include/crypto/crypt_algid.h and include/bsl/bsl_obj.h)."
+  },
+  {
+    "source": "claude",
+    "file": "tls/cert/cert_adapt/cert.c",
+    "line": "73-76",
+    "severity": "high",
+    "title": "Missing feature guard for composite signature default",
+    "problem": "The code adds a case for TLS_CERT_KEY_TYPE_COMPOSITE wrapped in HITLS_CRYPTO_COMPOSITE, but there's no check that this feature is enabled before using the default signature scheme.",
+    "code": "#if defined(HITLS_CRYPTO_COMPOSITE)\n        case TLS_CERT_KEY_TYPE_COMPOSITE:\n            return CERT_SIG_SCHEME_COMPOSITE_MLDSA44_RSA2048_PSS_SHA256;\n#endif",
+    "fix": "The code is correct, but ensure HITLS_CRYPTO_COMPOSITE is properly defined in the build configuration. If the feature is not intended to be compile-time optional, remove the #ifdef guard."
+  },
+  {
+    "source": "claude",
+    "file": "testcode/sdv/testcase/tls/ciphersuite/test_suite_sdv_hlt_group_signature.c",
+    "line": "239",
+    "severity": "medium",
+    "title": "Removed error stack validation",
+    "problem": "The test removed `ASSERT_TRUE(TestIsErrStackEmpty());` which validates that no errors were left on the error stack after the CONNECT function. This could hide issues.",
+    "code": "ASSERT_TRUE(memcmp(\"Hello World\", readBuf, readLen) == 0);\n\nEXIT:  /* Line 239 - ASSERT_TRUE(TestIsErrStackEmpty()); was removed */\n    HLT_FreeAllProcess();",
+    "fix": "ASSERT_TRUE(memcmp(\"Hello World\", readBuf, readLen) == 0);\n    ASSERT_TRUE(TestIsErrStackEmpty());\n\nEXIT:\n    HLT_FreeAllProcess();"
+  },
+  {
+    "source": "claude",
+    "file": "testcode/sdv/testcase/tls/ciphersuite/test_suite_sdv_hlt_group_signature.c",
+    "line": "86-90",
+    "severity": "low",
+    "title": "Inconsistent code formatting in if-else chain",
+    "problem": "The code has inconsistent formatting where the `else` keyword is on one line and the following `if` statement is on the next line, unlike all other branches.",
+    "code": "} else\n    if (strncmp(cert, \"COMPOSITE_MLDSA65_RSA4096_PSS_SHA512\", strlen(\"COMPOSITE_MLDSA65_RSA4096_PSS_SHA512\")) == 0) {",
+    "fix": "} else if (strncmp(cert, \"COMPOSITE_MLDSA65_RSA4096_PSS_SHA512\", strlen(\"COMPOSITE_MLDSA65_RSA4096_PSS_SHA512\")) == 0) {"
+  }
+]

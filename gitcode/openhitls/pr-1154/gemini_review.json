@@ -1,0 +1,22 @@
+[
+  {
+    "source": "gemini",
+    "file": "testcode/sdv/testcase/tls/ciphersuite/test_suite_sdv_hlt_group_signature.c",
+    "line": "236-240",
+    "severity": "medium",
+    "title": "Removal of error stack emptiness assertion",
+    "problem": "The PR incorrectly removes the `ASSERT_TRUE(TestIsErrStackEmpty());` check at the end of the `CONNECT` function. This assertion is critical for verifying that no unhandled errors were pushed to the error stack during a successful TLS handshake or read sequence. Removing it masks potential bugs and error state leakage.",
+    "code": "ASSERT_TRUE(readLen == strlen(\"Hello World\"));\n    ASSERT_TRUE(memcmp(\"Hello World\", readBuf, readLen) == 0);\nEXIT:\n    HLT_FreeAllProcess();",
+    "fix": "ASSERT_TRUE(readLen == strlen(\"Hello World\"));\n    ASSERT_TRUE(memcmp(\"Hello World\", readBuf, readLen) == 0);\n\n    ASSERT_TRUE(TestIsErrStackEmpty());\nEXIT:\n    HLT_FreeAllProcess();"
+  },
+  {
+    "source": "gemini",
+    "file": "tls/config/src/config_sign.c",
+    "line": "34-52",
+    "severity": "low",
+    "title": "Missing conditional compilation for composite signature schemes",
+    "problem": "The composite signature schemes are unconditionally added to the `DEFAULT_SIGSCHEME_ID` array. Since their corresponding definitions in `SIGNATURE_SCHEME_INFO` are guarded by `#ifdef HITLS_CRYPTO_COMPOSITE`, these array elements should also be wrapped in the same macro to ensure consistency and avoid unnecessary iterations when the feature is disabled.",
+    "code": "static const uint16_t DEFAULT_SIGSCHEME_ID[] = {\n    CERT_SIG_SCHEME_COMPOSITE_MLDSA44_RSA2048_PSS_SHA256,\n    CERT_SIG_SCHEME_COMPOSITE_MLDSA44_RSA2048_PKCS15_SHA256,\n    CERT_SIG_SCHEME_COMPOSITE_MLDSA44_ED25519_SHA512,\n    CERT_SIG_SCHEME_COMPOSITE_MLDSA44_ECDSA_P256_SHA256,\n    CERT_SIG_SCHEME_COMPOSITE_MLDSA65_RSA3072_PSS_SHA512,\n    CERT_SIG_SCHEME_COMPOSITE_MLDSA65_RSA3072_PKCS15_SHA512,\n    CERT_SIG_SCHEME_COMPOSITE_MLDSA65_RSA4096_PSS_SHA512,\n    CERT_SIG_SCHEME_COMPOSITE_MLDSA65_RSA4096_PKCS15_SHA512,\n    CERT_SIG_SCHEME_COMPOSITE_MLDSA65_ECDSA_P256_SHA512,\n    CERT_SIG_SCHEME_COMPOSITE_MLDSA65_ECDSA_P384_SHA512,\n    CERT_SIG_SCHEME_COMPOSITE_MLDSA65_ECDSA_BRAINPOOLP256R1_SHA512,\n    CERT_SIG_SCHEME_COMPOSITE_MLDSA65_ED25519_SHA512,\n    CERT_SIG_SCHEME_COMPOSITE_MLDSA87_ECDSA_P384_SHA512,\n    CERT_SIG_SCHEME_COMPOSITE_MLDSA87_ECDSA_BRAINPOOLP384R1_SHA512,\n    CERT_SIG_SCHEME_COMPOSITE_MLDSA87_RSA3072_PSS_SHA512,\n    CERT_SIG_SCHEME_COMPOSITE_MLDSA87_RSA4096_PSS_SHA512,\n    CERT_SIG_SCHEME_COMPOSITE_MLDSA87_ECDSA_P521_SHA512,\n    CERT_SIG_SCHEME_ECDSA_SECP256R1_SHA256,",
+    "fix": "static const uint16_t DEFAULT_SIGSCHEME_ID[] = {\n#ifdef HITLS_CRYPTO_COMPOSITE\n    CERT_SIG_SCHEME_COMPOSITE_MLDSA44_RSA2048_PSS_SHA256,\n    CERT_SIG_SCHEME_COMPOSITE_MLDSA44_RSA2048_PKCS15_SHA256,\n    CERT_SIG_SCHEME_COMPOSITE_MLDSA44_ED25519_SHA512,\n    CERT_SIG_SCHEME_COMPOSITE_MLDSA44_ECDSA_P256_SHA256,\n    CERT_SIG_SCHEME_COMPOSITE_MLDSA65_RSA3072_PSS_SHA512,\n    CERT_SIG_SCHEME_COMPOSITE_MLDSA65_RSA3072_PKCS15_SHA512,\n    CERT_SIG_SCHEME_COMPOSITE_MLDSA65_RSA4096_PSS_SHA512,\n    CERT_SIG_SCHEME_COMPOSITE_MLDSA65_RSA4096_PKCS15_SHA512,\n    CERT_SIG_SCHEME_COMPOSITE_MLDSA65_ECDSA_P256_SHA512,\n    CERT_SIG_SCHEME_COMPOSITE_MLDSA65_ECDSA_P384_SHA512,\n    CERT_SIG_SCHEME_COMPOSITE_MLDSA65_ECDSA_BRAINPOOLP256R1_SHA512,\n    CERT_SIG_SCHEME_COMPOSITE_MLDSA65_ED25519_SHA512,\n    CERT_SIG_SCHEME_COMPOSITE_MLDSA87_ECDSA_P384_SHA512,\n    CERT_SIG_SCHEME_COMPOSITE_MLDSA87_ECDSA_BRAINPOOLP384R1_SHA512,\n    CERT_SIG_SCHEME_COMPOSITE_MLDSA87_RSA3072_PSS_SHA512,\n    CERT_SIG_SCHEME_COMPOSITE_MLDSA87_RSA4096_PSS_SHA512,\n    CERT_SIG_SCHEME_COMPOSITE_MLDSA87_ECDSA_P521_SHA512,\n#endif\n    CERT_SIG_SCHEME_ECDSA_SECP256R1_SHA256,"
+  }
+]

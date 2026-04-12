@@ -1,0 +1,193 @@
+Now I have a good understanding of the changes. Let me output the issues found:
+
+===ISSUE===
+FILE: include/tls/hitls_cert_type.h
+LINE: 170
+SEVERITY: critical
+TITLE: Undefined BSL_CID_COMPOSITE constant
+PROBLEM: The code uses BSL_CID_COMPOSITE but this constant is not defined anywhere in the codebase. This will cause a compilation error.
+CODE:
+```
+    TLS_CERT_KEY_TYPE_COMPOSITE = BSL_CID_COMPOSITE
+```
+FIX:
+```
+Define BSL_CID_COMPOSITE in include/bsl/bsl_obj.h (or appropriate header) with a unique value, e.g.:
+    BSL_CID_COMPOSITE = 256,  /* identifies composite signature algorithms */
+```
+===END===
+
+===ISSUE===
+FILE: include/tls/hitls_crypt_type.h
+LINE: 173
+SEVERITY: critical
+TITLE: Undefined BSL_CID_COMPOSITE constant
+PROBLEM: The code uses BSL_CID_COMPOSITE but this constant is not defined anywhere in the codebase. This will cause a compilation error.
+CODE:
+```
+    HITLS_SIGN_COMPOSITE = BSL_CID_COMPOSITE,
+```
+FIX:
+```
+Define BSL_CID_COMPOSITE in include/bsl/bsl_obj.h (or appropriate header) with a unique value, e.g.:
+    BSL_CID_COMPOSITE = 256,  /* identifies composite signature algorithms */
+```
+===END===
+
+===ISSUE===
+FILE: tls/config/src/config_sign.c
+LINE: 117-311
+SEVERITY: critical
+TITLE: Undefined CRYPT_COMPOSITE_* and BSL_CID_MLDSA_* constants
+PROBLEM: The code uses multiple undefined constants: CRYPT_COMPOSITE_MLDSA44_RSA2048_PSS_SHA256, BSL_CID_MLDSA44_RSA2048_PSS_SHA256, etc. These are used in TLS_SigSchemeInfo structures but are not defined anywhere.
+CODE:
+```
+    {
+        CONST_CAST("composite_mldsa44_rsa2048_pss_sha256"),
+        CERT_SIG_SCHEME_COMPOSITE_MLDSA44_RSA2048_PSS_SHA256,
+        TLS_CERT_KEY_TYPE_COMPOSITE,
+        CRYPT_COMPOSITE_MLDSA44_RSA2048_PSS_SHA256,  /* UNDEFINED */
+        BSL_CID_MLDSA44_RSA2048_PSS_SHA256,           /* UNDEFINED */
+        ...
+    },
+```
+FIX:
+```
+Add the following definitions in include/crypto/crypt_algid.h:
+
+```c
+typedef enum {
+    /* Existing entries... */
+    CRYPT_PKEY_PARAID_MAX = BSL_CID_UNKNOWN,
+    
+    /* Composite signature algorithms */
+    CRYPT_COMPOSITE_MLDSA44_RSA2048_PSS_SHA256 = BSL_CID_MLDSA44_RSA2048_PSS_SHA256,
+    CRYPT_COMPOSITE_MLDSA44_RSA2048_PKCS15_SHA256 = BSL_CID_MLDSA44_RSA2048_PKCS15_SHA256,
+    CRYPT_COMPOSITE_MLDSA44_ED25519_SHA512 = BSL_CID_MLDSA44_ED25519_SHA512,
+    CRYPT_COMPOSITE_MLDSA44_ECDSA_P256_SHA256 = BSL_CID_MLDSA44_ECDSA_P256_SHA256,
+    /* ... all other CRYPT_COMPOSITE_* constants ... */
+} CRYPT_PKEY_ParaId;
+```
+
+And add BSL_CID_MLDSA44_* constants in include/bsl/bsl_obj.h:
+
+```c
+    /* Composite signature algorithm identifiers */
+    BSL_CID_MLDSA44_RSA2048_PSS_SHA256 = 65001,
+    BSL_CID_MLDSA44_RSA2048_PKCS15_SHA256 = 65002,
+    /* ... all other BSL_CID_MLDSA44_* constants ... */
+```
+===END===
+
+===ISSUE===
+FILE: tls/config/src/config_sign.c
+LINE: 112-311
+SEVERITY: critical
+TITLE: Missing HITLS_CRYPTO_COMPOSITE feature definition
+PROBLEM: The code is wrapped in `#ifdef HITLS_CRYPTO_COMPOSITE` but this feature macro is not defined in the configuration headers. This will cause the composite signature support to never be compiled.
+CODE:
+```
+#ifdef HITLS_CRYPTO_COMPOSITE
+    {
+        CONST_CAST("composite_mldsa44_rsa2048_pss_sha256"),
+        ...
+    },
+#endif /* HITLS_CRYPTO_COMPOSITE */
+```
+FIX:
+```
+Add HITLS_CRYPTO_COMPOSITE feature definition in config/macro_config/hitls_config_layer_crypto.h:
+
+```c
+#ifdef HITLS_CRYPTO_COMPOSITE
+    #ifndef HITLS_CRYPTO_MLDSA
+        #define HITLS_CRYPTO_MLDSA
+    #endif
+    /* Add other required feature dependencies */
+#endif
+```
+And ensure the build system (cmake/hitls_options.cmake) defines HITLS_CRYPTO_COMPOSITE when the feature is enabled.
+```
+===END===
+
+===ISSUE===
+FILE: tls/cert/cert_adapt/cert.c
+LINE: 73-76
+SEVERITY: high
+TITLE: Missing feature guard for composite signature default
+PROBLEM: The code adds a case for TLS_CERT_KEY_TYPE_COMPOSITE wrapped in HITLS_CRYPTO_COMPOSITE, but there's no check that this feature is enabled before using the default signature scheme.
+CODE:
+```
+#if defined(HITLS_CRYPTO_COMPOSITE)
+        case TLS_CERT_KEY_TYPE_COMPOSITE:
+            return CERT_SIG_SCHEME_COMPOSITE_MLDSA44_RSA2048_PSS_SHA256;
+#endif
+```
+FIX:
+```
+The code is correct, but ensure HITLS_CRYPTO_COMPOSITE is properly defined in the build configuration. If the feature is not intended to be compile-time optional, remove the #ifdef guard.
+```
+===END===
+
+===ISSUE===
+FILE: crypto/provider/src/default/crypt_default_provider.c
+LINE: 904-1114
+SEVERITY: critical
+TITLE: Duplicate undefined constants in provider
+PROBLEM: The same undefined CRYPT_COMPOSITE_* and BSL_CID_MLDSA44_* constants are used in the crypto provider. Once defined, they will work here too, but the issue must be fixed at the definition source.
+CODE:
+```
+    {
+        CONST_CAST("composite_mldsa44_rsa2048_pss_sha256"),
+        CERT_SIG_SCHEME_COMPOSITE_MLDSA44_RSA2048_PSS_SHA256,
+        TLS_CERT_KEY_TYPE_COMPOSITE,
+        CRYPT_COMPOSITE_MLDSA44_RSA2048_PSS_SHA256,  /* UNDEFINED */
+        BSL_CID_MLDSA44_RSA2048_PSS_SHA256,           /* UNDEFINED */
+        ...
+    },
+```
+FIX:
+```
+Same fix as for tls/config/src/config_sign.c - define the constants in the appropriate headers (include/crypto/crypt_algid.h and include/bsl/bsl_obj.h).
+```
+===END===
+
+===ISSUE===
+FILE: testcode/sdv/testcase/tls/ciphersuite/test_suite_sdv_hlt_group_signature.c
+LINE: 86-90
+SEVERITY: low
+TITLE: Inconsistent code formatting in if-else chain
+PROBLEM: The code has inconsistent formatting where the `else` keyword is on one line and the following `if` statement is on the next line, unlike all other branches.
+CODE:
+```
+    } else
+    if (strncmp(cert, "COMPOSITE_MLDSA65_RSA4096_PSS_SHA512", strlen("COMPOSITE_MLDSA65_RSA4096_PSS_SHA512")) == 0) {
+```
+FIX:
+```
+    } else if (strncmp(cert, "COMPOSITE_MLDSA65_RSA4096_PSS_SHA512", strlen("COMPOSITE_MLDSA65_RSA4096_PSS_SHA512")) == 0) {
+```
+===END===
+
+===ISSUE===
+FILE: testcode/sdv/testcase/tls/ciphersuite/test_suite_sdv_hlt_group_signature.c
+LINE: 239
+SEVERITY: medium
+TITLE: Removed error stack validation
+PROBLEM: The test removed `ASSERT_TRUE(TestIsErrStackEmpty());` which validates that no errors were left on the error stack after the CONNECT function. This could hide issues.
+CODE:
+```
+    ASSERT_TRUE(memcmp("Hello World", readBuf, readLen) == 0);
+
+EXIT:  /* Line 239 - ASSERT_TRUE(TestIsErrStackEmpty()); was removed */
+    HLT_FreeAllProcess();
+```
+FIX:
+```
+    ASSERT_TRUE(memcmp("Hello World", readBuf, readLen) == 0);
+    ASSERT_TRUE(TestIsErrStackEmpty());
+
+EXIT:
+    HLT_FreeAllProcess();
+```
+===END===

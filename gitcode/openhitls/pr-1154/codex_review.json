@@ -1,0 +1,42 @@
+[
+  {
+    "source": "codex",
+    "file": "tls/handshake/common/src/hs_cert.c",
+    "line": "39-43",
+    "severity": "high",
+    "title": "Composite keys are misclassified as legacy ECDSA certificate types",
+    "problem": "This maps a TLS1.3-only composite key to `CERT_TYPE_ECDSA_SIGN`, which is consumed by the TLS1.2/DTLS1.2 certificate-type and certificate-selection code. That lets legacy `ECDHE_ECDSA_*` paths request or select a composite certificate, including the RSA-based composite variants added by this PR, even though those handshakes have no valid composite cert type.",
+    "code": "case TLS_CERT_KEY_TYPE_SM2:\n        case TLS_CERT_KEY_TYPE_ECDSA:\n        case TLS_CERT_KEY_TYPE_ED25519:\n        case TLS_CERT_KEY_TYPE_COMPOSITE:\n            return CERT_TYPE_ECDSA_SIGN;",
+    "fix": "case TLS_CERT_KEY_TYPE_SM2:\n        case TLS_CERT_KEY_TYPE_ECDSA:\n        case TLS_CERT_KEY_TYPE_ED25519:\n            return CERT_TYPE_ECDSA_SIGN;\n        case TLS_CERT_KEY_TYPE_COMPOSITE:\n            return CERT_TYPE_UNKNOWN;"
+  },
+  {
+    "source": "codex",
+    "file": "tls/config/src/config_sign.c",
+    "line": "34-51",
+    "severity": "medium",
+    "title": "TLS1.3-only composite schemes leak into mixed TLS1.2/TLS1.3 defaults",
+    "problem": "These entries are inserted into the single global default `signAlgorithms` array whenever TLS1.3 is enabled in the config. The TLS1.2/DTLS1.2 packing and certificate-selection paths later reuse that array without checking `chainVersionBits`, so a dual-stack endpoint can advertise or even negotiate composite schemes in legacy handshakes where they are not valid.",
+    "code": "static const uint16_t DEFAULT_SIGSCHEME_ID[] = {\n    CERT_SIG_SCHEME_COMPOSITE_MLDSA44_RSA2048_PSS_SHA256,\n    CERT_SIG_SCHEME_COMPOSITE_MLDSA44_RSA2048_PKCS15_SHA256,\n    CERT_SIG_SCHEME_COMPOSITE_MLDSA44_ED25519_SHA512,\n    CERT_SIG_SCHEME_COMPOSITE_MLDSA44_ECDSA_P256_SHA256,\n    ...\n    CERT_SIG_SCHEME_COMPOSITE_MLDSA87_RSA4096_PSS_SHA512,\n    CERT_SIG_SCHEME_COMPOSITE_MLDSA87_ECDSA_P521_SHA512,\n    CERT_SIG_SCHEME_ECDSA_SECP256R1_SHA256,",
+    "fix": "for (uint32_t i = 0; i < sizeof(DEFAULT_SIGSCHEME_ID) / sizeof(DEFAULT_SIGSCHEME_ID[0]); i++) {\n    const TLS_SigSchemeInfo *info = ConfigGetSignatureSchemeInfo(config, DEFAULT_SIGSCHEME_ID[i]);\n    if (info == NULL || (config->version & info->chainVersionBits) == 0) {\n        continue;\n    }\n#if defined(HITLS_CRYPTO_COMPOSITE)\n    /* Do not place TLS1.3-only composite schemes into the shared default list for mixed-version configs. */\n    if (info->signAlgId == HITLS_SIGN_COMPOSITE &&\n        !(config->minVersion == HITLS_VERSION_TLS13 && config->maxVersion == HITLS_VERSION_TLS13)) {\n        continue;\n    }\n#endif\n    tempItems[size++] = DEFAULT_SIGSCHEME_ID[i];\n}"
+  },
+  {
+    "source": "codex",
+    "file": "tls/cert/cert_adapt/cert.c",
+    "line": "73-75",
+    "severity": "medium",
+    "title": "Default composite fallback can select a TLS1.3-only scheme in legacy flows",
+    "problem": "`SAL_CERT_GetDefaultSignHashAlgo()` has no negotiated-version input, but this new case returns a composite signature scheme unconditionally. Callers such as `CheckSignScheme()` and `VerifySignData()` use this fallback when the peer did not send `signature_algorithms`, so a TLS1.2 handshake can silently pick a TLS1.3-only composite code point instead of rejecting the certificate.",
+    "code": "#if defined(HITLS_CRYPTO_COMPOSITE)\n        case TLS_CERT_KEY_TYPE_COMPOSITE:\n            return CERT_SIG_SCHEME_COMPOSITE_MLDSA44_RSA2048_PSS_SHA256;\n#endif",
+    "fix": "#if defined(HITLS_CRYPTO_COMPOSITE)\n        case TLS_CERT_KEY_TYPE_COMPOSITE:\n            /* Composite must be selected from an explicit TLS1.3 signature_algorithms negotiation. */\n            return CERT_SIG_SCHEME_UNKNOWN;\n#endif"
+  },
+  {
+    "source": "codex",
+    "file": "tls/config/src/config_check.c",
+    "line": "65-67",
+    "severity": "medium",
+    "title": "Config validation accepts composite schemes as TLS1.2 ECDSA auth",
+    "problem": "`CheckSign()` uses `HaveMatchSignAlg()` to validate legacy cipher-suite/auth compatibility. Adding `HITLS_SIGN_COMPOSITE` here makes the config checker accept TLS1.2 `HITLS_AUTH_ECDSA` suites when the only matching signature schemes are composite, so impossible deployments pass validation and fail later during handshake selection.",
+    "code": "if (((signAlg == HITLS_SIGN_ECDSA) || (signAlg == HITLS_SIGN_ED25519) ||\n            (signAlg == HITLS_SIGN_COMPOSITE)) &&\n            (authAlg == HITLS_AUTH_ECDSA)) {\n            return true;\n        }",
+    "fix": "/* Composite schemes are TLS1.3-only and must not satisfy legacy ECDSA cipher-suite checks. */\n        if (((signAlg == HITLS_SIGN_ECDSA) || (signAlg == HITLS_SIGN_ED25519)) &&\n            (authAlg == HITLS_AUTH_ECDSA)) {\n            return true;\n        }"
+  }
+]

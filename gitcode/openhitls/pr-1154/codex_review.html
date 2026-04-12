@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Code Review: openHiTLS/openhitls#1154 - CODEX</title>
+    <style>
+        :root { --critical: #dc2626; --high: #ea580c; --medium: #ca8a04; --low: #65a30d; }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: system-ui, sans-serif; background: #f8fafc; color: #1e293b; padding: 2rem; line-height: 1.6; }
+        .container { max-width: 900px; margin: 0 auto; }
+        h1 { font-size: 1.5rem; margin-bottom: 0.5rem; }
+        .subtitle { color: #64748b; margin-bottom: 2rem; }
+        .section { margin-bottom: 2rem; }
+        .section-title { font-size: 1.1rem; font-weight: 600; padding: 0.5rem 1rem; border-radius: 0.5rem 0.5rem 0 0; color: white; }
+        .section-title.critical { background: var(--critical); }
+        .section-title.high { background: var(--high); }
+        .section-title.medium { background: var(--medium); }
+        .section-title.low { background: var(--low); }
+        .issue { background: white; border: 1px solid #e2e8f0; border-top: none; padding: 1rem; }
+        .issue:last-child { border-radius: 0 0 0.5rem 0.5rem; }
+        .issue-title { font-weight: 600; margin-bottom: 0.25rem; }
+        .issue-location { font-family: monospace; font-size: 0.875rem; color: #64748b; margin-bottom: 0.75rem; }
+        .issue-source { font-size: 0.75rem; color: #94a3b8; margin-top: 0.5rem; }
+        pre { background: #1e293b; color: #e2e8f0; padding: 0.75rem; border-radius: 0.375rem; overflow-x: auto; font-size: 0.875rem; margin: 0.5rem 0; }
+        .problem { margin: 0.75rem 0; }
+        .fix-label { font-weight: 600; margin-top: 0.75rem; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Code Review: openHiTLS/openhitls#1154 - CODEX</h1>
+        <div class="subtitle"></div>
+        
+<div class="section"><div class="section-title high">High</div>
+<div class="issue">
+                <div class="issue-title">Composite keys are misclassified as legacy ECDSA certificate types</div>
+                <div class="issue-location">tls/handshake/common/src/hs_cert.c:39-43</div>
+                <pre>case TLS_CERT_KEY_TYPE_SM2:
+        case TLS_CERT_KEY_TYPE_ECDSA:
+        case TLS_CERT_KEY_TYPE_ED25519:
+        case TLS_CERT_KEY_TYPE_COMPOSITE:
+            return CERT_TYPE_ECDSA_SIGN;</pre>
+                <div class="problem"><strong>Issue:</strong> This maps a TLS1.3-only composite key to `CERT_TYPE_ECDSA_SIGN`, which is consumed by the TLS1.2/DTLS1.2 certificate-type and certificate-selection code. That lets legacy `ECDHE_ECDSA_*` paths request or select a composite certificate, including the RSA-based composite variants added by this PR, even though those handshakes have no valid composite cert type.</div>
+                <div class="fix-label">Fix:</div><pre>case TLS_CERT_KEY_TYPE_SM2:
+        case TLS_CERT_KEY_TYPE_ECDSA:
+        case TLS_CERT_KEY_TYPE_ED25519:
+            return CERT_TYPE_ECDSA_SIGN;
+        case TLS_CERT_KEY_TYPE_COMPOSITE:
+            return CERT_TYPE_UNKNOWN;</pre>
+                <div class="issue-source">Reviewer: codex</div>
+            </div>
+</div>
+<div class="section"><div class="section-title medium">Medium</div>
+<div class="issue">
+                <div class="issue-title">TLS1.3-only composite schemes leak into mixed TLS1.2/TLS1.3 defaults</div>
+                <div class="issue-location">tls/config/src/config_sign.c:34-51</div>
+                <pre>static const uint16_t DEFAULT_SIGSCHEME_ID[] = {
+    CERT_SIG_SCHEME_COMPOSITE_MLDSA44_RSA2048_PSS_SHA256,
+    CERT_SIG_SCHEME_COMPOSITE_MLDSA44_RSA2048_PKCS15_SHA256,
+    CERT_SIG_SCHEME_COMPOSITE_MLDSA44_ED25519_SHA512,
+    CERT_SIG_SCHEME_COMPOSITE_MLDSA44_ECDSA_P256_SHA256,
+    ...
+    CERT_SIG_SCHEME_COMPOSITE_MLDSA87_RSA4096_PSS_SHA512,
+    CERT_SIG_SCHEME_COMPOSITE_MLDSA87_ECDSA_P521_SHA512,
+    CERT_SIG_SCHEME_ECDSA_SECP256R1_SHA256,</pre>
+                <div class="problem"><strong>Issue:</strong> These entries are inserted into the single global default `signAlgorithms` array whenever TLS1.3 is enabled in the config. The TLS1.2/DTLS1.2 packing and certificate-selection paths later reuse that array without checking `chainVersionBits`, so a dual-stack endpoint can advertise or even negotiate composite schemes in legacy handshakes where they are not valid.</div>
+                <div class="fix-label">Fix:</div><pre>for (uint32_t i = 0; i &lt; sizeof(DEFAULT_SIGSCHEME_ID) / sizeof(DEFAULT_SIGSCHEME_ID[0]); i++) {
+    const TLS_SigSchemeInfo *info = ConfigGetSignatureSchemeInfo(config, DEFAULT_SIGSCHEME_ID[i]);
+    if (info == NULL || (config-&gt;version &amp; info-&gt;chainVersionBits) == 0) {
+        continue;
+    }
+#if defined(HITLS_CRYPTO_COMPOSITE)
+    /* Do not place TLS1.3-only composite schemes into the shared default list for mixed-version configs. */
+    if (info-&gt;signAlgId == HITLS_SIGN_COMPOSITE &amp;&amp;
+        !(config-&gt;minVersion == HITLS_VERSION_TLS13 &amp;&amp; config-&gt;maxVersion == HITLS_VERSION_TLS13)) {
+        continue;
+    }
+#endif
+    tempItems[size++] = DEFAULT_SIGSCHEME_ID[i];
+}</pre>
+                <div class="issue-source">Reviewer: codex</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">Default composite fallback can select a TLS1.3-only scheme in legacy flows</div>
+                <div class="issue-location">tls/cert/cert_adapt/cert.c:73-75</div>
+                <pre>#if defined(HITLS_CRYPTO_COMPOSITE)
+        case TLS_CERT_KEY_TYPE_COMPOSITE:
+            return CERT_SIG_SCHEME_COMPOSITE_MLDSA44_RSA2048_PSS_SHA256;
+#endif</pre>
+                <div class="problem"><strong>Issue:</strong> `SAL_CERT_GetDefaultSignHashAlgo()` has no negotiated-version input, but this new case returns a composite signature scheme unconditionally. Callers such as `CheckSignScheme()` and `VerifySignData()` use this fallback when the peer did not send `signature_algorithms`, so a TLS1.2 handshake can silently pick a TLS1.3-only composite code point instead of rejecting the certificate.</div>
+                <div class="fix-label">Fix:</div><pre>#if defined(HITLS_CRYPTO_COMPOSITE)
+        case TLS_CERT_KEY_TYPE_COMPOSITE:
+            /* Composite must be selected from an explicit TLS1.3 signature_algorithms negotiation. */
+            return CERT_SIG_SCHEME_UNKNOWN;
+#endif</pre>
+                <div class="issue-source">Reviewer: codex</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">Config validation accepts composite schemes as TLS1.2 ECDSA auth</div>
+                <div class="issue-location">tls/config/src/config_check.c:65-67</div>
+                <pre>if (((signAlg == HITLS_SIGN_ECDSA) || (signAlg == HITLS_SIGN_ED25519) ||
+            (signAlg == HITLS_SIGN_COMPOSITE)) &amp;&amp;
+            (authAlg == HITLS_AUTH_ECDSA)) {
+            return true;
+        }</pre>
+                <div class="problem"><strong>Issue:</strong> `CheckSign()` uses `HaveMatchSignAlg()` to validate legacy cipher-suite/auth compatibility. Adding `HITLS_SIGN_COMPOSITE` here makes the config checker accept TLS1.2 `HITLS_AUTH_ECDSA` suites when the only matching signature schemes are composite, so impossible deployments pass validation and fail later during handshake selection.</div>
+                <div class="fix-label">Fix:</div><pre>/* Composite schemes are TLS1.3-only and must not satisfy legacy ECDSA cipher-suite checks. */
+        if (((signAlg == HITLS_SIGN_ECDSA) || (signAlg == HITLS_SIGN_ED25519)) &amp;&amp;
+            (authAlg == HITLS_AUTH_ECDSA)) {
+            return true;
+        }</pre>
+                <div class="issue-source">Reviewer: codex</div>
+            </div>
+</div>
+</div></body></html>

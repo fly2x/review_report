@@ -1,0 +1,62 @@
+[
+  {
+    "source": "gemini",
+    "file": "crypto/modes/src/modes_gcm_siv.c",
+    "line": "154",
+    "severity": "critical",
+    "title": "Integer Overflow in Polyval Buffer Allocation Leading to Heap Overflow",
+    "problem": "When calculating `total` length for the polyval input buffer, `padAad + padPt + GCM_BLOCKSIZE` can overflow if `ctx->aadLen` and `ptLen` are large, particularly because `Pad16Len` can wrap around if the length is close to `UINT32_MAX`. This causes `BSL_SAL_Malloc` to allocate a small buffer. Subsequent `memcpy_s` operations will use wrapped `destMax` values and write out of bounds, leading to a massive heap buffer overflow.",
+    "code": "static int32_t BuildPolyInput(struct ModesGcmSivCtx *ctx, const uint8_t *plaintext, uint32_t ptLen,\n    uint8_t **polyBuf, uint32_t *polyLen)\n{\n    uint32_t padAad = Pad16Len(ctx->aadLen);\n    uint32_t padPt = Pad16Len(ptLen);\n    uint32_t total = padAad + padPt + GCM_BLOCKSIZE;\n    uint8_t *buf = BSL_SAL_Malloc(total);",
+    "fix": "static int32_t BuildPolyInput(struct ModesGcmSivCtx *ctx, const uint8_t *plaintext, uint32_t ptLen,\n    uint8_t **polyBuf, uint32_t *polyLen)\n{\n    uint32_t padAad = Pad16Len(ctx->aadLen);\n    uint32_t padPt = Pad16Len(ptLen);\n    if (padAad < ctx->aadLen || padPt < ptLen || (UINT32_MAX - padAad - GCM_BLOCKSIZE) < padPt) {\n        BSL_ERR_PUSH_ERROR(CRYPT_INVALID_ARG);\n        return CRYPT_INVALID_ARG;\n    }\n    uint32_t total = padAad + padPt + GCM_BLOCKSIZE;\n    uint8_t *buf = BSL_SAL_Malloc(total);"
+  },
+  {
+    "source": "gemini",
+    "file": "crypto/modes/src/modes_gcm_siv.c",
+    "line": "622",
+    "severity": "critical",
+    "title": "AES-GCM-SIV DupCtx Output Pointer Alias Causes Heap Buffer Overflow",
+    "problem": "`MODES_GCM_SIV_DupCtx` performs a shallow copy of the source context using `BSL_SAL_Dump`, which includes copying `src->outPtr`. Because `outPtr` acts as the persistent destination for the entire buffered ciphertext, if the duplicate context receives additional data via `Update`, it will write its expanded combined ciphertext to the original `outPtr` buffer upon finalization. This results in an out-of-bounds write since the original `outPtr` buffer was likely allocated only for the original message length. The duplicate context must clear `outPtr` so a new, appropriately sized output buffer can be provided.",
+    "code": "MODES_GCM_SIV_Ctx *MODES_GCM_SIV_DupCtx(const MODES_GCM_SIV_Ctx *modeCtx)\n{\n    if (modeCtx == NULL) {\n        return NULL;\n    }\n    const struct ModesGcmSivCtx *src = modeCtx;\n    struct ModesGcmSivCtx *ctx = BSL_SAL_Dump(src, sizeof(struct ModesGcmSivCtx));\n    if (ctx == NULL) {\n        BSL_ERR_PUSH_ERROR(CRYPT_MEM_ALLOC_FAIL);\n        return NULL;\n    }\n    ctx->aadBuf = NULL;\n    ctx->msgBuf = NULL;",
+    "fix": "MODES_GCM_SIV_Ctx *MODES_GCM_SIV_DupCtx(const MODES_GCM_SIV_Ctx *modeCtx)\n{\n    if (modeCtx == NULL) {\n        return NULL;\n    }\n    const struct ModesGcmSivCtx *src = modeCtx;\n    struct ModesGcmSivCtx *ctx = BSL_SAL_Dump(src, sizeof(struct ModesGcmSivCtx));\n    if (ctx == NULL) {\n        BSL_ERR_PUSH_ERROR(CRYPT_MEM_ALLOC_FAIL);\n        return NULL;\n    }\n    ctx->aadBuf = NULL;\n    ctx->msgBuf = NULL;\n    ctx->outPtr = NULL;"
+  },
+  {
+    "source": "gemini",
+    "file": "crypto/modes/src/modes_gcm_siv.c",
+    "line": "462",
+    "severity": "high",
+    "title": "Integer Overflow in MODES_GCM_SIV_Update msgLen Causes Heap Overflow",
+    "problem": "In `MODES_GCM_SIV_Update`, the sum `modeCtx->msgLen + inLen` can overflow if a large amount of data is updated across multiple calls. This leads to `BSL_SAL_Realloc` allocating a smaller buffer than required, and the subsequent `memcpy_s` copying data out of bounds, resulting in a heap buffer overflow.",
+    "code": "if (inLen == 0) {\n        *outLen = 0;\n        return CRYPT_SUCCESS;\n    }\n    uint8_t *nbuf = BSL_SAL_Realloc(modeCtx->msgBuf, modeCtx->msgLen + inLen, modeCtx->msgLen);",
+    "fix": "if (inLen == 0) {\n        *outLen = 0;\n        return CRYPT_SUCCESS;\n    }\n    if (UINT32_MAX - modeCtx->msgLen < inLen) {\n        BSL_ERR_PUSH_ERROR(CRYPT_INVALID_ARG);\n        return CRYPT_INVALID_ARG;\n    }\n    uint8_t *nbuf = BSL_SAL_Realloc(modeCtx->msgBuf, modeCtx->msgLen + inLen, modeCtx->msgLen);"
+  },
+  {
+    "source": "gemini",
+    "file": "crypto/modes/src/modes_gcm_siv.c",
+    "line": "242",
+    "severity": "medium",
+    "title": "AES-GCM-SIV Fails for Zero-Length Messages",
+    "problem": "In `GcmSivEncryptFinish`, the code unconditionally checks `if (ctx->outPtr == NULL)` and returns an error. For zero-length plaintexts (e.g. when an application uses AES-GCM-SIV strictly for authenticating AAD), it is completely valid and common for the output pointer to be `NULL` since there is no ciphertext to write.",
+    "code": "if (ctx->outPtr == NULL) {\n        BSL_ERR_PUSH_ERROR(CRYPT_EAL_ERR_STATE);\n        return CRYPT_EAL_ERR_STATE;\n    }",
+    "fix": "if (ctx->msgLen > 0 && ctx->outPtr == NULL) {\n        BSL_ERR_PUSH_ERROR(CRYPT_EAL_ERR_STATE);\n        return CRYPT_EAL_ERR_STATE;\n    }"
+  },
+  {
+    "source": "gemini",
+    "file": "crypto/modes/src/modes_gcm_siv.c",
+    "line": "295",
+    "severity": "medium",
+    "title": "AES-GCM-SIV Decryption Fails for Empty Ciphertext",
+    "problem": "Similar to the encryption path, `GcmSivDecryptFinish` rejects a `NULL` `outPtr` even when the ciphertext length (`ctLen`) is zero. This prevents verification of empty payloads.",
+    "code": "if (ctx->outPtr == NULL) {\n        BSL_ERR_PUSH_ERROR(CRYPT_EAL_ERR_STATE);\n        return CRYPT_EAL_ERR_STATE;\n    }",
+    "fix": "if (ctLen > 0 && ctx->outPtr == NULL) {\n        BSL_ERR_PUSH_ERROR(CRYPT_EAL_ERR_STATE);\n        return CRYPT_EAL_ERR_STATE;\n    }"
+  },
+  {
+    "source": "gemini",
+    "file": "crypto/modes/src/modes_gcm_siv.c",
+    "line": "233",
+    "severity": "medium",
+    "title": "CstTimeTagCmp returns HPKE-specific error code",
+    "problem": "The `CstTimeTagCmp` function incorrectly returns `CRYPT_HPKE_ERR_AEAD_TAG` when tag verification fails. This mixes module boundaries by propagating an HPKE-specific error out of a generic AES mode component, which breaks generic EAL error handling logic. It should return a generic invalid argument or state error.",
+    "code": "return (d == 0) ? CRYPT_SUCCESS : CRYPT_HPKE_ERR_AEAD_TAG;",
+    "fix": "return (d == 0) ? CRYPT_SUCCESS : CRYPT_INVALID_ARG;"
+  }
+]

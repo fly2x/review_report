@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Code Review: openHiTLS/openhitls#1154 - GEMINI</title>
+    <style>
+        :root { --critical: #dc2626; --high: #ea580c; --medium: #ca8a04; --low: #65a30d; }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: system-ui, sans-serif; background: #f8fafc; color: #1e293b; padding: 2rem; line-height: 1.6; }
+        .container { max-width: 900px; margin: 0 auto; }
+        h1 { font-size: 1.5rem; margin-bottom: 0.5rem; }
+        .subtitle { color: #64748b; margin-bottom: 2rem; }
+        .section { margin-bottom: 2rem; }
+        .section-title { font-size: 1.1rem; font-weight: 600; padding: 0.5rem 1rem; border-radius: 0.5rem 0.5rem 0 0; color: white; }
+        .section-title.critical { background: var(--critical); }
+        .section-title.high { background: var(--high); }
+        .section-title.medium { background: var(--medium); }
+        .section-title.low { background: var(--low); }
+        .issue { background: white; border: 1px solid #e2e8f0; border-top: none; padding: 1rem; }
+        .issue:last-child { border-radius: 0 0 0.5rem 0.5rem; }
+        .issue-title { font-weight: 600; margin-bottom: 0.25rem; }
+        .issue-location { font-family: monospace; font-size: 0.875rem; color: #64748b; margin-bottom: 0.75rem; }
+        .issue-source { font-size: 0.75rem; color: #94a3b8; margin-top: 0.5rem; }
+        pre { background: #1e293b; color: #e2e8f0; padding: 0.75rem; border-radius: 0.375rem; overflow-x: auto; font-size: 0.875rem; margin: 0.5rem 0; }
+        .problem { margin: 0.75rem 0; }
+        .fix-label { font-weight: 600; margin-top: 0.75rem; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Code Review: openHiTLS/openhitls#1154 - GEMINI</h1>
+        <div class="subtitle"></div>
+        
+<div class="section"><div class="section-title medium">Medium</div>
+<div class="issue">
+                <div class="issue-title">Removal of error stack emptiness assertion</div>
+                <div class="issue-location">testcode/sdv/testcase/tls/ciphersuite/test_suite_sdv_hlt_group_signature.c:236-240</div>
+                <pre>ASSERT_TRUE(readLen == strlen("Hello World"));
+    ASSERT_TRUE(memcmp("Hello World", readBuf, readLen) == 0);
+EXIT:
+    HLT_FreeAllProcess();</pre>
+                <div class="problem"><strong>Issue:</strong> The PR incorrectly removes the `ASSERT_TRUE(TestIsErrStackEmpty());` check at the end of the `CONNECT` function. This assertion is critical for verifying that no unhandled errors were pushed to the error stack during a successful TLS handshake or read sequence. Removing it masks potential bugs and error state leakage.</div>
+                <div class="fix-label">Fix:</div><pre>ASSERT_TRUE(readLen == strlen("Hello World"));
+    ASSERT_TRUE(memcmp("Hello World", readBuf, readLen) == 0);
+
+    ASSERT_TRUE(TestIsErrStackEmpty());
+EXIT:
+    HLT_FreeAllProcess();</pre>
+                <div class="issue-source">Reviewer: gemini</div>
+            </div>
+</div>
+<div class="section"><div class="section-title low">Low</div>
+<div class="issue">
+                <div class="issue-title">Missing conditional compilation for composite signature schemes</div>
+                <div class="issue-location">tls/config/src/config_sign.c:34-52</div>
+                <pre>static const uint16_t DEFAULT_SIGSCHEME_ID[] = {
+    CERT_SIG_SCHEME_COMPOSITE_MLDSA44_RSA2048_PSS_SHA256,
+    CERT_SIG_SCHEME_COMPOSITE_MLDSA44_RSA2048_PKCS15_SHA256,
+    CERT_SIG_SCHEME_COMPOSITE_MLDSA44_ED25519_SHA512,
+    CERT_SIG_SCHEME_COMPOSITE_MLDSA44_ECDSA_P256_SHA256,
+    CERT_SIG_SCHEME_COMPOSITE_MLDSA65_RSA3072_PSS_SHA512,
+    CERT_SIG_SCHEME_COMPOSITE_MLDSA65_RSA3072_PKCS15_SHA512,
+    CERT_SIG_SCHEME_COMPOSITE_MLDSA65_RSA4096_PSS_SHA512,
+    CERT_SIG_SCHEME_COMPOSITE_MLDSA65_RSA4096_PKCS15_SHA512,
+    CERT_SIG_SCHEME_COMPOSITE_MLDSA65_ECDSA_P256_SHA512,
+    CERT_SIG_SCHEME_COMPOSITE_MLDSA65_ECDSA_P384_SHA512,
+    CERT_SIG_SCHEME_COMPOSITE_MLDSA65_ECDSA_BRAINPOOLP256R1_SHA512,
+    CERT_SIG_SCHEME_COMPOSITE_MLDSA65_ED25519_SHA512,
+    CERT_SIG_SCHEME_COMPOSITE_MLDSA87_ECDSA_P384_SHA512,
+    CERT_SIG_SCHEME_COMPOSITE_MLDSA87_ECDSA_BRAINPOOLP384R1_SHA512,
+    CERT_SIG_SCHEME_COMPOSITE_MLDSA87_RSA3072_PSS_SHA512,
+    CERT_SIG_SCHEME_COMPOSITE_MLDSA87_RSA4096_PSS_SHA512,
+    CERT_SIG_SCHEME_COMPOSITE_MLDSA87_ECDSA_P521_SHA512,
+    CERT_SIG_SCHEME_ECDSA_SECP256R1_SHA256,</pre>
+                <div class="problem"><strong>Issue:</strong> The composite signature schemes are unconditionally added to the `DEFAULT_SIGSCHEME_ID` array. Since their corresponding definitions in `SIGNATURE_SCHEME_INFO` are guarded by `#ifdef HITLS_CRYPTO_COMPOSITE`, these array elements should also be wrapped in the same macro to ensure consistency and avoid unnecessary iterations when the feature is disabled.</div>
+                <div class="fix-label">Fix:</div><pre>static const uint16_t DEFAULT_SIGSCHEME_ID[] = {
+#ifdef HITLS_CRYPTO_COMPOSITE
+    CERT_SIG_SCHEME_COMPOSITE_MLDSA44_RSA2048_PSS_SHA256,
+    CERT_SIG_SCHEME_COMPOSITE_MLDSA44_RSA2048_PKCS15_SHA256,
+    CERT_SIG_SCHEME_COMPOSITE_MLDSA44_ED25519_SHA512,
+    CERT_SIG_SCHEME_COMPOSITE_MLDSA44_ECDSA_P256_SHA256,
+    CERT_SIG_SCHEME_COMPOSITE_MLDSA65_RSA3072_PSS_SHA512,
+    CERT_SIG_SCHEME_COMPOSITE_MLDSA65_RSA3072_PKCS15_SHA512,
+    CERT_SIG_SCHEME_COMPOSITE_MLDSA65_RSA4096_PSS_SHA512,
+    CERT_SIG_SCHEME_COMPOSITE_MLDSA65_RSA4096_PKCS15_SHA512,
+    CERT_SIG_SCHEME_COMPOSITE_MLDSA65_ECDSA_P256_SHA512,
+    CERT_SIG_SCHEME_COMPOSITE_MLDSA65_ECDSA_P384_SHA512,
+    CERT_SIG_SCHEME_COMPOSITE_MLDSA65_ECDSA_BRAINPOOLP256R1_SHA512,
+    CERT_SIG_SCHEME_COMPOSITE_MLDSA65_ED25519_SHA512,
+    CERT_SIG_SCHEME_COMPOSITE_MLDSA87_ECDSA_P384_SHA512,
+    CERT_SIG_SCHEME_COMPOSITE_MLDSA87_ECDSA_BRAINPOOLP384R1_SHA512,
+    CERT_SIG_SCHEME_COMPOSITE_MLDSA87_RSA3072_PSS_SHA512,
+    CERT_SIG_SCHEME_COMPOSITE_MLDSA87_RSA4096_PSS_SHA512,
+    CERT_SIG_SCHEME_COMPOSITE_MLDSA87_ECDSA_P521_SHA512,
+#endif
+    CERT_SIG_SCHEME_ECDSA_SECP256R1_SHA256,</pre>
+                <div class="issue-source">Reviewer: gemini</div>
+            </div>
+</div>
+</div></body></html>

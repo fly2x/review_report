@@ -1,0 +1,82 @@
+[
+  {
+    "source": "claude",
+    "file": "crypto/modes/src/modes_gcm_siv.c",
+    "line": "462",
+    "severity": "high",
+    "title": "Integer overflow in MODES_GCM_SIV_Update could cause buffer overflow",
+    "problem": "The calculation `modeCtx->msgLen + inLen` can overflow for very large inputs, causing realloc to allocate less memory than needed. If an attacker can control the input size and trigger multiple Update calls, they could cause a buffer overflow.",
+    "code": "uint8_t *nbuf = BSL_SAL_Realloc(modeCtx->msgBuf, modeCtx->msgLen + inLen, modeCtx->msgLen);",
+    "fix": "// Check for overflow before allocation\nif (inLen > UINT32_MAX - modeCtx->msgLen) {\n    BSL_ERR_PUSH_ERROR(CRYPT_INVALID_ARG);\n    return CRYPT_INVALID_ARG;\n}\nuint8_t *nbuf = BSL_SAL_Realloc(modeCtx->msgBuf, modeCtx->msgLen + inLen, modeCtx->msgLen);"
+  },
+  {
+    "source": "claude",
+    "file": "crypto/modes/src/modes_gcm_siv.c",
+    "line": "176",
+    "severity": "high",
+    "title": "Integer overflow in BuildPolyInput could cause buffer underflow",
+    "problem": "The calculation `padAad + padPt + GCM_BLOCKSIZE` can overflow for very large AAD or plaintext lengths, causing malloc to allocate less memory than needed. This could lead to buffer overflow in memcpy_s operations.",
+    "code": "uint32_t total = padAad + padPt + GCM_BLOCKSIZE;",
+    "fix": "// Check for overflow\nif (padAad > UINT32_MAX - padPt - GCM_BLOCKSIZE) {\n    return CRYPT_INVALID_ARG;\n}\nuint32_t total = padAad + padPt + GCM_BLOCKSIZE;"
+  },
+  {
+    "source": "claude",
+    "file": "crypto/modes/src/modes_gcm_siv.c",
+    "line": "168",
+    "severity": "medium",
+    "title": "Integer overflow in Pad16Len for inputs near UINT32_MAX",
+    "problem": "The calculation `(len + GCM_BLOCKSIZE - 1u)` can overflow when `len` is close to `UINT32_MAX`, resulting in a smaller value than expected.",
+    "code": "return (len + GCM_BLOCKSIZE - 1u) & ~(GCM_BLOCKSIZE - 1u);",
+    "fix": "if (len > UINT32_MAX - GCM_BLOCKSIZE + 1) {\n    // Handle overflow - return error or max valid value\n    return UINT32_MAX;  // or return error code via different mechanism\n}\nreturn (len + GCM_BLOCKSIZE - 1u) & ~(GCM_BLOCKSIZE - 1u);"
+  },
+  {
+    "source": "claude",
+    "file": "crypto/modes/src/modes_gcm_siv.c",
+    "line": "275-278",
+    "severity": "medium",
+    "title": "Tag copied even when encryption fails in GcmSivEncryptFinish",
+    "problem": "If AesCtrGcmSiv fails, the function still copies the tag to the output before returning the error. This could mislead callers who check the tag buffer but not the return value, causing them to use an unencrypted payload with a valid tag.",
+    "code": "if (ctx->msgLen > 0) {\n    ret = AesCtrGcmSiv(encKey, encKeyLen, ctr, ctx->msgBuf, ctx->msgLen, ctx->outPtr);\n}\n(void)memcpy_s(tagBuf, tagLen, tag, ctx->tagLen);",
+    "fix": "if (ctx->msgLen > 0) {\n    ret = AesCtrGcmSiv(encKey, encKeyLen, ctr, ctx->msgBuf, ctx->msgLen, ctx->outPtr);\n    if (ret != CRYPT_SUCCESS) {\n        (void)BSL_SAL_CleanseData(authKey, sizeof(authKey));\n        (void)BSL_SAL_CleanseData(encKey, sizeof(encKey));\n        return ret;\n    }\n}\n(void)memcpy_s(tagBuf, tagLen, tag, ctx->tagLen);"
+  },
+  {
+    "source": "claude",
+    "file": "crypto/modes/src/modes_gcm_siv.c",
+    "line": "615-634",
+    "severity": "low",
+    "title": "DupCtx copies outPtr pointer from source context",
+    "problem": "The MODES_GCM_SIV_DupCtx function uses BSL_SAL_Dump to copy the entire structure, including the outPtr field. If the source context has outPtr set (pointing to caller's buffer), the duplicated context will also point to the same buffer. This could cause issues if both contexts are used independently.",
+    "code": "struct ModesGcmSivCtx *ctx = BSL_SAL_Dump(src, sizeof(struct ModesGcmSivCtx));\n...\nctx->aadBuf = NULL;\nctx->msgBuf = NULL;",
+    "fix": "struct ModesGcmSivCtx *ctx = BSL_SAL_Dump(src, sizeof(struct ModesGcmSivCtx));\n...\nctx->aadBuf = NULL;\nctx->msgBuf = NULL;\nctx->outPtr = NULL;  // Add this line"
+  },
+  {
+    "source": "claude",
+    "file": "crypto/modes/include/crypt_modes_gcm_siv.h",
+    "line": "56",
+    "severity": "low",
+    "title": "Missing newline at end of file",
+    "problem": "The file is missing a terminating newline character, which violates POSIX standards and may cause issues with some tools.",
+    "code": "#endif /* CRYPT_MODES_GCM_SIV_H */\n\\ No newline at end of file",
+    "fix": "#endif /* CRYPT_MODES_GCM_SIV_H */"
+  },
+  {
+    "source": "claude",
+    "file": "crypto/modes/src/modes_gcm_siv.c",
+    "line": "644",
+    "severity": "low",
+    "title": "Missing newline at end of file",
+    "problem": "The file is missing a terminating newline character.",
+    "code": "#endif /* HITLS_CRYPTO_GCM && HITLS_CRYPTO_AES && HITLS_CRYPTO_GHASH */\n\\ No newline at end of file",
+    "fix": "#endif /* HITLS_CRYPTO_GCM && HITLS_CRYPTO_AES && HITLS_CRYPTO_GHASH */"
+  },
+  {
+    "source": "claude",
+    "file": "testcode/sdv/testcase/crypto/aes/test_suite_sdv_eal_aes_gcm_siv.c",
+    "line": "176",
+    "severity": "low",
+    "title": "Missing newline at end of file",
+    "problem": "The file is missing a terminating newline character.",
+    "code": "}\n/* END_CASE */\n\\ No newline at end of file",
+    "fix": "}\n/* END_CASE */"
+  }
+]

@@ -1,0 +1,326 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Final Report: openHiTLS/openhitls#1154</title>
+    <style>
+        :root { --critical: #dc2626; --high: #ea580c; --medium: #ca8a04; --low: #65a30d;
+                 --trusted: #059669; --likely: #0284c7; --evaluate: #7c3aed; }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: system-ui, sans-serif; background: #f8fafc; color: #1e293b; padding: 2rem; line-height: 1.6; }
+        .container { max-width: 900px; margin: 0 auto; }
+        h1 { font-size: 1.75rem; margin-bottom: 0.5rem; }
+        .subtitle { color: #64748b; margin-bottom: 1rem; }
+        .stats { display: flex; gap: 1rem; margin-bottom: 2rem; flex-wrap: wrap; }
+        .stat { background: white; border: 1px solid #e2e8f0; border-radius: 0.5rem; padding: 1rem; min-width: 100px; text-align: center; }
+        .stat-value { font-size: 1.5rem; font-weight: 700; }
+        .stat-label { font-size: 0.875rem; color: #64748b; }
+        .stat.critical .stat-value { color: var(--critical); }
+        .stat.high .stat-value { color: var(--high); }
+        .stat.medium .stat-value { color: var(--medium); }
+        .stat.low .stat-value { color: var(--low); }
+        .reviewers { background: #e0e7ff; color: #3730a3; padding: 0.5rem 1rem; border-radius: 0.5rem; margin-bottom: 2rem; }
+        .section { margin-bottom: 2rem; }
+        .section-title { font-size: 1.1rem; font-weight: 600; padding: 0.5rem 1rem; border-radius: 0.5rem 0.5rem 0 0; color: white; }
+        .section-title.critical { background: var(--critical); }
+        .section-title.high { background: var(--high); }
+        .section-title.medium { background: var(--medium); }
+        .section-title.low { background: var(--low); }
+        .issue { background: white; border: 1px solid #e2e8f0; border-top: none; padding: 1rem; }
+        .issue:last-child { border-radius: 0 0 0.5rem 0.5rem; }
+        .issue-title { font-weight: 600; margin-bottom: 0.25rem; }
+        .issue-location { font-family: monospace; font-size: 0.875rem; color: #64748b; margin-bottom: 0.5rem; }
+        .issue-meta { font-size: 0.75rem; margin-bottom: 0.75rem; display: flex; gap: 0.75rem; align-items: center; }
+        .issue-meta .reviewers { background: #f1f5f9; color: #475569; padding: 0.25rem 0.5rem; border-radius: 0.25rem; margin: 0; }
+        .confidence-badge { padding: 0.25rem 0.5rem; border-radius: 0.25rem; font-weight: 500; }
+        .confidence-badge.trusted { background: #d1fae5; color: #065f46; }
+        .confidence-badge.likely { background: #dbeafe; color: #1e40af; }
+        .confidence-badge.evaluate { background: #ede9fe; color: #5b21b6; }
+        pre { background: #1e293b; color: #e2e8f0; padding: 0.75rem; border-radius: 0.375rem; overflow-x: auto; font-size: 0.875rem; margin: 0.5rem 0; }
+        .problem { margin: 0.75rem 0; }
+        .fix-label { font-weight: 600; margin-top: 0.75rem; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Final Code Review Report</h1>
+        <div class="subtitle">openHiTLS/openhitls - PR #1154</div>
+        <p style="margin-bottom: 1rem;"></p>
+
+        <div class="stats">
+            <div class="stat"><div class="stat-value">13</div><div class="stat-label">Total</div></div>
+            <div class="stat critical"><div class="stat-value">5</div><div class="stat-label">Critical</div></div>
+            <div class="stat high"><div class="stat-value">2</div><div class="stat-label">High</div></div>
+            <div class="stat medium"><div class="stat-value">4</div><div class="stat-label">Medium</div></div>
+            <div class="stat low"><div class="stat-value">2</div><div class="stat-label">Low</div></div>
+        </div>
+
+        <div class="reviewers">Reviewers: claude, gemini, codex</div>
+<div class="section"><div class="section-title critical">Critical</div>
+<div class="issue">
+                <div class="issue-title">Undefined BSL_CID_COMPOSITE constant</div>
+                <div class="issue-location">include/tls/hitls_cert_type.h:170</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: claude</span>
+                    <span class="confidence-badge likely">置信度: 较可信</span>
+                </div>
+                <pre>TLS_CERT_KEY_TYPE_COMPOSITE = BSL_CID_COMPOSITE</pre>
+                <div class="problem"><strong>Issue:</strong> The code uses BSL_CID_COMPOSITE but this constant is not defined anywhere in the codebase. This will cause a compilation error.</div>
+                <div class="fix-label">Fix:</div><pre>Define BSL_CID_COMPOSITE in include/bsl/bsl_obj.h (or appropriate header) with a unique value, e.g.:
+    BSL_CID_COMPOSITE = 256,  /* identifies composite signature algorithms */</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">Undefined BSL_CID_COMPOSITE constant</div>
+                <div class="issue-location">include/tls/hitls_crypt_type.h:173</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: claude</span>
+                    <span class="confidence-badge likely">置信度: 较可信</span>
+                </div>
+                <pre>HITLS_SIGN_COMPOSITE = BSL_CID_COMPOSITE,</pre>
+                <div class="problem"><strong>Issue:</strong> The code uses BSL_CID_COMPOSITE but this constant is not defined anywhere in the codebase. This will cause a compilation error.</div>
+                <div class="fix-label">Fix:</div><pre>Define BSL_CID_COMPOSITE in include/bsl/bsl_obj.h (or appropriate header) with a unique value, e.g.:
+    BSL_CID_COMPOSITE = 256,  /* identifies composite signature algorithms */</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">Undefined CRYPT_COMPOSITE_* and BSL_CID_MLDSA_* constants</div>
+                <div class="issue-location">tls/config/src/config_sign.c:117-311</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: claude</span>
+                    <span class="confidence-badge likely">置信度: 较可信</span>
+                </div>
+                <pre>{
+        CONST_CAST("composite_mldsa44_rsa2048_pss_sha256"),
+        CERT_SIG_SCHEME_COMPOSITE_MLDSA44_RSA2048_PSS_SHA256,
+        TLS_CERT_KEY_TYPE_COMPOSITE,
+        CRYPT_COMPOSITE_MLDSA44_RSA2048_PSS_SHA256,  /* UNDEFINED */
+        BSL_CID_MLDSA44_RSA2048_PSS_SHA256,           /* UNDEFINED */
+        ...
+    },</pre>
+                <div class="problem"><strong>Issue:</strong> The code uses multiple undefined constants: CRYPT_COMPOSITE_MLDSA44_RSA2048_PSS_SHA256, BSL_CID_MLDSA44_RSA2048_PSS_SHA256, etc. These are used in TLS_SigSchemeInfo structures but are not defined anywhere.</div>
+                <div class="fix-label">Fix:</div><pre>Add the following definitions in include/crypto/crypt_algid.h:</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">Missing HITLS_CRYPTO_COMPOSITE feature definition</div>
+                <div class="issue-location">tls/config/src/config_sign.c:112-311</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: claude</span>
+                    <span class="confidence-badge likely">置信度: 较可信</span>
+                </div>
+                <pre>#ifdef HITLS_CRYPTO_COMPOSITE
+    {
+        CONST_CAST("composite_mldsa44_rsa2048_pss_sha256"),
+        ...
+    },
+#endif /* HITLS_CRYPTO_COMPOSITE */</pre>
+                <div class="problem"><strong>Issue:</strong> The code is wrapped in `#ifdef HITLS_CRYPTO_COMPOSITE` but this feature macro is not defined in the configuration headers. This will cause the composite signature support to never be compiled.</div>
+                <div class="fix-label">Fix:</div><pre>Add HITLS_CRYPTO_COMPOSITE feature definition in config/macro_config/hitls_config_layer_crypto.h:</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">Duplicate undefined constants in provider</div>
+                <div class="issue-location">crypto/provider/src/default/crypt_default_provider.c:904-1114</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: claude</span>
+                    <span class="confidence-badge likely">置信度: 较可信</span>
+                </div>
+                <pre>{
+        CONST_CAST("composite_mldsa44_rsa2048_pss_sha256"),
+        CERT_SIG_SCHEME_COMPOSITE_MLDSA44_RSA2048_PSS_SHA256,
+        TLS_CERT_KEY_TYPE_COMPOSITE,
+        CRYPT_COMPOSITE_MLDSA44_RSA2048_PSS_SHA256,  /* UNDEFINED */
+        BSL_CID_MLDSA44_RSA2048_PSS_SHA256,           /* UNDEFINED */
+        ...
+    },</pre>
+                <div class="problem"><strong>Issue:</strong> The same undefined CRYPT_COMPOSITE_* and BSL_CID_MLDSA44_* constants are used in the crypto provider. Once defined, they will work here too, but the issue must be fixed at the definition source.</div>
+                <div class="fix-label">Fix:</div><pre>Same fix as for tls/config/src/config_sign.c - define the constants in the appropriate headers (include/crypto/crypt_algid.h and include/bsl/bsl_obj.h).</pre>
+            </div>
+</div>
+<div class="section"><div class="section-title high">High</div>
+<div class="issue">
+                <div class="issue-title">Missing feature guard for composite signature default</div>
+                <div class="issue-location">tls/cert/cert_adapt/cert.c:73-76</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: claude</span>
+                    <span class="confidence-badge likely">置信度: 较可信</span>
+                </div>
+                <pre>#if defined(HITLS_CRYPTO_COMPOSITE)
+        case TLS_CERT_KEY_TYPE_COMPOSITE:
+            return CERT_SIG_SCHEME_COMPOSITE_MLDSA44_RSA2048_PSS_SHA256;
+#endif</pre>
+                <div class="problem"><strong>Issue:</strong> The code adds a case for TLS_CERT_KEY_TYPE_COMPOSITE wrapped in HITLS_CRYPTO_COMPOSITE, but there's no check that this feature is enabled before using the default signature scheme.</div>
+                <div class="fix-label">Fix:</div><pre>The code is correct, but ensure HITLS_CRYPTO_COMPOSITE is properly defined in the build configuration. If the feature is not intended to be compile-time optional, remove the #ifdef guard.</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">Composite keys are misclassified as legacy ECDSA certificate types</div>
+                <div class="issue-location">tls/handshake/common/src/hs_cert.c:39-43</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: codex</span>
+                    <span class="confidence-badge likely">置信度: 较可信</span>
+                </div>
+                <pre>case TLS_CERT_KEY_TYPE_SM2:
+        case TLS_CERT_KEY_TYPE_ECDSA:
+        case TLS_CERT_KEY_TYPE_ED25519:
+        case TLS_CERT_KEY_TYPE_COMPOSITE:
+            return CERT_TYPE_ECDSA_SIGN;</pre>
+                <div class="problem"><strong>Issue:</strong> This maps a TLS1.3-only composite key to `CERT_TYPE_ECDSA_SIGN`, which is consumed by the TLS1.2/DTLS1.2 certificate-type and certificate-selection code. That lets legacy `ECDHE_ECDSA_*` paths request or select a composite certificate, including the RSA-based composite variants added by this PR, even though those handshakes have no valid composite cert type.</div>
+                <div class="fix-label">Fix:</div><pre>case TLS_CERT_KEY_TYPE_SM2:
+        case TLS_CERT_KEY_TYPE_ECDSA:
+        case TLS_CERT_KEY_TYPE_ED25519:
+            return CERT_TYPE_ECDSA_SIGN;
+        case TLS_CERT_KEY_TYPE_COMPOSITE:
+            return CERT_TYPE_UNKNOWN;</pre>
+            </div>
+</div>
+<div class="section"><div class="section-title medium">Medium</div>
+<div class="issue">
+                <div class="issue-title">Removed error stack validation</div>
+                <div class="issue-location">testcode/sdv/testcase/tls/ciphersuite/test_suite_sdv_hlt_group_signature.c:239</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: claude, gemini</span>
+                    <span class="confidence-badge trusted">置信度: 可信</span>
+                </div>
+                <pre>ASSERT_TRUE(memcmp("Hello World", readBuf, readLen) == 0);
+
+EXIT:  /* Line 239 - ASSERT_TRUE(TestIsErrStackEmpty()); was removed */
+    HLT_FreeAllProcess();</pre>
+                <div class="problem"><strong>Issue:</strong> The test removed `ASSERT_TRUE(TestIsErrStackEmpty());` which validates that no errors were left on the error stack after the CONNECT function. This could hide issues.</div>
+                <div class="fix-label">Fix:</div><pre>ASSERT_TRUE(memcmp("Hello World", readBuf, readLen) == 0);
+    ASSERT_TRUE(TestIsErrStackEmpty());
+
+EXIT:
+    HLT_FreeAllProcess();</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">TLS1.3-only composite schemes leak into mixed TLS1.2/TLS1.3 defaults</div>
+                <div class="issue-location">tls/config/src/config_sign.c:34-51</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: codex</span>
+                    <span class="confidence-badge likely">置信度: 较可信</span>
+                </div>
+                <pre>static const uint16_t DEFAULT_SIGSCHEME_ID[] = {
+    CERT_SIG_SCHEME_COMPOSITE_MLDSA44_RSA2048_PSS_SHA256,
+    CERT_SIG_SCHEME_COMPOSITE_MLDSA44_RSA2048_PKCS15_SHA256,
+    CERT_SIG_SCHEME_COMPOSITE_MLDSA44_ED25519_SHA512,
+    CERT_SIG_SCHEME_COMPOSITE_MLDSA44_ECDSA_P256_SHA256,
+    ...
+    CERT_SIG_SCHEME_COMPOSITE_MLDSA87_RSA4096_PSS_SHA512,
+    CERT_SIG_SCHEME_COMPOSITE_MLDSA87_ECDSA_P521_SHA512,
+    CERT_SIG_SCHEME_ECDSA_SECP256R1_SHA256,</pre>
+                <div class="problem"><strong>Issue:</strong> These entries are inserted into the single global default `signAlgorithms` array whenever TLS1.3 is enabled in the config. The TLS1.2/DTLS1.2 packing and certificate-selection paths later reuse that array without checking `chainVersionBits`, so a dual-stack endpoint can advertise or even negotiate composite schemes in legacy handshakes where they are not valid.</div>
+                <div class="fix-label">Fix:</div><pre>for (uint32_t i = 0; i &lt; sizeof(DEFAULT_SIGSCHEME_ID) / sizeof(DEFAULT_SIGSCHEME_ID[0]); i++) {
+    const TLS_SigSchemeInfo *info = ConfigGetSignatureSchemeInfo(config, DEFAULT_SIGSCHEME_ID[i]);
+    if (info == NULL || (config-&gt;version &amp; info-&gt;chainVersionBits) == 0) {
+        continue;
+    }
+#if defined(HITLS_CRYPTO_COMPOSITE)
+    /* Do not place TLS1.3-only composite schemes into the shared default list for mixed-version configs. */
+    if (info-&gt;signAlgId == HITLS_SIGN_COMPOSITE &amp;&amp;
+        !(config-&gt;minVersion == HITLS_VERSION_TLS13 &amp;&amp; config-&gt;maxVersion == HITLS_VERSION_TLS13)) {
+        continue;
+    }
+#endif
+    tempItems[size++] = DEFAULT_SIGSCHEME_ID[i];
+}</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">Default composite fallback can select a TLS1.3-only scheme in legacy flows</div>
+                <div class="issue-location">tls/cert/cert_adapt/cert.c:73-75</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: codex</span>
+                    <span class="confidence-badge likely">置信度: 较可信</span>
+                </div>
+                <pre>#if defined(HITLS_CRYPTO_COMPOSITE)
+        case TLS_CERT_KEY_TYPE_COMPOSITE:
+            return CERT_SIG_SCHEME_COMPOSITE_MLDSA44_RSA2048_PSS_SHA256;
+#endif</pre>
+                <div class="problem"><strong>Issue:</strong> `SAL_CERT_GetDefaultSignHashAlgo()` has no negotiated-version input, but this new case returns a composite signature scheme unconditionally. Callers such as `CheckSignScheme()` and `VerifySignData()` use this fallback when the peer did not send `signature_algorithms`, so a TLS1.2 handshake can silently pick a TLS1.3-only composite code point instead of rejecting the certificate.</div>
+                <div class="fix-label">Fix:</div><pre>#if defined(HITLS_CRYPTO_COMPOSITE)
+        case TLS_CERT_KEY_TYPE_COMPOSITE:
+            /* Composite must be selected from an explicit TLS1.3 signature_algorithms negotiation. */
+            return CERT_SIG_SCHEME_UNKNOWN;
+#endif</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">Config validation accepts composite schemes as TLS1.2 ECDSA auth</div>
+                <div class="issue-location">tls/config/src/config_check.c:65-67</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: codex</span>
+                    <span class="confidence-badge likely">置信度: 较可信</span>
+                </div>
+                <pre>if (((signAlg == HITLS_SIGN_ECDSA) || (signAlg == HITLS_SIGN_ED25519) ||
+            (signAlg == HITLS_SIGN_COMPOSITE)) &amp;&amp;
+            (authAlg == HITLS_AUTH_ECDSA)) {
+            return true;
+        }</pre>
+                <div class="problem"><strong>Issue:</strong> `CheckSign()` uses `HaveMatchSignAlg()` to validate legacy cipher-suite/auth compatibility. Adding `HITLS_SIGN_COMPOSITE` here makes the config checker accept TLS1.2 `HITLS_AUTH_ECDSA` suites when the only matching signature schemes are composite, so impossible deployments pass validation and fail later during handshake selection.</div>
+                <div class="fix-label">Fix:</div><pre>/* Composite schemes are TLS1.3-only and must not satisfy legacy ECDSA cipher-suite checks. */
+        if (((signAlg == HITLS_SIGN_ECDSA) || (signAlg == HITLS_SIGN_ED25519)) &amp;&amp;
+            (authAlg == HITLS_AUTH_ECDSA)) {
+            return true;
+        }</pre>
+            </div>
+</div>
+<div class="section"><div class="section-title low">Low</div>
+<div class="issue">
+                <div class="issue-title">Inconsistent code formatting in if-else chain</div>
+                <div class="issue-location">testcode/sdv/testcase/tls/ciphersuite/test_suite_sdv_hlt_group_signature.c:86-90</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: claude</span>
+                    <span class="confidence-badge likely">置信度: 较可信</span>
+                </div>
+                <pre>} else
+    if (strncmp(cert, "COMPOSITE_MLDSA65_RSA4096_PSS_SHA512", strlen("COMPOSITE_MLDSA65_RSA4096_PSS_SHA512")) == 0) {</pre>
+                <div class="problem"><strong>Issue:</strong> The code has inconsistent formatting where the `else` keyword is on one line and the following `if` statement is on the next line, unlike all other branches.</div>
+                <div class="fix-label">Fix:</div><pre>} else if (strncmp(cert, "COMPOSITE_MLDSA65_RSA4096_PSS_SHA512", strlen("COMPOSITE_MLDSA65_RSA4096_PSS_SHA512")) == 0) {</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">Missing conditional compilation for composite signature schemes</div>
+                <div class="issue-location">tls/config/src/config_sign.c:34-52</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: gemini</span>
+                    <span class="confidence-badge likely">置信度: 较可信</span>
+                </div>
+                <pre>static const uint16_t DEFAULT_SIGSCHEME_ID[] = {
+    CERT_SIG_SCHEME_COMPOSITE_MLDSA44_RSA2048_PSS_SHA256,
+    CERT_SIG_SCHEME_COMPOSITE_MLDSA44_RSA2048_PKCS15_SHA256,
+    CERT_SIG_SCHEME_COMPOSITE_MLDSA44_ED25519_SHA512,
+    CERT_SIG_SCHEME_COMPOSITE_MLDSA44_ECDSA_P256_SHA256,
+    CERT_SIG_SCHEME_COMPOSITE_MLDSA65_RSA3072_PSS_SHA512,
+    CERT_SIG_SCHEME_COMPOSITE_MLDSA65_RSA3072_PKCS15_SHA512,
+    CERT_SIG_SCHEME_COMPOSITE_MLDSA65_RSA4096_PSS_SHA512,
+    CERT_SIG_SCHEME_COMPOSITE_MLDSA65_RSA4096_PKCS15_SHA512,
+    CERT_SIG_SCHEME_COMPOSITE_MLDSA65_ECDSA_P256_SHA512,
+    CERT_SIG_SCHEME_COMPOSITE_MLDSA65_ECDSA_P384_SHA512,
+    CERT_SIG_SCHEME_COMPOSITE_MLDSA65_ECDSA_BRAINPOOLP256R1_SHA512,
+    CERT_SIG_SCHEME_COMPOSITE_MLDSA65_ED25519_SHA512,
+    CERT_SIG_SCHEME_COMPOSITE_MLDSA87_ECDSA_P384_SHA512,
+    CERT_SIG_SCHEME_COMPOSITE_MLDSA87_ECDSA_BRAINPOOLP384R1_SHA512,
+    CERT_SIG_SCHEME_COMPOSITE_MLDSA87_RSA3072_PSS_SHA512,
+    CERT_SIG_SCHEME_COMPOSITE_MLDSA87_RSA4096_PSS_SHA512,
+    CERT_SIG_SCHEME_COMPOSITE_MLDSA87_ECDSA_P521_SHA512,
+    CERT_SIG_SCHEME_ECDSA_SECP256R1_SHA256,</pre>
+                <div class="problem"><strong>Issue:</strong> The composite signature schemes are unconditionally added to the `DEFAULT_SIGSCHEME_ID` array. Since their corresponding definitions in `SIGNATURE_SCHEME_INFO` are guarded by `#ifdef HITLS_CRYPTO_COMPOSITE`, these array elements should also be wrapped in the same macro to ensure consistency and avoid unnecessary iterations when the feature is disabled.</div>
+                <div class="fix-label">Fix:</div><pre>static const uint16_t DEFAULT_SIGSCHEME_ID[] = {
+#ifdef HITLS_CRYPTO_COMPOSITE
+    CERT_SIG_SCHEME_COMPOSITE_MLDSA44_RSA2048_PSS_SHA256,
+    CERT_SIG_SCHEME_COMPOSITE_MLDSA44_RSA2048_PKCS15_SHA256,
+    CERT_SIG_SCHEME_COMPOSITE_MLDSA44_ED25519_SHA512,
+    CERT_SIG_SCHEME_COMPOSITE_MLDSA44_ECDSA_P256_SHA256,
+    CERT_SIG_SCHEME_COMPOSITE_MLDSA65_RSA3072_PSS_SHA512,
+    CERT_SIG_SCHEME_COMPOSITE_MLDSA65_RSA3072_PKCS15_SHA512,
+    CERT_SIG_SCHEME_COMPOSITE_MLDSA65_RSA4096_PSS_SHA512,
+    CERT_SIG_SCHEME_COMPOSITE_MLDSA65_RSA4096_PKCS15_SHA512,
+    CERT_SIG_SCHEME_COMPOSITE_MLDSA65_ECDSA_P256_SHA512,
+    CERT_SIG_SCHEME_COMPOSITE_MLDSA65_ECDSA_P384_SHA512,
+    CERT_SIG_SCHEME_COMPOSITE_MLDSA65_ECDSA_BRAINPOOLP256R1_SHA512,
+    CERT_SIG_SCHEME_COMPOSITE_MLDSA65_ED25519_SHA512,
+    CERT_SIG_SCHEME_COMPOSITE_MLDSA87_ECDSA_P384_SHA512,
+    CERT_SIG_SCHEME_COMPOSITE_MLDSA87_ECDSA_BRAINPOOLP384R1_SHA512,
+    CERT_SIG_SCHEME_COMPOSITE_MLDSA87_RSA3072_PSS_SHA512,
+    CERT_SIG_SCHEME_COMPOSITE_MLDSA87_RSA4096_PSS_SHA512,
+    CERT_SIG_SCHEME_COMPOSITE_MLDSA87_ECDSA_P521_SHA512,
+#endif
+    CERT_SIG_SCHEME_ECDSA_SECP256R1_SHA256,</pre>
+            </div>
+</div>
+</div></body></html>
