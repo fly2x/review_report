@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Code Review: openHiTLS/openhitls#1217 - CLAUDE</title>
+    <style>
+        :root { --critical: #dc2626; --high: #ea580c; --medium: #ca8a04; --low: #65a30d; }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: system-ui, sans-serif; background: #f8fafc; color: #1e293b; padding: 2rem; line-height: 1.6; }
+        .container { max-width: 900px; margin: 0 auto; }
+        h1 { font-size: 1.5rem; margin-bottom: 0.5rem; }
+        .subtitle { color: #64748b; margin-bottom: 2rem; }
+        .section { margin-bottom: 2rem; }
+        .section-title { font-size: 1.1rem; font-weight: 600; padding: 0.5rem 1rem; border-radius: 0.5rem 0.5rem 0 0; color: white; }
+        .section-title.critical { background: var(--critical); }
+        .section-title.high { background: var(--high); }
+        .section-title.medium { background: var(--medium); }
+        .section-title.low { background: var(--low); }
+        .issue { background: white; border: 1px solid #e2e8f0; border-top: none; padding: 1rem; }
+        .issue:last-child { border-radius: 0 0 0.5rem 0.5rem; }
+        .issue-title { font-weight: 600; margin-bottom: 0.25rem; }
+        .issue-location { font-family: monospace; font-size: 0.875rem; color: #64748b; margin-bottom: 0.75rem; }
+        .issue-source { font-size: 0.75rem; color: #94a3b8; margin-top: 0.5rem; }
+        pre { background: #1e293b; color: #e2e8f0; padding: 0.75rem; border-radius: 0.375rem; overflow-x: auto; font-size: 0.875rem; margin: 0.5rem 0; }
+        .problem { margin: 0.75rem 0; }
+        .fix-label { font-weight: 600; margin-top: 0.75rem; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Code Review: openHiTLS/openhitls#1217 - CLAUDE</h1>
+        <div class="subtitle"></div>
+<div class="section"><div class="section-title critical">Critical</div>
+<div class="issue">
+                <div class="issue-title">Undefined option HITLS_CRYPTO_PKEY_KEM prevents source compilation</div>
+                <div class="issue-location">crypto/eal/CMakeLists.txt:38</div>
+                <pre>if(HITLS_CRYPTO_PKEY_KEM)
+    list(APPEND _eal_sources ${CMAKE_CURRENT_SOURCE_DIR}/src/eal_pkey_kem.c)
+endif()</pre>
+                <div class="problem"><strong>Issue:</strong> The condition `if(HITLS_CRYPTO_PKEY_KEM)` checks an option that is never defined in cmake/hitls_options.cmake or set anywhere. In CMake, undefined variables are falsy, so `eal_pkey_kem.c` will never be compiled even when KEM algorithms are enabled. The original `file(GLOB)` would have included this file.</div>
+                <div class="fix-label">Fix:</div><pre># Option should be defined in cmake/hitls_options.cmake, or use existing KEM algorithm flags
+if(HITLS_CRYPTO_MLKEM OR HITLS_CRYPTO_FRODOKEM OR HITLS_CRYPTO_HPKE OR HITLS_CRYPTO_HYBRIDKEM OR HITLS_CRYPTO_MCELIECE)
+    list(APPEND _eal_sources ${CMAKE_CURRENT_SOURCE_DIR}/src/eal_pkey_kem.c)
+endif()</pre>
+                <div class="issue-source">Reviewer: claude</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">Undefined option HITLS_CRYPTO_PKEY_KEM prevents source compilation</div>
+                <div class="issue-location">crypto/provider/CMakeLists.txt:42-44</div>
+                <pre>if(HITLS_CRYPTO_PKEY_KEM)
+    list(APPEND _default_sources ${CMAKE_CURRENT_SOURCE_DIR}/src/default/crypt_default_kem.c)
+endif()</pre>
+                <div class="problem"><strong>Issue:</strong> The condition `if(HITLS_CRYPTO_PKEY_KEM)` checks an option that is never defined in cmake/hitls_options.cmake. This causes `crypt_default_kem.c` to never be compiled, breaking KEM functionality.</div>
+                <div class="fix-label">Fix:</div><pre>if(HITLS_CRYPTO_MLKEM OR HITLS_CRYPTO_FRODOKEM OR HITLS_CRYPTO_HPKE OR HITLS_CRYPTO_HYBRIDKEM OR HITLS_CRYPTO_MCELIECE)
+    list(APPEND _default_sources ${CMAKE_CURRENT_SOURCE_DIR}/src/default/crypt_default_kem.c)
+endif()</pre>
+                <div class="issue-source">Reviewer: claude</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">Undefined option HITLS_CRYPTO_PKEY_EXCH prevents source compilation</div>
+                <div class="issue-location">crypto/provider/CMakeLists.txt:45-47</div>
+                <pre>if(HITLS_CRYPTO_PKEY_EXCH)
+    list(APPEND _default_sources ${CMAKE_CURRENT_SOURCE_DIR}/src/default/crypt_default_keyexch.c)
+endif()</pre>
+                <div class="problem"><strong>Issue:</strong> The condition `if(HITLS_CRYPTO_PKEY_EXCH)` checks an option that is never defined. This causes `crypt_default_keyexch.c` to never be compiled, breaking key exchange functionality for ECDH, SM2, SM9, and X25519.</div>
+                <div class="fix-label">Fix:</div><pre>if(HITLS_CRYPTO_ECDH OR HITLS_CRYPTO_SM2_EXCH OR HITLS_CRYPTO_SM9_EXCH OR HITLS_CRYPTO_X25519 OR HITLS_CRYPTO_DH)
+    list(APPEND _default_sources ${CMAKE_CURRENT_SOURCE_DIR}/src/default/crypt_default_keyexch.c)
+endif()</pre>
+                <div class="issue-source">Reviewer: claude</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">Undefined option HITLS_CRYPTO_PKEY_CRYPT prevents source compilation</div>
+                <div class="issue-location">crypto/provider/CMakeLists.txt:48-50</div>
+                <pre>if(HITLS_CRYPTO_PKEY_CRYPT)
+    list(APPEND _default_sources ${CMAKE_CURRENT_SOURCE_DIR}/src/default/crypt_default_pkeycipher.c)
+endif()</pre>
+                <div class="problem"><strong>Issue:</strong> The condition `if(HITLS_CRYPTO_PKEY_CRYPT)` checks an option that is never defined. This causes `crypt_default_pkeycipher.c` to never be compiled, breaking public key encryption/decryption functionality for RSA, SM2, and SM9.</div>
+                <div class="fix-label">Fix:</div><pre>if(HITLS_CRYPTO_RSA_ENCRYPT OR HITLS_CRYPTO_RSA_DECRYPT OR HITLS_CRYPTO_SM2_CRYPT OR HITLS_CRYPTO_SM9_CRYPT)
+    list(APPEND _default_sources ${CMAKE_CURRENT_SOURCE_DIR}/src/default/crypt_default_pkeycipher.c)
+endif()</pre>
+                <div class="issue-source">Reviewer: claude</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">Undefined option HITLS_CRYPTO_PKEY_SIGN prevents source compilation</div>
+                <div class="issue-location">crypto/provider/CMakeLists.txt:51-53</div>
+                <pre>if(HITLS_CRYPTO_PKEY_SIGN)
+    list(APPEND _default_sources ${CMAKE_CURRENT_SOURCE_DIR}/src/default/crypt_default_sign.c)
+endif()</pre>
+                <div class="problem"><strong>Issue:</strong> The condition `if(HITLS_CRYPTO_PKEY_SIGN)` checks an option that is never defined. This causes `crypt_default_sign.c` to never be compiled, breaking signature functionality for RSA, DSA, ECDSA, Ed25519, SM2, SM9, and XMSS.</div>
+                <div class="fix-label">Fix:</div><pre>if(HITLS_CRYPTO_RSA_SIGN OR HITLS_CRYPTO_RSA_VERIFY OR HITLS_CRYPTO_DSA OR HITLS_CRYPTO_ECDSA OR HITLS_CRYPTO_ED25519 OR HITLS_CRYPTO_SM2_SIGN OR HITLS_CRYPTO_SM9_SIGN OR HITLS_CRYPTO_XMSS OR HITLS_CRYPTO_MLDSA)
+    list(APPEND _default_sources ${CMAKE_CURRENT_SOURCE_DIR}/src/default/crypt_default_sign.c)
+endif()</pre>
+                <div class="issue-source">Reviewer: claude</div>
+            </div>
+</div>
+</div></body></html>

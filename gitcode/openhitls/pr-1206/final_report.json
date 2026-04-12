@@ -1,0 +1,154 @@
+{
+  "context": {
+    "owner": "openHiTLS",
+    "repo": "openhitls",
+    "pr_id": "1206",
+    "title": "",
+    "reviewers": [
+      "claude",
+      "gemini",
+      "codex"
+    ]
+  },
+  "statistics": {
+    "total": 12,
+    "critical": 0,
+    "high": 8,
+    "medium": 4,
+    "low": 0
+  },
+  "issues": [
+    {
+      "file": "pki/cms/src/hitls_cms_envelopeddata.c",
+      "line": "294-295",
+      "severity": "high",
+      "title": "Integer overflow in ciphertext length calculation",
+      "reviewers": "CLAUDE, CODEX",
+      "confidence": "trusted",
+      "problem": "uint32_t ciphertextLen = plaintext->dataLen + blockSize; can overflow if plaintext->dataLen is close to UINT32_MAX, leading to buffer under-allocation and heap overflow during encryption.",
+      "code": "uint32_t ciphertextLen = plaintext->dataLen + blockSize;\nuint8_t *ciphertext = BSL_SAL_Malloc(ciphertextLen);",
+      "fix": "if (blockSize > UINT32_MAX - plaintext->dataLen) {\n    BSL_ERR_PUSH_ERROR(HITLS_CMS_ERR_INVALID_PARAM);\n    return HITLS_CMS_ERR_INVALID_PARAM;\n}\nuint32_t ciphertextLen = plaintext->dataLen + blockSize;\nuint8_t *ciphertext = BSL_SAL_Malloc(ciphertextLen);"
+    },
+    {
+      "file": "pki/cms/src/hitls_cms_envelopeddata.c",
+      "line": "776-777",
+      "severity": "high",
+      "title": "Integer overflow in plaintext length calculation",
+      "reviewers": "CLAUDE, CODEX",
+      "confidence": "trusted",
+      "problem": "uint32_t maxPlaintextLen = encInfo->encryptedContent.dataLen + blockSize; can overflow, leading to buffer under-allocation and heap overflow during decryption.",
+      "code": "uint32_t blockSize = 0;\nret = CRYPT_EAL_CipherCtrl(ctx, CRYPT_CTRL_GET_BLOCKSIZE, &blockSize, sizeof(blockSize));\nif (ret != CRYPT_SUCCESS) {\n    BSL_ERR_PUSH_ERROR(ret);\n    return ret;\n}\nuint32_t maxPlaintextLen = encInfo->encryptedContent.dataLen + blockSize;\nuint8_t *plaintextData = BSL_SAL_Malloc(maxPlaintextLen);",
+      "fix": "if (blockSize > UINT32_MAX - encInfo->encryptedContent.dataLen) {\n    BSL_ERR_PUSH_ERROR(HITLS_CMS_ERR_INVALID_PARAM);\n    return HITLS_CMS_ERR_INVALID_PARAM;\n}\nuint32_t maxPlaintextLen = encInfo->encryptedContent.dataLen + blockSize;\nuint8_t *plaintextData = BSL_SAL_Malloc(maxPlaintextLen);"
+    },
+    {
+      "file": "pki/cms/src/hitls_cms_envelopeddata.c",
+      "line": "2234-2235",
+      "severity": "high",
+      "title": "Integer overflow in streaming encrypt update buffer allocation",
+      "reviewers": "CLAUDE, CODEX",
+      "confidence": "trusted",
+      "problem": "Multiple unchecked additions that can overflow: uint32_t newDataLen = input->dataLen + blockSize; uint32_t totalLen = currentLen + newDataLen; leading to heap corruption.",
+      "code": "uint32_t currentLen = envData->encryptedContentInfo.encryptedContent.dataLen;\nuint32_t newDataLen = input->dataLen + blockSize;\nuint32_t totalLen = currentLen + newDataLen;\nuint8_t *newBuf = BSL_SAL_Realloc(envData->encryptedContentInfo.encryptedContent.data, totalLen, currentLen);",
+      "fix": "if (blockSize > UINT32_MAX - input->dataLen) {\n    BSL_ERR_PUSH_ERROR(HITLS_CMS_ERR_INVALID_PARAM);\n    return HITLS_CMS_ERR_INVALID_PARAM;\n}\nuint32_t newDataLen = input->dataLen + blockSize;\nif (newDataLen > UINT32_MAX - currentLen) {\n    BSL_ERR_PUSH_ERROR(HITLS_CMS_ERR_INVALID_PARAM);\n    return HITLS_CMS_ERR_INVALID_PARAM;\n}\nuint32_t totalLen = currentLen + newDataLen;"
+    },
+    {
+      "file": "pki/cms/src/hitls_cms_envelopeddata.c",
+      "line": "2268-2269",
+      "severity": "high",
+      "title": "Integer overflow in FinalizeEncry buffer reallocation",
+      "reviewers": "CLAUDE, CODEX",
+      "confidence": "trusted",
+      "problem": "uint32_t totalLen = currentLen + blockSize; can overflow, leading to heap corruption.",
+      "code": "uint32_t currentLen = envData->encryptedContentInfo.encryptedContent.dataLen;\nuint32_t totalLen = currentLen + blockSize;\nuint8_t *newBuf = BSL_SAL_Realloc(envData->encryptedContentInfo.encryptedContent.data, totalLen, currentLen);",
+      "fix": "if (blockSize > UINT32_MAX - currentLen) {\n    BSL_ERR_PUSH_ERROR(HITLS_CMS_ERR_INVALID_PARAM);\n    return HITLS_CMS_ERR_INVALID_PARAM;\n}\nuint32_t totalLen = currentLen + blockSize;"
+    },
+    {
+      "file": "pki/cms/src/hitls_cms_envelopeddata.c",
+      "line": "2484-2485",
+      "severity": "high",
+      "title": "Integer overflow in streaming decrypt update buffer allocation",
+      "reviewers": "CLAUDE, CODEX",
+      "confidence": "trusted",
+      "problem": "Multiple unchecked additions: uint32_t maxOutLen = input->dataLen + blockSize; uint32_t totalOutLen = curOutLen + maxOutLen; can overflow.",
+      "code": "uint32_t curOutLen = output->dataLen;\nuint32_t maxOutLen = input->dataLen + blockSize;\nuint32_t totalOutLen = curOutLen + maxOutLen;",
+      "fix": "if (blockSize > UINT32_MAX - input->dataLen) {\n    BSL_ERR_PUSH_ERROR(HITLS_CMS_ERR_INVALID_PARAM);\n    return HITLS_CMS_ERR_INVALID_PARAM;\n}\nuint32_t maxOutLen = input->dataLen + blockSize;\nif (maxOutLen > UINT32_MAX - curOutLen) {\n    BSL_ERR_PUSH_ERROR(HITLS_CMS_ERR_INVALID_PARAM);\n    return HITLS_CMS_ERR_INVALID_PARAM;\n}\nuint32_t totalOutLen = curOutLen + maxOutLen;"
+    },
+    {
+      "file": "pki/cms/src/hitls_cms_envelopeddata.c",
+      "line": "2512",
+      "severity": "high",
+      "title": "Integer overflow in TransferAccumulatedData buffer reallocation",
+      "reviewers": "CLAUDE, CODEX",
+      "confidence": "trusted",
+      "problem": "uint32_t newOutLen = curOutLen + accDataLen; can overflow, leading to heap corruption.",
+      "code": "uint32_t curOutLen = output->dataLen;\nuint32_t accDataLen = envData->streamPlaintext->dataLen;\nuint32_t newOutLen = curOutLen + accDataLen;\nuint8_t *newBuf = BSL_SAL_Realloc(output->data, newOutLen, curOutLen);",
+      "fix": "if (accDataLen > UINT32_MAX - curOutLen) {\n    BSL_ERR_PUSH_ERROR(HITLS_CMS_ERR_INVALID_PARAM);\n    return HITLS_CMS_ERR_INVALID_PARAM;\n}\nuint32_t newOutLen = curOutLen + accDataLen;"
+    },
+    {
+      "file": "pki/cms/src/hitls_cms_envelopeddata.c",
+      "line": "2568",
+      "severity": "high",
+      "title": "Integer overflow in DecryptFinal buffer reallocation",
+      "reviewers": "CLAUDE, CODEX",
+      "confidence": "trusted",
+      "problem": "uint32_t totalLen = currentLen + blockSize; can overflow, leading to heap corruption.",
+      "code": "uint32_t currentLen = output->dataLen;\nuint32_t totalLen = currentLen + blockSize;\nuint8_t *newBuf = BSL_SAL_Realloc(output->data, totalLen, currentLen);",
+      "fix": "if (blockSize > UINT32_MAX - currentLen) {\n    BSL_ERR_PUSH_ERROR(HITLS_CMS_ERR_INVALID_PARAM);\n    return HITLS_CMS_ERR_INVALID_PARAM;\n}\nuint32_t totalLen = currentLen + blockSize;"
+    },
+    {
+      "file": "pki/cms/src/hitls_cms_envelopeddata.c",
+      "line": "2443-2450",
+      "severity": "high",
+      "title": "DecryptInit returns success after cipher setup failure",
+      "reviewers": "CODEX, GEMINI",
+      "confidence": "trusted",
+      "problem": "SetDecryCtx errors are ignored. On failure the code clears the CEK, but still marks the object as HITLS_CMS_DECRYPT_INIT and returns success. This creates an invalid decrypt context that will crash on subsequent operations.",
+      "code": "ret = SetDecryCtx(envData);\nif (ret != HITLS_PKI_SUCCESS) {\n    BSL_SAL_ClearFree(envData->streamKey, envData->streamKeyLen);\n    envData->streamKey = NULL;\n    envData->streamKeyLen = 0;\n}\nenvData->state = HITLS_CMS_DECRYPT_INIT;\nreturn HITLS_PKI_SUCCESS;",
+      "fix": "ret = SetDecryCtx(envData);\nif (ret != HITLS_PKI_SUCCESS) {\n    BSL_SAL_ClearFree(envData->streamKey, envData->streamKeyLen);\n    envData->streamKey = NULL;\n    envData->streamKeyLen = 0;\n    return ret;\n}\nenvData->state = HITLS_CMS_DECRYPT_INIT;\nreturn HITLS_PKI_SUCCESS;"
+    },
+    {
+      "file": "pki/cms/src/hitls_cms_envelopeddata.c",
+      "line": "631-640",
+      "severity": "medium",
+      "title": "Potential null pointer dereference in BufferEquals",
+      "reviewers": "CLAUDE",
+      "confidence": "trusted",
+      "problem": "The function checks if struct pointers a and b are NULL, but not if a->data or b->data are NULL before calling memcmp. memcmp with NULL pointers is undefined behavior.",
+      "code": "static bool BufferEquals(const BSL_Buffer *a, const BSL_Buffer *b)\n{\n    if (a == NULL || b == NULL) {\n        return false;\n    }\n    if (a->dataLen != b->dataLen) {\n        return false;\n    }\n    return memcmp(a->data, b->data, a->dataLen) == 0;\n}",
+      "fix": "static bool BufferEquals(const BSL_Buffer *a, const BSL_Buffer *b)\n{\n    if (a == NULL || b == NULL) {\n        return false;\n    }\n    if (a->dataLen != b->dataLen) {\n        return false;\n    }\n    if (a->data == NULL || b->data == NULL) {\n        return a->dataLen == 0;\n    }\n    return memcmp(a->data, b->data, a->dataLen) == 0;\n}"
+    },
+    {
+      "file": "pki/cms/src/hitls_cms_envelopeddata.c",
+      "line": "664-669",
+      "severity": "medium",
+      "title": "Potential null pointer dereference in MatchRecipientIdByData",
+      "reviewers": "CLAUDE",
+      "confidence": "trusted",
+      "problem": "The function calls BufferEquals with &certSerial whose certSerial.data may be NULL if HITLS_X509_CertCtrl returns success with NULL data pointer.",
+      "code": "BSL_Buffer certSerial = {0};\nret = HITLS_X509_CertCtrl(cert, HITLS_X509_GET_SERIALNUM, &certSerial, sizeof(BSL_Buffer));\nif (ret != HITLS_PKI_SUCCESS) {\n    return false;\n}\nreturn BufferEquals(serialNumber, &certSerial);",
+      "fix": "BSL_Buffer certSerial = {0};\nret = HITLS_X509_CertCtrl(cert, HITLS_X509_GET_SERIALNUM, &certSerial, sizeof(BSL_Buffer));\nif (ret != HITLS_PKI_SUCCESS) {\n    return false;\n}\nif (certSerial.data == NULL) {\n    return false;\n}\nreturn BufferEquals(serialNumber, &certSerial);"
+    },
+    {
+      "file": "pki/cms/src/hitls_cms_envelopeddata.c",
+      "line": "564-576",
+      "severity": "medium",
+      "title": "EnvelopedData generation accepts empty RecipientInfos set",
+      "reviewers": "CODEX",
+      "confidence": "trusted",
+      "problem": "RFC 5652 requires RecipientInfos to contain at least one recipient, but GetEnvDataVersion never enforces this. When the list is empty, allVersion0 is treated as true, producing an invalid, undecryptable CMS object.",
+      "code": "if (envData->originatorInfo == NULL && envData->unprotectedAttrs == NULL) {\n    bool allVersion0 = true;\n    recip = BSL_LIST_GET_FIRST(envData->recipientInfos);\n    while (recip != NULL) {\n        if (!(recip->type == CMS_RECIPIENT_TYPE_KTRI && recip->d.ktri != NULL && recip->d.ktri->version == 0)) {\n            allVersion0 = false;\n            break;\n        }\n        recip = BSL_LIST_GET_NEXT(envData->recipientInfos);\n    }\n    if (allVersion0) {\n        envData->version = 0;\n        return HITLS_PKI_SUCCESS;\n    }\n}",
+      "fix": "if (envData->recipientInfos == NULL || BSL_LIST_COUNT(envData->recipientInfos) == 0) {\n    BSL_ERR_PUSH_ERROR(HITLS_CMS_ERR_INVALID_PARAM);\n    return HITLS_CMS_ERR_INVALID_PARAM;\n}\n\nif (envData->originatorInfo == NULL && envData->unprotectedAttrs == NULL) {\n    bool allVersion0 = true;\n    recip = BSL_LIST_GET_FIRST(envData->recipientInfos);\n    while (recip != NULL) {\n        if (!(recip->type == CMS_RECIPIENT_TYPE_KTRI && recip->d.ktri != NULL && recip->d.ktri->version == 0)) {\n            allVersion0 = false;\n            break;\n        }\n        recip = BSL_LIST_GET_NEXT(envData->recipientInfos);\n    }\n    if (allVersion0) {\n        envData->version = 0;\n        return HITLS_PKI_SUCCESS;\n    }\n}"
+    },
+    {
+      "file": "pki/cms/src/hitls_cms_envelopeddata.c",
+      "line": "2642-2648",
+      "severity": "medium",
+      "title": "Final decrypt path trusts output parameter without validating type",
+      "reviewers": "CODEX",
+      "confidence": "trusted",
+      "problem": "Unlike other parameter extractors in this file, this branch only checks p->value != NULL and then casts to BSL_Buffer*. If the caller passes CRYPT_PARAM_DECODE_BUFFER_DATA with wrong valueType or valueLen, EnvelopedData_DecryptFinal dereferences unrelated memory.",
+      "code": "const BSL_Param *p = BSL_PARAM_FindConstParam(param, CRYPT_PARAM_DECODE_BUFFER_DATA);\nif (p == NULL || p->value == NULL) {\n    BSL_ERR_PUSH_ERROR(HITLS_CMS_ERR_NULL_POINTER);\n    return HITLS_CMS_ERR_NULL_POINTER;\n}\nBSL_Buffer *output = (BSL_Buffer *)p->value;\nreturn EnvelopedData_DecryptFinal(cms, output);",
+      "fix": "const BSL_Param *p = BSL_PARAM_FindConstParam(param, CRYPT_PARAM_DECODE_BUFFER_DATA);\nif (p == NULL || p->value == NULL ||\n    p->valueType != BSL_PARAM_TYPE_CTX_PTR || p->valueLen != sizeof(BSL_Buffer)) {\n    BSL_ERR_PUSH_ERROR(HITLS_CMS_ERR_INVALID_PARAM);\n    return HITLS_CMS_ERR_INVALID_PARAM;\n}\nBSL_Buffer *output = (BSL_Buffer *)p->value;\nreturn EnvelopedData_DecryptFinal(cms, output);"
+    }
+  ]
+}

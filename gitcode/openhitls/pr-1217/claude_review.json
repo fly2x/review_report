@@ -1,0 +1,52 @@
+[
+  {
+    "source": "claude",
+    "file": "crypto/eal/CMakeLists.txt",
+    "line": "38",
+    "severity": "critical",
+    "title": "Undefined option HITLS_CRYPTO_PKEY_KEM prevents source compilation",
+    "problem": "The condition `if(HITLS_CRYPTO_PKEY_KEM)` checks an option that is never defined in cmake/hitls_options.cmake or set anywhere. In CMake, undefined variables are falsy, so `eal_pkey_kem.c` will never be compiled even when KEM algorithms are enabled. The original `file(GLOB)` would have included this file.",
+    "code": "if(HITLS_CRYPTO_PKEY_KEM)\n    list(APPEND _eal_sources ${CMAKE_CURRENT_SOURCE_DIR}/src/eal_pkey_kem.c)\nendif()",
+    "fix": "# Option should be defined in cmake/hitls_options.cmake, or use existing KEM algorithm flags\nif(HITLS_CRYPTO_MLKEM OR HITLS_CRYPTO_FRODOKEM OR HITLS_CRYPTO_HPKE OR HITLS_CRYPTO_HYBRIDKEM OR HITLS_CRYPTO_MCELIECE)\n    list(APPEND _eal_sources ${CMAKE_CURRENT_SOURCE_DIR}/src/eal_pkey_kem.c)\nendif()"
+  },
+  {
+    "source": "claude",
+    "file": "crypto/provider/CMakeLists.txt",
+    "line": "42-44",
+    "severity": "critical",
+    "title": "Undefined option HITLS_CRYPTO_PKEY_KEM prevents source compilation",
+    "problem": "The condition `if(HITLS_CRYPTO_PKEY_KEM)` checks an option that is never defined in cmake/hitls_options.cmake. This causes `crypt_default_kem.c` to never be compiled, breaking KEM functionality.",
+    "code": "if(HITLS_CRYPTO_PKEY_KEM)\n    list(APPEND _default_sources ${CMAKE_CURRENT_SOURCE_DIR}/src/default/crypt_default_kem.c)\nendif()",
+    "fix": "if(HITLS_CRYPTO_MLKEM OR HITLS_CRYPTO_FRODOKEM OR HITLS_CRYPTO_HPKE OR HITLS_CRYPTO_HYBRIDKEM OR HITLS_CRYPTO_MCELIECE)\n    list(APPEND _default_sources ${CMAKE_CURRENT_SOURCE_DIR}/src/default/crypt_default_kem.c)\nendif()"
+  },
+  {
+    "source": "claude",
+    "file": "crypto/provider/CMakeLists.txt",
+    "line": "45-47",
+    "severity": "critical",
+    "title": "Undefined option HITLS_CRYPTO_PKEY_EXCH prevents source compilation",
+    "problem": "The condition `if(HITLS_CRYPTO_PKEY_EXCH)` checks an option that is never defined. This causes `crypt_default_keyexch.c` to never be compiled, breaking key exchange functionality for ECDH, SM2, SM9, and X25519.",
+    "code": "if(HITLS_CRYPTO_PKEY_EXCH)\n    list(APPEND _default_sources ${CMAKE_CURRENT_SOURCE_DIR}/src/default/crypt_default_keyexch.c)\nendif()",
+    "fix": "if(HITLS_CRYPTO_ECDH OR HITLS_CRYPTO_SM2_EXCH OR HITLS_CRYPTO_SM9_EXCH OR HITLS_CRYPTO_X25519 OR HITLS_CRYPTO_DH)\n    list(APPEND _default_sources ${CMAKE_CURRENT_SOURCE_DIR}/src/default/crypt_default_keyexch.c)\nendif()"
+  },
+  {
+    "source": "claude",
+    "file": "crypto/provider/CMakeLists.txt",
+    "line": "48-50",
+    "severity": "critical",
+    "title": "Undefined option HITLS_CRYPTO_PKEY_CRYPT prevents source compilation",
+    "problem": "The condition `if(HITLS_CRYPTO_PKEY_CRYPT)` checks an option that is never defined. This causes `crypt_default_pkeycipher.c` to never be compiled, breaking public key encryption/decryption functionality for RSA, SM2, and SM9.",
+    "code": "if(HITLS_CRYPTO_PKEY_CRYPT)\n    list(APPEND _default_sources ${CMAKE_CURRENT_SOURCE_DIR}/src/default/crypt_default_pkeycipher.c)\nendif()",
+    "fix": "if(HITLS_CRYPTO_RSA_ENCRYPT OR HITLS_CRYPTO_RSA_DECRYPT OR HITLS_CRYPTO_SM2_CRYPT OR HITLS_CRYPTO_SM9_CRYPT)\n    list(APPEND _default_sources ${CMAKE_CURRENT_SOURCE_DIR}/src/default/crypt_default_pkeycipher.c)\nendif()"
+  },
+  {
+    "source": "claude",
+    "file": "crypto/provider/CMakeLists.txt",
+    "line": "51-53",
+    "severity": "critical",
+    "title": "Undefined option HITLS_CRYPTO_PKEY_SIGN prevents source compilation",
+    "problem": "The condition `if(HITLS_CRYPTO_PKEY_SIGN)` checks an option that is never defined. This causes `crypt_default_sign.c` to never be compiled, breaking signature functionality for RSA, DSA, ECDSA, Ed25519, SM2, SM9, and XMSS.",
+    "code": "if(HITLS_CRYPTO_PKEY_SIGN)\n    list(APPEND _default_sources ${CMAKE_CURRENT_SOURCE_DIR}/src/default/crypt_default_sign.c)\nendif()",
+    "fix": "if(HITLS_CRYPTO_RSA_SIGN OR HITLS_CRYPTO_RSA_VERIFY OR HITLS_CRYPTO_DSA OR HITLS_CRYPTO_ECDSA OR HITLS_CRYPTO_ED25519 OR HITLS_CRYPTO_SM2_SIGN OR HITLS_CRYPTO_SM9_SIGN OR HITLS_CRYPTO_XMSS OR HITLS_CRYPTO_MLDSA)\n    list(APPEND _default_sources ${CMAKE_CURRENT_SOURCE_DIR}/src/default/crypt_default_sign.c)\nendif()"
+  }
+]

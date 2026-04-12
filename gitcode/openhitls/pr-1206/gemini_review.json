@@ -1,0 +1,12 @@
+[
+  {
+    "source": "gemini",
+    "file": "pki/cms/src/hitls_cms_envelopeddata.c",
+    "line": "2443-2450",
+    "severity": "high",
+    "title": "Masked error in EnvelopedData_DecryptInit allows invalid state",
+    "problem": "If SetDecryCtx fails during stream decryption initialization, the error code is saved in `ret` and streamKey is freed, but the function ignores the failure and proceeds to transition the context state to HITLS_CMS_DECRYPT_INIT and unconditionally returns HITLS_PKI_SUCCESS. This will lead to subsequent updates failing on an uninitialized cipher context and potential null pointer dereferences or crashes when relying on stream decryption.",
+    "code": "ret = SetDecryCtx(envData);\n    if (ret != HITLS_PKI_SUCCESS) {\n        BSL_SAL_ClearFree(envData->streamKey, envData->streamKeyLen);\n        envData->streamKey = NULL;\n        envData->streamKeyLen = 0;\n    }\n    envData->state = HITLS_CMS_DECRYPT_INIT;\n    return HITLS_PKI_SUCCESS;",
+    "fix": "ret = SetDecryCtx(envData);\n    if (ret != HITLS_PKI_SUCCESS) {\n        BSL_SAL_ClearFree(envData->streamKey, envData->streamKeyLen);\n        envData->streamKey = NULL;\n        envData->streamKeyLen = 0;\n        return ret;\n    }\n    envData->state = HITLS_CMS_DECRYPT_INIT;\n    return HITLS_PKI_SUCCESS;"
+  }
+]
