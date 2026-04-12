@@ -1,0 +1,32 @@
+[
+  {
+    "source": "codex",
+    "file": "pki/x509_verify/src/hitls_x509_verify.c",
+    "line": "1867-1872",
+    "severity": "high",
+    "title": "StoreCtxDup breaks `VFY_LOCATION`-only builds",
+    "problem": "`X509_CopyStringList()` now calls `DupString()` unconditionally, but `DupString()` is only compiled under `#ifdef HITLS_PKI_X509_VFY_IDENTITY`. `HITLS_X509_StoreCtxDup()` uses `X509_CopyStringList()` for `caPaths` when `HITLS_PKI_X509_VFY_LOCATION` is enabled, so the supported option set `HITLS_PKI_X509_VFY_LOCATION=ON` and `HITLS_PKI_X509_VFY_IDENTITY=OFF` will fail to compile/link.",
+    "code": "static int32_t X509_CopyStringList(BslList *dst, const BslList *src)\n{\n    for (BslListNode *node = BSL_LIST_FirstNode(src); node != NULL; node = BSL_LIST_GetNextNode(src, node)) {\n        char *value = (char *)BSL_LIST_GetData(node);\n        char *copy = DupString(value);\n        if (copy == NULL) {",
+    "fix": "static int32_t X509_CopyStringList(BslList *dst, const BslList *src)\n{\n    for (BslListNode *node = BSL_LIST_FirstNode(src); node != NULL; node = BSL_LIST_GetNextNode(src, node)) {\n        char *value = (char *)BSL_LIST_GetData(node);\n        size_t len = strlen(value) + 1;\n        char *copy = BSL_SAL_Dump(value, len);\n        if (copy == NULL) {\n            BSL_ERR_PUSH_ERROR(BSL_MALLOC_FAIL);\n            return BSL_MALLOC_FAIL;\n        }\n        copy[len - 1] = '\\0';\n\n        int32_t ret = BSL_LIST_AddElement(dst, copy, BSL_LIST_POS_END);\n        if (ret != BSL_SUCCESS) {\n            BSL_SAL_Free(copy);\n            BSL_ERR_PUSH_ERROR(ret);\n            return ret;\n        }\n    }\n    return HITLS_PKI_SUCCESS;\n}"
+  },
+  {
+    "source": "codex",
+    "file": "pki/x509_common/src/hitls_x509_util.c",
+    "line": "167-192",
+    "severity": "medium",
+    "title": "Generic SAN walker changes IP-verification failure into `EXT_NOT_FOUND`",
+    "problem": "The new shared SAN traversal helper initializes `ret` to `HITLS_X509_ERR_EXT_NOT_FOUND` and only switches to `mismatchRet` after it sees the requested SAN type. That preserves hostname fallback behavior, but it regresses `X509_VerifyIp()`: when a certificate has a SAN extension but no `iPAddress` entry, the old code returned `HITLS_X509_ERR_VFY_IP_FAIL`, while the refactored path now returns `HITLS_X509_ERR_EXT_NOT_FOUND`. Callers can no longer distinguish “SAN exists but the requested IP is absent” from “SAN extension is absent”.",
+    "code": "static int32_t X509_TrvSubjectAltName(HITLS_X509_Cert *cert, uint32_t nameType, X509_SanMatchCb matchCb, void *ctx,\n    int32_t mismatchRet)\n{\n    HITLS_X509_ExtSan san = {0};\n    int32_t ret = HITLS_X509_CertCtrl(cert, HITLS_X509_EXT_GET_SAN, &san, sizeof(san));\n    if (ret != HITLS_PKI_SUCCESS || san.names == NULL) {\n        return HITLS_X509_ERR_EXT_NOT_FOUND;\n    }\n\n    ret = HITLS_X509_ERR_EXT_NOT_FOUND;\n    for (BslListNode *nameNode = BSL_LIST_FirstNode(san.names); nameNode != NULL;\n        nameNode = BSL_LIST_GetNextNode(san.names, nameNode)) {\n        HITLS_X509_GeneralName *gn = (HITLS_X509_GeneralName *)BSL_LIST_GetData(nameNode);\n        if (gn->type != nameType) {\n            continue;\n        }\n        ret = mismatchRet;",
+    "fix": "static int32_t X509_TrvSubjectAltName(HITLS_X509_Cert *cert, uint32_t nameType, X509_SanMatchCb matchCb, void *ctx,\n    int32_t noSanRet, int32_t noMatchRet)\n{\n    HITLS_X509_ExtSan san = {0};\n    int32_t ret = HITLS_X509_CertCtrl(cert, HITLS_X509_EXT_GET_SAN, &san, sizeof(san));\n    if (ret != HITLS_PKI_SUCCESS || san.names == NULL) {\n        return noSanRet;\n    }\n\n    ret = noMatchRet;\n    for (BslListNode *nameNode = BSL_LIST_FirstNode(san.names); nameNode != NULL;\n        nameNode = BSL_LIST_GetNextNode(san.names, nameNode)) {\n        HITLS_X509_GeneralName *gn = (HITLS_X509_GeneralName *)BSL_LIST_GetData(nameNode);\n        if (gn->type != nameType) {\n            continue;\n        }\n        int32_t matchRet = matchCb(&gn->value, ctx);\n        if (matchRet == HITLS_PKI_SUCCESS) {\n            ret = HITLS_PKI_SUCCESS;\n            break;\n        }\n        if (matchRet != noMatchRet) {\n            ret = matchRet;\n            break;\n        }\n    }\n\n    HITLS_X509_ClearSubjectAltName(&san);\n    return ret;\n}\n\n/* hostname: fall back when SAN/DNS is absent */\nreturn X509_TrvSubjectAltName(cert, HITLS_X509_GN_DNS, X509_MatchSanHostname, &matchCtx,\n    HITLS_X509_ERR_EXT_NOT_FOUND, HITLS_X509_ERR_EXT_NOT_FOUND);\n\n/* IP: fail when SAN exists but has no IP entry */\nreturn X509_TrvSubjectAltName(cert, HITLS_X509_GN_IP, X509_MatchSanIp, &ipBuff,\n    HITLS_X509_ERR_EXT_NOT_FOUND, HITLS_X509_ERR_VFY_IP_FAIL);"
+  },
+  {
+    "source": "codex",
+    "file": "pki/x509_verify/src/hitls_x509_verify.c",
+    "line": "1969-1971",
+    "severity": "medium",
+    "title": "StoreCtxDup copies session-bound `usrData` into the clone",
+    "problem": "The new public API is documented as a deep copy of configuration with session state reset, but it copies `usrData` verbatim. In the TLS path, `usrData` is set to the active `HITLS_Ctx *` immediately before verification. Duplicating a store after it has been used therefore propagates a stale per-connection pointer into the new store, and later verification callbacks can observe or dereference the wrong/freed context.",
+    "code": "#ifdef HITLS_PKI_X509_VFY_CB\n    newCtx->verifyCb = ctx->verifyCb;\n    newCtx->usrData = ctx->usrData;\n#endif",
+    "fix": "#ifdef HITLS_PKI_X509_VFY_CB\n    newCtx->verifyCb = ctx->verifyCb;\n    newCtx->usrData = NULL;\n#endif"
+  }
+]

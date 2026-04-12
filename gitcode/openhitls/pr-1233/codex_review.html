@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Code Review: openHiTLS/openhitls#1233 - CODEX</title>
+    <style>
+        :root { --critical: #dc2626; --high: #ea580c; --medium: #ca8a04; --low: #65a30d; }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: system-ui, sans-serif; background: #f8fafc; color: #1e293b; padding: 2rem; line-height: 1.6; }
+        .container { max-width: 900px; margin: 0 auto; }
+        h1 { font-size: 1.5rem; margin-bottom: 0.5rem; }
+        .subtitle { color: #64748b; margin-bottom: 2rem; }
+        .section { margin-bottom: 2rem; }
+        .section-title { font-size: 1.1rem; font-weight: 600; padding: 0.5rem 1rem; border-radius: 0.5rem 0.5rem 0 0; color: white; }
+        .section-title.critical { background: var(--critical); }
+        .section-title.high { background: var(--high); }
+        .section-title.medium { background: var(--medium); }
+        .section-title.low { background: var(--low); }
+        .issue { background: white; border: 1px solid #e2e8f0; border-top: none; padding: 1rem; }
+        .issue:last-child { border-radius: 0 0 0.5rem 0.5rem; }
+        .issue-title { font-weight: 600; margin-bottom: 0.25rem; }
+        .issue-location { font-family: monospace; font-size: 0.875rem; color: #64748b; margin-bottom: 0.75rem; }
+        .issue-source { font-size: 0.75rem; color: #94a3b8; margin-top: 0.5rem; }
+        pre { background: #1e293b; color: #e2e8f0; padding: 0.75rem; border-radius: 0.375rem; overflow-x: auto; font-size: 0.875rem; margin: 0.5rem 0; }
+        .problem { margin: 0.75rem 0; }
+        .fix-label { font-weight: 600; margin-top: 0.75rem; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Code Review: openHiTLS/openhitls#1233 - CODEX</h1>
+        <div class="subtitle"></div>
+<div class="section"><div class="section-title high">High</div>
+<div class="issue">
+                <div class="issue-title">StoreCtxDup breaks `VFY_LOCATION`-only builds</div>
+                <div class="issue-location">pki/x509_verify/src/hitls_x509_verify.c:1867-1872</div>
+                <pre>static int32_t X509_CopyStringList(BslList *dst, const BslList *src)
+{
+    for (BslListNode *node = BSL_LIST_FirstNode(src); node != NULL; node = BSL_LIST_GetNextNode(src, node)) {
+        char *value = (char *)BSL_LIST_GetData(node);
+        char *copy = DupString(value);
+        if (copy == NULL) {</pre>
+                <div class="problem"><strong>Issue:</strong> `X509_CopyStringList()` now calls `DupString()` unconditionally, but `DupString()` is only compiled under `#ifdef HITLS_PKI_X509_VFY_IDENTITY`. `HITLS_X509_StoreCtxDup()` uses `X509_CopyStringList()` for `caPaths` when `HITLS_PKI_X509_VFY_LOCATION` is enabled, so the supported option set `HITLS_PKI_X509_VFY_LOCATION=ON` and `HITLS_PKI_X509_VFY_IDENTITY=OFF` will fail to compile/link.</div>
+                <div class="fix-label">Fix:</div><pre>static int32_t X509_CopyStringList(BslList *dst, const BslList *src)
+{
+    for (BslListNode *node = BSL_LIST_FirstNode(src); node != NULL; node = BSL_LIST_GetNextNode(src, node)) {
+        char *value = (char *)BSL_LIST_GetData(node);
+        size_t len = strlen(value) + 1;
+        char *copy = BSL_SAL_Dump(value, len);
+        if (copy == NULL) {
+            BSL_ERR_PUSH_ERROR(BSL_MALLOC_FAIL);
+            return BSL_MALLOC_FAIL;
+        }
+        copy[len - 1] = '\0';
+
+        int32_t ret = BSL_LIST_AddElement(dst, copy, BSL_LIST_POS_END);
+        if (ret != BSL_SUCCESS) {
+            BSL_SAL_Free(copy);
+            BSL_ERR_PUSH_ERROR(ret);
+            return ret;
+        }
+    }
+    return HITLS_PKI_SUCCESS;
+}</pre>
+                <div class="issue-source">Reviewer: codex</div>
+            </div>
+</div>
+<div class="section"><div class="section-title medium">Medium</div>
+<div class="issue">
+                <div class="issue-title">Generic SAN walker changes IP-verification failure into `EXT_NOT_FOUND`</div>
+                <div class="issue-location">pki/x509_common/src/hitls_x509_util.c:167-192</div>
+                <pre>static int32_t X509_TrvSubjectAltName(HITLS_X509_Cert *cert, uint32_t nameType, X509_SanMatchCb matchCb, void *ctx,
+    int32_t mismatchRet)
+{
+    HITLS_X509_ExtSan san = {0};
+    int32_t ret = HITLS_X509_CertCtrl(cert, HITLS_X509_EXT_GET_SAN, &amp;san, sizeof(san));
+    if (ret != HITLS_PKI_SUCCESS || san.names == NULL) {
+        return HITLS_X509_ERR_EXT_NOT_FOUND;
+    }
+
+    ret = HITLS_X509_ERR_EXT_NOT_FOUND;
+    for (BslListNode *nameNode = BSL_LIST_FirstNode(san.names); nameNode != NULL;
+        nameNode = BSL_LIST_GetNextNode(san.names, nameNode)) {
+        HITLS_X509_GeneralName *gn = (HITLS_X509_GeneralName *)BSL_LIST_GetData(nameNode);
+        if (gn-&gt;type != nameType) {
+            continue;
+        }
+        ret = mismatchRet;</pre>
+                <div class="problem"><strong>Issue:</strong> The new shared SAN traversal helper initializes `ret` to `HITLS_X509_ERR_EXT_NOT_FOUND` and only switches to `mismatchRet` after it sees the requested SAN type. That preserves hostname fallback behavior, but it regresses `X509_VerifyIp()`: when a certificate has a SAN extension but no `iPAddress` entry, the old code returned `HITLS_X509_ERR_VFY_IP_FAIL`, while the refactored path now returns `HITLS_X509_ERR_EXT_NOT_FOUND`. Callers can no longer distinguish “SAN exists but the requested IP is absent” from “SAN extension is absent”.</div>
+                <div class="fix-label">Fix:</div><pre>static int32_t X509_TrvSubjectAltName(HITLS_X509_Cert *cert, uint32_t nameType, X509_SanMatchCb matchCb, void *ctx,
+    int32_t noSanRet, int32_t noMatchRet)
+{
+    HITLS_X509_ExtSan san = {0};
+    int32_t ret = HITLS_X509_CertCtrl(cert, HITLS_X509_EXT_GET_SAN, &amp;san, sizeof(san));
+    if (ret != HITLS_PKI_SUCCESS || san.names == NULL) {
+        return noSanRet;
+    }
+
+    ret = noMatchRet;
+    for (BslListNode *nameNode = BSL_LIST_FirstNode(san.names); nameNode != NULL;
+        nameNode = BSL_LIST_GetNextNode(san.names, nameNode)) {
+        HITLS_X509_GeneralName *gn = (HITLS_X509_GeneralName *)BSL_LIST_GetData(nameNode);
+        if (gn-&gt;type != nameType) {
+            continue;
+        }
+        int32_t matchRet = matchCb(&amp;gn-&gt;value, ctx);
+        if (matchRet == HITLS_PKI_SUCCESS) {
+            ret = HITLS_PKI_SUCCESS;
+            break;
+        }
+        if (matchRet != noMatchRet) {
+            ret = matchRet;
+            break;
+        }
+    }
+
+    HITLS_X509_ClearSubjectAltName(&amp;san);
+    return ret;
+}
+
+/* hostname: fall back when SAN/DNS is absent */
+return X509_TrvSubjectAltName(cert, HITLS_X509_GN_DNS, X509_MatchSanHostname, &amp;matchCtx,
+    HITLS_X509_ERR_EXT_NOT_FOUND, HITLS_X509_ERR_EXT_NOT_FOUND);
+
+/* IP: fail when SAN exists but has no IP entry */
+return X509_TrvSubjectAltName(cert, HITLS_X509_GN_IP, X509_MatchSanIp, &amp;ipBuff,
+    HITLS_X509_ERR_EXT_NOT_FOUND, HITLS_X509_ERR_VFY_IP_FAIL);</pre>
+                <div class="issue-source">Reviewer: codex</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">StoreCtxDup copies session-bound `usrData` into the clone</div>
+                <div class="issue-location">pki/x509_verify/src/hitls_x509_verify.c:1969-1971</div>
+                <pre>#ifdef HITLS_PKI_X509_VFY_CB
+    newCtx-&gt;verifyCb = ctx-&gt;verifyCb;
+    newCtx-&gt;usrData = ctx-&gt;usrData;
+#endif</pre>
+                <div class="problem"><strong>Issue:</strong> The new public API is documented as a deep copy of configuration with session state reset, but it copies `usrData` verbatim. In the TLS path, `usrData` is set to the active `HITLS_Ctx *` immediately before verification. Duplicating a store after it has been used therefore propagates a stale per-connection pointer into the new store, and later verification callbacks can observe or dereference the wrong/freed context.</div>
+                <div class="fix-label">Fix:</div><pre>#ifdef HITLS_PKI_X509_VFY_CB
+    newCtx-&gt;verifyCb = ctx-&gt;verifyCb;
+    newCtx-&gt;usrData = NULL;
+#endif</pre>
+                <div class="issue-source">Reviewer: codex</div>
+            </div>
+</div>
+</div></body></html>
