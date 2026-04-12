@@ -1,0 +1,394 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Final Report: openHiTLS/openhitls#1222</title>
+    <style>
+        :root { --critical: #dc2626; --high: #ea580c; --medium: #ca8a04; --low: #65a30d;
+                 --trusted: #059669; --likely: #0284c7; --evaluate: #7c3aed; }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: system-ui, sans-serif; background: #f8fafc; color: #1e293b; padding: 2rem; line-height: 1.6; }
+        .container { max-width: 900px; margin: 0 auto; }
+        h1 { font-size: 1.75rem; margin-bottom: 0.5rem; }
+        .subtitle { color: #64748b; margin-bottom: 1rem; }
+        .stats { display: flex; gap: 1rem; margin-bottom: 2rem; flex-wrap: wrap; }
+        .stat { background: white; border: 1px solid #e2e8f0; border-radius: 0.5rem; padding: 1rem; min-width: 100px; text-align: center; }
+        .stat-value { font-size: 1.5rem; font-weight: 700; }
+        .stat-label { font-size: 0.875rem; color: #64748b; }
+        .stat.critical .stat-value { color: var(--critical); }
+        .stat.high .stat-value { color: var(--high); }
+        .stat.medium .stat-value { color: var(--medium); }
+        .stat.low .stat-value { color: var(--low); }
+        .reviewers { background: #e0e7ff; color: #3730a3; padding: 0.5rem 1rem; border-radius: 0.5rem; margin-bottom: 2rem; }
+        .section { margin-bottom: 2rem; }
+        .section-title { font-size: 1.1rem; font-weight: 600; padding: 0.5rem 1rem; border-radius: 0.5rem 0.5rem 0 0; color: white; }
+        .section-title.critical { background: var(--critical); }
+        .section-title.high { background: var(--high); }
+        .section-title.medium { background: var(--medium); }
+        .section-title.low { background: var(--low); }
+        .issue { background: white; border: 1px solid #e2e8f0; border-top: none; padding: 1rem; }
+        .issue:last-child { border-radius: 0 0 0.5rem 0.5rem; }
+        .issue-title { font-weight: 600; margin-bottom: 0.25rem; }
+        .issue-location { font-family: monospace; font-size: 0.875rem; color: #64748b; margin-bottom: 0.5rem; }
+        .issue-meta { font-size: 0.75rem; margin-bottom: 0.75rem; display: flex; gap: 0.75rem; align-items: center; }
+        .issue-meta .reviewers { background: #f1f5f9; color: #475569; padding: 0.25rem 0.5rem; border-radius: 0.25rem; margin: 0; }
+        .confidence-badge { padding: 0.25rem 0.5rem; border-radius: 0.25rem; font-weight: 500; }
+        .confidence-badge.trusted { background: #d1fae5; color: #065f46; }
+        .confidence-badge.likely { background: #dbeafe; color: #1e40af; }
+        .confidence-badge.evaluate { background: #ede9fe; color: #5b21b6; }
+        pre { background: #1e293b; color: #e2e8f0; padding: 0.75rem; border-radius: 0.375rem; overflow-x: auto; font-size: 0.875rem; margin: 0.5rem 0; }
+        .problem { margin: 0.75rem 0; }
+        .fix-label { font-weight: 600; margin-top: 0.75rem; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Final Code Review Report</h1>
+        <div class="subtitle">openHiTLS/openhitls - PR #1222</div>
+        <p style="margin-bottom: 1rem;"></p>
+
+        <div class="stats">
+            <div class="stat"><div class="stat-value">12</div><div class="stat-label">Total</div></div>
+            <div class="stat critical"><div class="stat-value">2</div><div class="stat-label">Critical</div></div>
+            <div class="stat high"><div class="stat-value">2</div><div class="stat-label">High</div></div>
+            <div class="stat medium"><div class="stat-value">5</div><div class="stat-label">Medium</div></div>
+            <div class="stat low"><div class="stat-value">3</div><div class="stat-label">Low</div></div>
+        </div>
+
+        <div class="reviewers">Reviewers: claude, gemini, codex</div>
+<div class="section"><div class="section-title critical">Critical</div>
+<div class="issue">
+                <div class="issue-title">Integer overflow in BuildPolyInput leading to heap buffer overflow</div>
+                <div class="issue-location">crypto/modes/src/modes_gcm_siv.c:166-176</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: GEMINI, CLAUDE, CODEX</span>
+                    <span class="confidence-badge trusted">置信度: 可信</span>
+                </div>
+                <pre>static uint32_t Pad16Len(uint32_t len)
+{
+    return (len + GCM_BLOCKSIZE - 1u) &amp; ~(GCM_BLOCKSIZE - 1u);
+}
+
+static int32_t BuildPolyInput(struct ModesGcmSivCtx *ctx, const uint8_t *plaintext, uint32_t ptLen,
+    uint8_t **polyBuf, uint32_t *polyLen)
+{
+    uint32_t padAad = Pad16Len(ctx-&gt;aadLen);
+    uint32_t padPt = Pad16Len(ptLen);
+    uint32_t total = padAad + padPt + GCM_BLOCKSIZE;
+    uint8_t *buf = BSL_SAL_Malloc(total);</pre>
+                <div class="problem"><strong>Issue:</strong> Both Pad16Len() and BuildPolyInput() have unchecked arithmetic that can overflow for large inputs. Pad16Len() at line 168 can wrap when len is close to UINT32_MAX. BuildPolyInput() at line 176 calculates total = padAad + padPt + GCM_BLOCKSIZE without overflow checks. This causes malloc to allocate a smaller buffer than needed, and subsequent memcpy_s operations use wrapped destMax values, leading to heap buffer overflow.</div>
+                <div class="fix-label">Fix:</div><pre>static int32_t Pad16Len(uint32_t len, uint32_t *padded)
+{
+    if (len &gt; UINT32_MAX - GCM_BLOCKSIZE + 1) {
+        BSL_ERR_PUSH_ERROR(CRYPT_INVALID_ARG);
+        return CRYPT_INVALID_ARG;
+    }
+    *padded = (len + GCM_BLOCKSIZE - 1u) &amp; ~(GCM_BLOCKSIZE - 1u);
+    return CRYPT_SUCCESS;
+}
+
+static int32_t BuildPolyInput(struct ModesGcmSivCtx *ctx, const uint8_t *plaintext, uint32_t ptLen,
+    uint8_t **polyBuf, uint32_t *polyLen)
+{
+    uint32_t padAad;
+    uint32_t padPt;
+    int32_t ret;
+    
+    ret = Pad16Len(ctx-&gt;aadLen, &amp;padAad);
+    if (ret != CRYPT_SUCCESS) {
+        return ret;
+    }
+    ret = Pad16Len(ptLen, &amp;padPt);
+    if (ret != CRYPT_SUCCESS) {
+        return ret;
+    }
+    if (padAad &gt; UINT32_MAX - padPt - GCM_BLOCKSIZE) {
+        BSL_ERR_PUSH_ERROR(CRYPT_INVALID_ARG);
+        return CRYPT_INVALID_ARG;
+    }
+    
+    uint32_t total = padAad + padPt + GCM_BLOCKSIZE;</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">DupCtx outPtr aliasing causes heap buffer overflow</div>
+                <div class="issue-location">crypto/modes/src/modes_gcm_siv.c:609-642</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: GEMINI, CLAUDE, CODEX</span>
+                    <span class="confidence-badge trusted">置信度: 可信</span>
+                </div>
+                <pre>MODES_GCM_SIV_Ctx *MODES_GCM_SIV_DupCtx(const MODES_GCM_SIV_Ctx *modeCtx)
+{
+    if (modeCtx == NULL) {
+        return NULL;
+    }
+    const struct ModesGcmSivCtx *src = modeCtx;
+    struct ModesGcmSivCtx *ctx = BSL_SAL_Dump(src, sizeof(struct ModesGcmSivCtx));
+    if (ctx == NULL) {
+        BSL_ERR_PUSH_ERROR(CRYPT_MEM_ALLOC_FAIL);
+        return NULL;
+    }
+    ctx-&gt;aadBuf = NULL;
+    ctx-&gt;msgBuf = NULL;</pre>
+                <div class="problem"><strong>Issue:</strong> MODES_GCM_SIV_DupCtx uses BSL_SAL_Dump to copy the entire struct including the outPtr field. The outPtr points to caller-allocated buffer. If the duplicated context is used for another encryption/decryption operation, it will write ciphertext to the original caller's buffer when GET_TAG is called, causing heap corruption since the original buffer was sized for the original message only.</div>
+                <div class="fix-label">Fix:</div><pre>MODES_GCM_SIV_Ctx *MODES_GCM_SIV_DupCtx(const MODES_GCM_SIV_Ctx *modeCtx)
+{
+    if (modeCtx == NULL) {
+        return NULL;
+    }
+    const struct ModesGcmSivCtx *src = modeCtx;
+    struct ModesGcmSivCtx *ctx = BSL_SAL_Dump(src, sizeof(struct ModesGcmSivCtx));
+    if (ctx == NULL) {
+        BSL_ERR_PUSH_ERROR(CRYPT_MEM_ALLOC_FAIL);
+        return NULL;
+    }
+    ctx-&gt;aadBuf = NULL;
+    ctx-&gt;msgBuf = NULL;
+    ctx-&gt;outPtr = NULL;  /* Reset caller-owned pointer */</pre>
+            </div>
+</div>
+<div class="section"><div class="section-title high">High</div>
+<div class="issue">
+                <div class="issue-title">Integer overflow in MODES_GCM_SIV_Update msgLen causes heap overflow</div>
+                <div class="issue-location">crypto/modes/src/modes_gcm_siv.c:462-469</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CLAUDE, GEMINI, CODEX</span>
+                    <span class="confidence-badge trusted">置信度: 可信</span>
+                </div>
+                <pre>uint8_t *nbuf = BSL_SAL_Realloc(modeCtx-&gt;msgBuf, modeCtx-&gt;msgLen + inLen, modeCtx-&gt;msgLen);
+if (nbuf == NULL) {
+    BSL_ERR_PUSH_ERROR(CRYPT_MEM_ALLOC_FAIL);
+    return CRYPT_MEM_ALLOC_FAIL;
+}
+modeCtx-&gt;msgBuf = nbuf;
+(void)memcpy_s(modeCtx-&gt;msgBuf + modeCtx-&gt;msgLen, inLen, in, inLen);
+modeCtx-&gt;msgLen += inLen;</pre>
+                <div class="problem"><strong>Issue:</strong> The calculation modeCtx->msgLen + inLen at line 462 can overflow if many Update calls are made with large data. When overflow occurs, realloc allocates a smaller buffer than needed, and the subsequent memcpy_s and msgLen increment operate on incorrect sizes, causing heap buffer overflow.</div>
+                <div class="fix-label">Fix:</div><pre>if (inLen &gt; UINT32_MAX - modeCtx-&gt;msgLen) {
+    BSL_ERR_PUSH_ERROR(CRYPT_INVALID_ARG);
+    return CRYPT_INVALID_ARG;
+}
+uint32_t newLen = modeCtx-&gt;msgLen + inLen;
+uint8_t *nbuf = BSL_SAL_Realloc(modeCtx-&gt;msgBuf, newLen, modeCtx-&gt;msgLen);
+if (nbuf == NULL) {
+    BSL_ERR_PUSH_ERROR(CRYPT_MEM_ALLOC_FAIL);
+    return CRYPT_MEM_ALLOC_FAIL;
+}
+modeCtx-&gt;msgBuf = nbuf;
+(void)memcpy_s(modeCtx-&gt;msgBuf + modeCtx-&gt;msgLen, newLen - modeCtx-&gt;msgLen, in, inLen);
+modeCtx-&gt;msgLen = newLen;</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">Deferred output writes can overflow caller buffers</div>
+                <div class="issue-location">crypto/modes/src/modes_gcm_siv.c:444-471</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CODEX</span>
+                    <span class="confidence-badge likely">置信度: 较可信</span>
+                </div>
+                <pre>int32_t MODES_GCM_SIV_Update(struct ModesGcmSivCtx *modeCtx, const uint8_t *in, uint32_t inLen, uint8_t *out,
+    uint32_t *outLen)
+{
+    ...
+    if (out != NULL &amp;&amp; modeCtx-&gt;outPtr == NULL) {
+        modeCtx-&gt;outPtr = out;
+    }
+    if (inLen == 0) {
+        *outLen = 0;
+        return CRYPT_SUCCESS;
+    }
+    uint8_t *nbuf = BSL_SAL_Realloc(modeCtx-&gt;msgBuf, modeCtx-&gt;msgLen + inLen, modeCtx-&gt;msgLen);
+    ...
+    *outLen = 0;
+    return CRYPT_SUCCESS;
+}</pre>
+                <div class="problem"><strong>Issue:</strong> Update() buffers all input internally, remembers only the first out pointer, and forces *outLen = 0. When GET_TAG is later called, it writes the entire buffered message to the raw outPtr without checking how much space the caller originally advertised. This violates the AEAD API contract where Update should process data incrementally and respect output buffer sizes.</div>
+                <div class="fix-label">Fix:</div><pre>/* Add to ModesGcmSivCtx */
+uint32_t outCap;
+
+int32_t MODES_GCM_SIV_Update(struct ModesGcmSivCtx *modeCtx, const uint8_t *in, uint32_t inLen, uint8_t *out,
+    uint32_t *outLen)
+{
+    ...
+    if (out != NULL &amp;&amp; modeCtx-&gt;outPtr == NULL) {
+        modeCtx-&gt;outPtr = out;
+        modeCtx-&gt;outCap = *outLen;
+    }
+    ...
+    /* In GcmSivEncryptFinish and GcmSivDecryptFinish, add check: */
+    if (ctx-&gt;msgLen &gt; ctx-&gt;outCap) {
+        BSL_ERR_PUSH_ERROR(CRYPT_MODE_BUFF_LEN_NOT_ENOUGH);
+        return CRYPT_MODE_BUFF_LEN_NOT_ENOUGH;
+    }</pre>
+            </div>
+</div>
+<div class="section"><div class="section-title medium">Medium</div>
+<div class="issue">
+                <div class="issue-title">Tag copied even when encryption fails in GcmSivEncryptFinish</div>
+                <div class="issue-location">crypto/modes/src/modes_gcm_siv.c:275-278</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CLAUDE</span>
+                    <span class="confidence-badge likely">置信度: 较可信</span>
+                </div>
+                <pre>if (ctx-&gt;msgLen &gt; 0) {
+    ret = AesCtrGcmSiv(encKey, encKeyLen, ctr, ctx-&gt;msgBuf, ctx-&gt;msgLen, ctx-&gt;outPtr);
+}
+(void)memcpy_s(tagBuf, tagLen, tag, ctx-&gt;tagLen);
+(void)BSL_SAL_CleanseData(authKey, sizeof(authKey));
+(void)BSL_SAL_CleanseData(encKey, sizeof(encKey));
+return ret;</pre>
+                <div class="problem"><strong>Issue:</strong> If AesCtrGcmSiv() fails during encryption, the function still copies the tag to the output buffer before returning the error. Callers who check the tag buffer but not the return value might use an unencrypted payload with a valid-looking tag, leading to security issues.</div>
+                <div class="fix-label">Fix:</div><pre>if (ctx-&gt;msgLen &gt; 0) {
+    ret = AesCtrGcmSiv(encKey, encKeyLen, ctr, ctx-&gt;msgBuf, ctx-&gt;msgLen, ctx-&gt;outPtr);
+    if (ret != CRYPT_SUCCESS) {
+        (void)BSL_SAL_CleanseData(authKey, sizeof(authKey));
+        (void)BSL_SAL_CleanseData(encKey, sizeof(encKey));
+        return ret;
+    }
+}
+(void)memcpy_s(tagBuf, tagLen, tag, ctx-&gt;tagLen);
+(void)BSL_SAL_CleanseData(authKey, sizeof(authKey));
+(void)BSL_SAL_CleanseData(encKey, sizeof(encKey));
+return CRYPT_SUCCESS;</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">AES-GCM-SIV encryption fails for zero-length plaintext</div>
+                <div class="issue-location">crypto/modes/src/modes_gcm_siv.c:242-244</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: GEMINI</span>
+                    <span class="confidence-badge likely">置信度: 较可信</span>
+                </div>
+                <pre>if (ctx-&gt;outPtr == NULL) {
+    BSL_ERR_PUSH_ERROR(CRYPT_EAL_ERR_STATE);
+    return CRYPT_EAL_ERR_STATE;
+}</pre>
+                <div class="problem"><strong>Issue:</strong> GcmSivEncryptFinish unconditionally checks if outPtr is NULL and returns an error, even when msgLen is 0. For zero-length plaintexts (e.g., when using AES-GCM-SIV only to authenticate AAD), it is valid for outPtr to be NULL since there is no ciphertext to write.</div>
+                <div class="fix-label">Fix:</div><pre>if (ctx-&gt;msgLen &gt; 0 &amp;&amp; ctx-&gt;outPtr == NULL) {
+    BSL_ERR_PUSH_ERROR(CRYPT_EAL_ERR_STATE);
+    return CRYPT_EAL_ERR_STATE;
+}</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">AES-GCM-SIV decryption fails for empty ciphertext</div>
+                <div class="issue-location">crypto/modes/src/modes_gcm_siv.c:295-297</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: GEMINI</span>
+                    <span class="confidence-badge likely">置信度: 较可信</span>
+                </div>
+                <pre>if (ctx-&gt;outPtr == NULL) {
+    BSL_ERR_PUSH_ERROR(CRYPT_EAL_ERR_STATE);
+    return CRYPT_EAL_ERR_STATE;
+}</pre>
+                <div class="problem"><strong>Issue:</strong> Similar to the encryption path, GcmSivDecryptFinish rejects NULL outPtr even when ciphertext length is zero. This prevents verification of empty payloads where only AAD needs authentication.</div>
+                <div class="fix-label">Fix:</div><pre>if (ctLen &gt; 0 &amp;&amp; ctx-&gt;outPtr == NULL) {
+    BSL_ERR_PUSH_ERROR(CRYPT_EAL_ERR_STATE);
+    return CRYPT_EAL_ERR_STATE;
+}</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">CstTimeTagCmp returns HPKE-specific error code</div>
+                <div class="issue-location">crypto/modes/src/modes_gcm_siv.c:233</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: GEMINI</span>
+                    <span class="confidence-badge likely">置信度: 较可信</span>
+                </div>
+                <pre>static int32_t CstTimeTagCmp(const uint8_t *a, const uint8_t *b, uint32_t len)
+{
+    uint8_t d = 0;
+    uint32_t i;
+    for (i = 0; i &lt; len; i++) {
+        d |= (uint8_t)(a[i] ^ b[i]);
+    }
+    return (d == 0) ? CRYPT_SUCCESS : CRYPT_HPKE_ERR_AEAD_TAG;
+}</pre>
+                <div class="problem"><strong>Issue:</strong> CstTimeTagCmp returns CRYPT_HPKE_ERR_AEAD_TAG when tag verification fails. This mixes module boundaries by returning an HPKE-specific error from a generic AES mode component. Generic EAL error handling logic may not correctly interpret this error code.</div>
+                <div class="fix-label">Fix:</div><pre>static int32_t CstTimeTagCmp(const uint8_t *a, const uint8_t *b, uint32_t len)
+{
+    uint8_t d = 0;
+    uint32_t i;
+    for (i = 0; i &lt; len; i++) {
+        d |= (uint8_t)(a[i] ^ b[i]);
+    }
+    return (d == 0) ? CRYPT_SUCCESS : CRYPT_INVALID_ARG;
+}</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">GCM-SIV decryption breaks existing AEAD API contract</div>
+                <div class="issue-location">crypto/modes/src/modes_gcm_siv.c:284-375</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CODEX</span>
+                    <span class="confidence-badge evaluate">置信度: 需评估</span>
+                </div>
+                <pre>static int32_t GcmSivDecryptFinish(struct ModesGcmSivCtx *ctx, uint8_t *tagOut, uint32_t tagLen)
+{
+    if (ctx-&gt;msgLen &lt; GCM_BLOCKSIZE) {
+        BSL_ERR_PUSH_ERROR(CRYPT_INVALID_ARG);
+        return CRYPT_INVALID_ARG;
+    }
+    uint32_t ctLen = ctx-&gt;msgLen - GCM_BLOCKSIZE;
+    ...
+    const uint8_t *recvTag = ctx-&gt;msgBuf + ctLen;
+    ...
+}</pre>
+                <div class="problem"><strong>Issue:</strong> The implementation treats the last 16 bytes passed to Update() as the authentication tag. This is inconsistent with the existing CRYPT_EAL_Cipher AEAD API used by GCM/CCM/ChaCha20-Poly1305, where Update() processes ciphertext and CipherCtrl(GET_TAG) handles the tag separately via CRYPT_CTRL_SET_TAG. This creates a hidden special case that breaks generic AEAD callers.</div>
+                <div class="fix-label">Fix:</div><pre>/* Add to ModesGcmSivCtx */
+uint8_t expectedTag[GCM_BLOCKSIZE];
+bool hasExpectedTag;
+
+/* Add new function and update Ctrl handler: */
+static int32_t SetExpectedTag(struct ModesGcmSivCtx *ctx, const uint8_t *tag, uint32_t len)
+{
+    if (tag == NULL || len != GCM_BLOCKSIZE) {
+        BSL_ERR_PUSH_ERROR(CRYPT_MODES_TAGLEN_ERROR);
+        return CRYPT_MODES_TAGLEN_ERROR;
+    }
+    (void)memcpy_s(ctx-&gt;expectedTag, sizeof(ctx-&gt;expectedTag), tag, len);
+    ctx-&gt;hasExpectedTag = true;
+    return CRYPT_SUCCESS;
+}
+
+/* Update MODES_GCM_SIV_Ctrl to handle CRYPT_CTRL_SET_TAG */
+case CRYPT_CTRL_SET_TAG:
+    return SetExpectedTag(ctx, val, len);
+
+/* Update GcmSivDecryptFinish to use ctx-&gt;expectedTag instead of extracting from msgBuf */</pre>
+            </div>
+</div>
+<div class="section"><div class="section-title low">Low</div>
+<div class="issue">
+                <div class="issue-title">Missing newline at end of file</div>
+                <div class="issue-location">crypto/modes/include/crypt_modes_gcm_siv.h:56</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CLAUDE</span>
+                    <span class="confidence-badge trusted">置信度: 可信</span>
+                </div>
+                <pre>#endif /* CRYPT_MODES_GCM_SIV_H */
+\ No newline at end of file</pre>
+                <div class="problem"><strong>Issue:</strong> The header file is missing a terminating newline character, which violates POSIX standards and may cause issues with some tools.</div>
+                <div class="fix-label">Fix:</div><pre>#endif /* CRYPT_MODES_GCM_SIV_H */</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">Missing newline at end of file</div>
+                <div class="issue-location">crypto/modes/src/modes_gcm_siv.c:644</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CLAUDE</span>
+                    <span class="confidence-badge trusted">置信度: 可信</span>
+                </div>
+                <pre>#endif /* HITLS_CRYPTO_GCM &amp;&amp; HITLS_CRYPTO_AES &amp;&amp; HITLS_CRYPTO_GHASH */
+\ No newline at end of file</pre>
+                <div class="problem"><strong>Issue:</strong> The source file is missing a terminating newline character, which violates POSIX standards.</div>
+                <div class="fix-label">Fix:</div><pre>#endif /* HITLS_CRYPTO_GCM &amp;&amp; HITLS_CRYPTO_AES &amp;&amp; HITLS_CRYPTO_GHASH */</pre>
+            </div>
+<div class="issue">
+                <div class="issue-title">Missing newline at end of file</div>
+                <div class="issue-location">testcode/sdv/testcase/crypto/aes/test_suite_sdv_eal_aes_gcm_siv.c:176</div>
+                <div class="issue-meta">
+                    <span class="reviewers">Reviewers: CLAUDE</span>
+                    <span class="confidence-badge trusted">置信度: 可信</span>
+                </div>
+                <pre>/* END_CASE */
+\ No newline at end of file</pre>
+                <div class="problem"><strong>Issue:</strong> The test file is missing a terminating newline character.</div>
+                <div class="fix-label">Fix:</div><pre>/* END_CASE */</pre>
+            </div>
+</div>
+</div></body></html>

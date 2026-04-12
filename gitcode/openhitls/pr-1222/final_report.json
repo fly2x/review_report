@@ -1,0 +1,154 @@
+{
+  "context": {
+    "owner": "openHiTLS",
+    "repo": "openhitls",
+    "pr_id": "1222",
+    "title": "",
+    "reviewers": [
+      "claude",
+      "gemini",
+      "codex"
+    ]
+  },
+  "statistics": {
+    "total": 12,
+    "critical": 2,
+    "high": 2,
+    "medium": 5,
+    "low": 3
+  },
+  "issues": [
+    {
+      "file": "crypto/modes/src/modes_gcm_siv.c",
+      "line": "166-176",
+      "severity": "critical",
+      "title": "Integer overflow in BuildPolyInput leading to heap buffer overflow",
+      "reviewers": "GEMINI, CLAUDE, CODEX",
+      "confidence": "trusted",
+      "problem": "Both Pad16Len() and BuildPolyInput() have unchecked arithmetic that can overflow for large inputs. Pad16Len() at line 168 can wrap when len is close to UINT32_MAX. BuildPolyInput() at line 176 calculates total = padAad + padPt + GCM_BLOCKSIZE without overflow checks. This causes malloc to allocate a smaller buffer than needed, and subsequent memcpy_s operations use wrapped destMax values, leading to heap buffer overflow.",
+      "code": "static uint32_t Pad16Len(uint32_t len)\n{\n    return (len + GCM_BLOCKSIZE - 1u) & ~(GCM_BLOCKSIZE - 1u);\n}\n\nstatic int32_t BuildPolyInput(struct ModesGcmSivCtx *ctx, const uint8_t *plaintext, uint32_t ptLen,\n    uint8_t **polyBuf, uint32_t *polyLen)\n{\n    uint32_t padAad = Pad16Len(ctx->aadLen);\n    uint32_t padPt = Pad16Len(ptLen);\n    uint32_t total = padAad + padPt + GCM_BLOCKSIZE;\n    uint8_t *buf = BSL_SAL_Malloc(total);",
+      "fix": "static int32_t Pad16Len(uint32_t len, uint32_t *padded)\n{\n    if (len > UINT32_MAX - GCM_BLOCKSIZE + 1) {\n        BSL_ERR_PUSH_ERROR(CRYPT_INVALID_ARG);\n        return CRYPT_INVALID_ARG;\n    }\n    *padded = (len + GCM_BLOCKSIZE - 1u) & ~(GCM_BLOCKSIZE - 1u);\n    return CRYPT_SUCCESS;\n}\n\nstatic int32_t BuildPolyInput(struct ModesGcmSivCtx *ctx, const uint8_t *plaintext, uint32_t ptLen,\n    uint8_t **polyBuf, uint32_t *polyLen)\n{\n    uint32_t padAad;\n    uint32_t padPt;\n    int32_t ret;\n    \n    ret = Pad16Len(ctx->aadLen, &padAad);\n    if (ret != CRYPT_SUCCESS) {\n        return ret;\n    }\n    ret = Pad16Len(ptLen, &padPt);\n    if (ret != CRYPT_SUCCESS) {\n        return ret;\n    }\n    if (padAad > UINT32_MAX - padPt - GCM_BLOCKSIZE) {\n        BSL_ERR_PUSH_ERROR(CRYPT_INVALID_ARG);\n        return CRYPT_INVALID_ARG;\n    }\n    \n    uint32_t total = padAad + padPt + GCM_BLOCKSIZE;"
+    },
+    {
+      "file": "crypto/modes/src/modes_gcm_siv.c",
+      "line": "609-642",
+      "severity": "critical",
+      "title": "DupCtx outPtr aliasing causes heap buffer overflow",
+      "reviewers": "GEMINI, CLAUDE, CODEX",
+      "confidence": "trusted",
+      "problem": "MODES_GCM_SIV_DupCtx uses BSL_SAL_Dump to copy the entire struct including the outPtr field. The outPtr points to caller-allocated buffer. If the duplicated context is used for another encryption/decryption operation, it will write ciphertext to the original caller's buffer when GET_TAG is called, causing heap corruption since the original buffer was sized for the original message only.",
+      "code": "MODES_GCM_SIV_Ctx *MODES_GCM_SIV_DupCtx(const MODES_GCM_SIV_Ctx *modeCtx)\n{\n    if (modeCtx == NULL) {\n        return NULL;\n    }\n    const struct ModesGcmSivCtx *src = modeCtx;\n    struct ModesGcmSivCtx *ctx = BSL_SAL_Dump(src, sizeof(struct ModesGcmSivCtx));\n    if (ctx == NULL) {\n        BSL_ERR_PUSH_ERROR(CRYPT_MEM_ALLOC_FAIL);\n        return NULL;\n    }\n    ctx->aadBuf = NULL;\n    ctx->msgBuf = NULL;",
+      "fix": "MODES_GCM_SIV_Ctx *MODES_GCM_SIV_DupCtx(const MODES_GCM_SIV_Ctx *modeCtx)\n{\n    if (modeCtx == NULL) {\n        return NULL;\n    }\n    const struct ModesGcmSivCtx *src = modeCtx;\n    struct ModesGcmSivCtx *ctx = BSL_SAL_Dump(src, sizeof(struct ModesGcmSivCtx));\n    if (ctx == NULL) {\n        BSL_ERR_PUSH_ERROR(CRYPT_MEM_ALLOC_FAIL);\n        return NULL;\n    }\n    ctx->aadBuf = NULL;\n    ctx->msgBuf = NULL;\n    ctx->outPtr = NULL;  /* Reset caller-owned pointer */"
+    },
+    {
+      "file": "crypto/modes/src/modes_gcm_siv.c",
+      "line": "462-469",
+      "severity": "high",
+      "title": "Integer overflow in MODES_GCM_SIV_Update msgLen causes heap overflow",
+      "reviewers": "CLAUDE, GEMINI, CODEX",
+      "confidence": "trusted",
+      "problem": "The calculation modeCtx->msgLen + inLen at line 462 can overflow if many Update calls are made with large data. When overflow occurs, realloc allocates a smaller buffer than needed, and the subsequent memcpy_s and msgLen increment operate on incorrect sizes, causing heap buffer overflow.",
+      "code": "uint8_t *nbuf = BSL_SAL_Realloc(modeCtx->msgBuf, modeCtx->msgLen + inLen, modeCtx->msgLen);\nif (nbuf == NULL) {\n    BSL_ERR_PUSH_ERROR(CRYPT_MEM_ALLOC_FAIL);\n    return CRYPT_MEM_ALLOC_FAIL;\n}\nmodeCtx->msgBuf = nbuf;\n(void)memcpy_s(modeCtx->msgBuf + modeCtx->msgLen, inLen, in, inLen);\nmodeCtx->msgLen += inLen;",
+      "fix": "if (inLen > UINT32_MAX - modeCtx->msgLen) {\n    BSL_ERR_PUSH_ERROR(CRYPT_INVALID_ARG);\n    return CRYPT_INVALID_ARG;\n}\nuint32_t newLen = modeCtx->msgLen + inLen;\nuint8_t *nbuf = BSL_SAL_Realloc(modeCtx->msgBuf, newLen, modeCtx->msgLen);\nif (nbuf == NULL) {\n    BSL_ERR_PUSH_ERROR(CRYPT_MEM_ALLOC_FAIL);\n    return CRYPT_MEM_ALLOC_FAIL;\n}\nmodeCtx->msgBuf = nbuf;\n(void)memcpy_s(modeCtx->msgBuf + modeCtx->msgLen, newLen - modeCtx->msgLen, in, inLen);\nmodeCtx->msgLen = newLen;"
+    },
+    {
+      "file": "crypto/modes/src/modes_gcm_siv.c",
+      "line": "444-471",
+      "severity": "high",
+      "title": "Deferred output writes can overflow caller buffers",
+      "reviewers": "CODEX",
+      "confidence": "likely",
+      "problem": "Update() buffers all input internally, remembers only the first out pointer, and forces *outLen = 0. When GET_TAG is later called, it writes the entire buffered message to the raw outPtr without checking how much space the caller originally advertised. This violates the AEAD API contract where Update should process data incrementally and respect output buffer sizes.",
+      "code": "int32_t MODES_GCM_SIV_Update(struct ModesGcmSivCtx *modeCtx, const uint8_t *in, uint32_t inLen, uint8_t *out,\n    uint32_t *outLen)\n{\n    ...\n    if (out != NULL && modeCtx->outPtr == NULL) {\n        modeCtx->outPtr = out;\n    }\n    if (inLen == 0) {\n        *outLen = 0;\n        return CRYPT_SUCCESS;\n    }\n    uint8_t *nbuf = BSL_SAL_Realloc(modeCtx->msgBuf, modeCtx->msgLen + inLen, modeCtx->msgLen);\n    ...\n    *outLen = 0;\n    return CRYPT_SUCCESS;\n}",
+      "fix": "/* Add to ModesGcmSivCtx */\nuint32_t outCap;\n\nint32_t MODES_GCM_SIV_Update(struct ModesGcmSivCtx *modeCtx, const uint8_t *in, uint32_t inLen, uint8_t *out,\n    uint32_t *outLen)\n{\n    ...\n    if (out != NULL && modeCtx->outPtr == NULL) {\n        modeCtx->outPtr = out;\n        modeCtx->outCap = *outLen;\n    }\n    ...\n    /* In GcmSivEncryptFinish and GcmSivDecryptFinish, add check: */\n    if (ctx->msgLen > ctx->outCap) {\n        BSL_ERR_PUSH_ERROR(CRYPT_MODE_BUFF_LEN_NOT_ENOUGH);\n        return CRYPT_MODE_BUFF_LEN_NOT_ENOUGH;\n    }"
+    },
+    {
+      "file": "crypto/modes/src/modes_gcm_siv.c",
+      "line": "275-278",
+      "severity": "medium",
+      "title": "Tag copied even when encryption fails in GcmSivEncryptFinish",
+      "reviewers": "CLAUDE",
+      "confidence": "likely",
+      "problem": "If AesCtrGcmSiv() fails during encryption, the function still copies the tag to the output buffer before returning the error. Callers who check the tag buffer but not the return value might use an unencrypted payload with a valid-looking tag, leading to security issues.",
+      "code": "if (ctx->msgLen > 0) {\n    ret = AesCtrGcmSiv(encKey, encKeyLen, ctr, ctx->msgBuf, ctx->msgLen, ctx->outPtr);\n}\n(void)memcpy_s(tagBuf, tagLen, tag, ctx->tagLen);\n(void)BSL_SAL_CleanseData(authKey, sizeof(authKey));\n(void)BSL_SAL_CleanseData(encKey, sizeof(encKey));\nreturn ret;",
+      "fix": "if (ctx->msgLen > 0) {\n    ret = AesCtrGcmSiv(encKey, encKeyLen, ctr, ctx->msgBuf, ctx->msgLen, ctx->outPtr);\n    if (ret != CRYPT_SUCCESS) {\n        (void)BSL_SAL_CleanseData(authKey, sizeof(authKey));\n        (void)BSL_SAL_CleanseData(encKey, sizeof(encKey));\n        return ret;\n    }\n}\n(void)memcpy_s(tagBuf, tagLen, tag, ctx->tagLen);\n(void)BSL_SAL_CleanseData(authKey, sizeof(authKey));\n(void)BSL_SAL_CleanseData(encKey, sizeof(encKey));\nreturn CRYPT_SUCCESS;"
+    },
+    {
+      "file": "crypto/modes/src/modes_gcm_siv.c",
+      "line": "242-244",
+      "severity": "medium",
+      "title": "AES-GCM-SIV encryption fails for zero-length plaintext",
+      "reviewers": "GEMINI",
+      "confidence": "likely",
+      "problem": "GcmSivEncryptFinish unconditionally checks if outPtr is NULL and returns an error, even when msgLen is 0. For zero-length plaintexts (e.g., when using AES-GCM-SIV only to authenticate AAD), it is valid for outPtr to be NULL since there is no ciphertext to write.",
+      "code": "if (ctx->outPtr == NULL) {\n    BSL_ERR_PUSH_ERROR(CRYPT_EAL_ERR_STATE);\n    return CRYPT_EAL_ERR_STATE;\n}",
+      "fix": "if (ctx->msgLen > 0 && ctx->outPtr == NULL) {\n    BSL_ERR_PUSH_ERROR(CRYPT_EAL_ERR_STATE);\n    return CRYPT_EAL_ERR_STATE;\n}"
+    },
+    {
+      "file": "crypto/modes/src/modes_gcm_siv.c",
+      "line": "295-297",
+      "severity": "medium",
+      "title": "AES-GCM-SIV decryption fails for empty ciphertext",
+      "reviewers": "GEMINI",
+      "confidence": "likely",
+      "problem": "Similar to the encryption path, GcmSivDecryptFinish rejects NULL outPtr even when ciphertext length is zero. This prevents verification of empty payloads where only AAD needs authentication.",
+      "code": "if (ctx->outPtr == NULL) {\n    BSL_ERR_PUSH_ERROR(CRYPT_EAL_ERR_STATE);\n    return CRYPT_EAL_ERR_STATE;\n}",
+      "fix": "if (ctLen > 0 && ctx->outPtr == NULL) {\n    BSL_ERR_PUSH_ERROR(CRYPT_EAL_ERR_STATE);\n    return CRYPT_EAL_ERR_STATE;\n}"
+    },
+    {
+      "file": "crypto/modes/src/modes_gcm_siv.c",
+      "line": "233",
+      "severity": "medium",
+      "title": "CstTimeTagCmp returns HPKE-specific error code",
+      "reviewers": "GEMINI",
+      "confidence": "likely",
+      "problem": "CstTimeTagCmp returns CRYPT_HPKE_ERR_AEAD_TAG when tag verification fails. This mixes module boundaries by returning an HPKE-specific error from a generic AES mode component. Generic EAL error handling logic may not correctly interpret this error code.",
+      "code": "static int32_t CstTimeTagCmp(const uint8_t *a, const uint8_t *b, uint32_t len)\n{\n    uint8_t d = 0;\n    uint32_t i;\n    for (i = 0; i < len; i++) {\n        d |= (uint8_t)(a[i] ^ b[i]);\n    }\n    return (d == 0) ? CRYPT_SUCCESS : CRYPT_HPKE_ERR_AEAD_TAG;\n}",
+      "fix": "static int32_t CstTimeTagCmp(const uint8_t *a, const uint8_t *b, uint32_t len)\n{\n    uint8_t d = 0;\n    uint32_t i;\n    for (i = 0; i < len; i++) {\n        d |= (uint8_t)(a[i] ^ b[i]);\n    }\n    return (d == 0) ? CRYPT_SUCCESS : CRYPT_INVALID_ARG;\n}"
+    },
+    {
+      "file": "crypto/modes/src/modes_gcm_siv.c",
+      "line": "284-375",
+      "severity": "medium",
+      "title": "GCM-SIV decryption breaks existing AEAD API contract",
+      "reviewers": "CODEX",
+      "confidence": "evaluate",
+      "problem": "The implementation treats the last 16 bytes passed to Update() as the authentication tag. This is inconsistent with the existing CRYPT_EAL_Cipher AEAD API used by GCM/CCM/ChaCha20-Poly1305, where Update() processes ciphertext and CipherCtrl(GET_TAG) handles the tag separately via CRYPT_CTRL_SET_TAG. This creates a hidden special case that breaks generic AEAD callers.",
+      "code": "static int32_t GcmSivDecryptFinish(struct ModesGcmSivCtx *ctx, uint8_t *tagOut, uint32_t tagLen)\n{\n    if (ctx->msgLen < GCM_BLOCKSIZE) {\n        BSL_ERR_PUSH_ERROR(CRYPT_INVALID_ARG);\n        return CRYPT_INVALID_ARG;\n    }\n    uint32_t ctLen = ctx->msgLen - GCM_BLOCKSIZE;\n    ...\n    const uint8_t *recvTag = ctx->msgBuf + ctLen;\n    ...\n}",
+      "fix": "/* Add to ModesGcmSivCtx */\nuint8_t expectedTag[GCM_BLOCKSIZE];\nbool hasExpectedTag;\n\n/* Add new function and update Ctrl handler: */\nstatic int32_t SetExpectedTag(struct ModesGcmSivCtx *ctx, const uint8_t *tag, uint32_t len)\n{\n    if (tag == NULL || len != GCM_BLOCKSIZE) {\n        BSL_ERR_PUSH_ERROR(CRYPT_MODES_TAGLEN_ERROR);\n        return CRYPT_MODES_TAGLEN_ERROR;\n    }\n    (void)memcpy_s(ctx->expectedTag, sizeof(ctx->expectedTag), tag, len);\n    ctx->hasExpectedTag = true;\n    return CRYPT_SUCCESS;\n}\n\n/* Update MODES_GCM_SIV_Ctrl to handle CRYPT_CTRL_SET_TAG */\ncase CRYPT_CTRL_SET_TAG:\n    return SetExpectedTag(ctx, val, len);\n\n/* Update GcmSivDecryptFinish to use ctx->expectedTag instead of extracting from msgBuf */"
+    },
+    {
+      "file": "crypto/modes/include/crypt_modes_gcm_siv.h",
+      "line": "56",
+      "severity": "low",
+      "title": "Missing newline at end of file",
+      "reviewers": "CLAUDE",
+      "confidence": "trusted",
+      "problem": "The header file is missing a terminating newline character, which violates POSIX standards and may cause issues with some tools.",
+      "code": "#endif /* CRYPT_MODES_GCM_SIV_H */\n\\ No newline at end of file",
+      "fix": "#endif /* CRYPT_MODES_GCM_SIV_H */"
+    },
+    {
+      "file": "crypto/modes/src/modes_gcm_siv.c",
+      "line": "644",
+      "severity": "low",
+      "title": "Missing newline at end of file",
+      "reviewers": "CLAUDE",
+      "confidence": "trusted",
+      "problem": "The source file is missing a terminating newline character, which violates POSIX standards.",
+      "code": "#endif /* HITLS_CRYPTO_GCM && HITLS_CRYPTO_AES && HITLS_CRYPTO_GHASH */\n\\ No newline at end of file",
+      "fix": "#endif /* HITLS_CRYPTO_GCM && HITLS_CRYPTO_AES && HITLS_CRYPTO_GHASH */"
+    },
+    {
+      "file": "testcode/sdv/testcase/crypto/aes/test_suite_sdv_eal_aes_gcm_siv.c",
+      "line": "176",
+      "severity": "low",
+      "title": "Missing newline at end of file",
+      "reviewers": "CLAUDE",
+      "confidence": "trusted",
+      "problem": "The test file is missing a terminating newline character.",
+      "code": "/* END_CASE */\n\\ No newline at end of file",
+      "fix": "/* END_CASE */"
+    }
+  ]
+}

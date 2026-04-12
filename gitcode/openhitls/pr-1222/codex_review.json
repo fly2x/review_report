@@ -1,0 +1,52 @@
+[
+  {
+    "source": "codex",
+    "file": "crypto/modes/src/modes_gcm_siv.c",
+    "line": "236-319",
+    "severity": "high",
+    "title": "Deferred output writes can overflow or corrupt caller buffers",
+    "problem": "`MODES_GCM_SIV_Update()` buffers all input, forces `*outLen = 0`, and only remembers the first `out` pointer. `GET_TAG` later writes the entire buffered message to that raw pointer without checking how much space the caller actually advertised, and without validating later `Update()` calls use the same contiguous buffer. A caller can therefore pass a tiny first buffer or different per-chunk buffers and trigger an out-of-bounds write when `GET_TAG` runs.",
+    "code": "if (out != NULL && modeCtx->outPtr == NULL) {\n    modeCtx->outPtr = out;\n}\n...\n*outLen = 0;\n...\nif (ctx->msgLen > 0) {\n    ret = AesCtrGcmSiv(encKey, encKeyLen, ctr, ctx->msgBuf, ctx->msgLen, ctx->outPtr);\n}\n...\nif (ctLen > 0) {\n    ...\n    if (ctLen > 0 && plain != NULL) {\n        (void)memcpy_s(ctx->outPtr, ctLen, plain, ctLen);\n    }\n}",
+    "fix": "/* add to ModesGcmSivCtx */\nuint32_t outCap;\n\nint32_t MODES_GCM_SIV_Update(struct ModesGcmSivCtx *modeCtx, const uint8_t *in, uint32_t inLen,\n    uint8_t *out, uint32_t *outLen)\n{\n    ...\n    if (inLen == 0) {\n        *outLen = 0;\n        return CRYPT_SUCCESS;\n    }\n    if (out == NULL || *outLen < inLen) {\n        BSL_ERR_PUSH_ERROR(CRYPT_MODE_BUFF_LEN_NOT_ENOUGH);\n        return CRYPT_MODE_BUFF_LEN_NOT_ENOUGH;\n    }\n\n    if (modeCtx->outPtr == NULL) {\n        modeCtx->outPtr = out;\n        modeCtx->outCap = *outLen;\n    } else {\n        if (out != modeCtx->outPtr + modeCtx->msgLen) {\n            BSL_ERR_PUSH_ERROR(CRYPT_EAL_ERR_STATE);\n            return CRYPT_EAL_ERR_STATE;\n        }\n        if (modeCtx->outCap < modeCtx->msgLen + *outLen) {\n            modeCtx->outCap = modeCtx->msgLen + *outLen;\n        }\n    }\n\n    ...\n    *outLen = 0;\n    return CRYPT_SUCCESS;\n}\n\nstatic int32_t GcmSivEncryptFinish(struct ModesGcmSivCtx *ctx, uint8_t *tagBuf, uint32_t tagLen)\n{\n    ...\n    if (ctx->msgLen > ctx->outCap) {\n        BSL_ERR_PUSH_ERROR(CRYPT_MODE_BUFF_LEN_NOT_ENOUGH);\n        return CRYPT_MODE_BUFF_LEN_NOT_ENOUGH;\n    }\n    ...\n}\n\nstatic int32_t GcmSivDecryptFinish(struct ModesGcmSivCtx *ctx, uint8_t *tagOut, uint32_t tagLen)\n{\n    ...\n    if (ctLen > ctx->outCap) {\n        BSL_ERR_PUSH_ERROR(CRYPT_MODE_BUFF_LEN_NOT_ENOUGH);\n        return CRYPT_MODE_BUFF_LEN_NOT_ENOUGH;\n    }\n    ...\n}"
+  },
+  {
+    "source": "codex",
+    "file": "crypto/modes/src/modes_gcm_siv.c",
+    "line": "462-469",
+    "severity": "medium",
+    "title": "Buffered message length can wrap on repeated Update calls",
+    "problem": "`modeCtx->msgLen + inLen` is computed in `uint32_t` with no overflow check before `BSL_SAL_Realloc()`. After enough `Update()` calls, the addition wraps, a too-small buffer is allocated, and the subsequent `memcpy_s()` / `msgLen += inLen` operate on an invalid logical size.",
+    "code": "uint8_t *nbuf = BSL_SAL_Realloc(modeCtx->msgBuf, modeCtx->msgLen + inLen, modeCtx->msgLen);\nif (nbuf == NULL) {\n    BSL_ERR_PUSH_ERROR(CRYPT_MEM_ALLOC_FAIL);\n    return CRYPT_MEM_ALLOC_FAIL;\n}\nmodeCtx->msgBuf = nbuf;\n(void)memcpy_s(modeCtx->msgBuf + modeCtx->msgLen, inLen, in, inLen);\nmodeCtx->msgLen += inLen;",
+    "fix": "if (modeCtx->msgLen > UINT32_MAX - inLen) {\n    BSL_ERR_PUSH_ERROR(CRYPT_MODES_CRYPTLEN_OVERFLOW);\n    return CRYPT_MODES_CRYPTLEN_OVERFLOW;\n}\n\nuint32_t newLen = modeCtx->msgLen + inLen;\nuint8_t *nbuf = BSL_SAL_Realloc(modeCtx->msgBuf, newLen, modeCtx->msgLen);\nif (nbuf == NULL) {\n    BSL_ERR_PUSH_ERROR(CRYPT_MEM_ALLOC_FAIL);\n    return CRYPT_MEM_ALLOC_FAIL;\n}\nmodeCtx->msgBuf = nbuf;\n(void)memcpy_s(modeCtx->msgBuf + modeCtx->msgLen, newLen - modeCtx->msgLen, in, inLen);\nmodeCtx->msgLen = newLen;"
+  },
+  {
+    "source": "codex",
+    "file": "crypto/modes/src/modes_gcm_siv.c",
+    "line": "166-176",
+    "severity": "medium",
+    "title": "POLYVAL input size arithmetic can under-allocate for large inputs",
+    "problem": "`Pad16Len()` and `total = padAad + padPt + GCM_BLOCKSIZE` both use unchecked 32-bit arithmetic. Large AAD or plaintext lengths can wrap during padding/total-size calculation, causing `BSL_SAL_Malloc(total)` to allocate too little memory and making the later `memcpy_s()` writes inconsistent with the logical input sizes.",
+    "code": "static uint32_t Pad16Len(uint32_t len)\n{\n    return (len + GCM_BLOCKSIZE - 1u) & ~(GCM_BLOCKSIZE - 1u);\n}\n...\nuint32_t padAad = Pad16Len(ctx->aadLen);\nuint32_t padPt = Pad16Len(ptLen);\nuint32_t total = padAad + padPt + GCM_BLOCKSIZE;\nuint8_t *buf = BSL_SAL_Malloc(total);",
+    "fix": "static int32_t Pad16Len(uint32_t len, uint32_t *padded)\n{\n    if (len > UINT32_MAX - (GCM_BLOCKSIZE - 1u)) {\n        BSL_ERR_PUSH_ERROR(CRYPT_MODES_CRYPTLEN_OVERFLOW);\n        return CRYPT_MODES_CRYPTLEN_OVERFLOW;\n    }\n    *padded = (len + GCM_BLOCKSIZE - 1u) & ~(GCM_BLOCKSIZE - 1u);\n    return CRYPT_SUCCESS;\n}\n\nstatic int32_t BuildPolyInput(struct ModesGcmSivCtx *ctx, const uint8_t *plaintext, uint32_t ptLen,\n    uint8_t **polyBuf, uint32_t *polyLen)\n{\n    uint32_t padAad;\n    uint32_t padPt;\n    int32_t ret = Pad16Len(ctx->aadLen, &padAad);\n    if (ret != CRYPT_SUCCESS) {\n        return ret;\n    }\n    ret = Pad16Len(ptLen, &padPt);\n    if (ret != CRYPT_SUCCESS) {\n        return ret;\n    }\n    if (padAad > UINT32_MAX - padPt - GCM_BLOCKSIZE) {\n        BSL_ERR_PUSH_ERROR(CRYPT_MODES_CRYPTLEN_OVERFLOW);\n        return CRYPT_MODES_CRYPTLEN_OVERFLOW;\n    }\n\n    uint32_t total = padAad + padPt + GCM_BLOCKSIZE;\n    ...\n}"
+  },
+  {
+    "source": "codex",
+    "file": "crypto/modes/src/modes_gcm_siv.c",
+    "line": "615-634",
+    "severity": "medium",
+    "title": "DupCtx clones a caller-owned output pointer into the new context",
+    "problem": "`BSL_SAL_Dump(src, sizeof(struct ModesGcmSivCtx))` copies the entire struct, including `outPtr`, which points into caller memory rather than internal state. If the context is duplicated after `Update()`, the duplicate will later write ciphertext/plaintext into the original caller buffer on `GET_TAG`, corrupting memory and violating `CopyCtx`/`DupCtx` semantics.",
+    "code": "const struct ModesGcmSivCtx *src = modeCtx;\nstruct ModesGcmSivCtx *ctx = BSL_SAL_Dump(src, sizeof(struct ModesGcmSivCtx));\nif (ctx == NULL) {\n    BSL_ERR_PUSH_ERROR(CRYPT_MEM_ALLOC_FAIL);\n    return NULL;\n}\nctx->aadBuf = NULL;\nctx->msgBuf = NULL;\n...\nreturn ctx;",
+    "fix": "MODES_GCM_SIV_Ctx *MODES_GCM_SIV_DupCtx(const MODES_GCM_SIV_Ctx *modeCtx)\n{\n    if (modeCtx == NULL) {\n        return NULL;\n    }\n    const struct ModesGcmSivCtx *src = modeCtx;\n\n    /* Safe immediate fix: do not duplicate an in-progress context that depends on caller buffers. */\n    if (src->msgLen != 0 || src->outPtr != NULL) {\n        BSL_ERR_PUSH_ERROR(CRYPT_EAL_ERR_STATE);\n        return NULL;\n    }\n\n    struct ModesGcmSivCtx *ctx = BSL_SAL_Dump(src, sizeof(struct ModesGcmSivCtx));\n    if (ctx == NULL) {\n        BSL_ERR_PUSH_ERROR(CRYPT_MEM_ALLOC_FAIL);\n        return NULL;\n    }\n    ctx->outPtr = NULL;\n    ctx->aadBuf = NULL;\n    ctx->msgBuf = NULL;\n    ...\n}"
+  },
+  {
+    "source": "codex",
+    "file": "crypto/modes/src/modes_gcm_siv.c",
+    "line": "286-299",
+    "severity": "medium",
+    "title": "GCM-SIV decryption breaks the existing AEAD API contract",
+    "problem": "The implementation treats the last 16 bytes passed to `Update()` as the authentication tag. That is not how the existing `CRYPT_EAL_Cipher*` AEAD API works for GCM/CCM/ChaCha20-Poly1305, where `Update()` consumes ciphertext and `CipherCtrl(GET_TAG)` handles the tag separately. As written, generic AEAD callers cannot use AES-GCM-SIV correctly without a hidden `ciphertext || tag` special case.",
+    "code": "if (ctx->msgLen < GCM_BLOCKSIZE) {\n    BSL_ERR_PUSH_ERROR(CRYPT_INVALID_ARG);\n    return CRYPT_INVALID_ARG;\n}\nuint32_t ctLen = ctx->msgLen - GCM_BLOCKSIZE;\n...\nconst uint8_t *recvTag = ctx->msgBuf + ctLen;\n...\nret = AesCtrGcmSiv(encKey, encKeyLen, ctr, ctx->msgBuf, ctLen, plain);",
+    "fix": "/* add to ModesGcmSivCtx */\nuint8_t expectedTag[GCM_BLOCKSIZE];\nbool hasExpectedTag;\n\nstatic int32_t SetExpectedTag(struct ModesGcmSivCtx *ctx, const uint8_t *tag, uint32_t len)\n{\n    if (tag == NULL || len != GCM_BLOCKSIZE) {\n        BSL_ERR_PUSH_ERROR(CRYPT_MODES_TAGLEN_ERROR);\n        return CRYPT_MODES_TAGLEN_ERROR;\n    }\n    (void)memcpy_s(ctx->expectedTag, sizeof(ctx->expectedTag), tag, len);\n    ctx->hasExpectedTag = true;\n    return CRYPT_SUCCESS;\n}\n\nint32_t MODES_GCM_SIV_Ctrl(MODES_GCM_SIV_Ctx *modeCtx, int32_t cmd, void *val, uint32_t len)\n{\n    ...\n    case CRYPT_CTRL_SET_TAG:\n        return SetExpectedTag(ctx, val, len);\n    case CRYPT_CTRL_GET_TAG:\n        return ctx->enc ? GcmSivEncryptFinish(ctx, val, len) : GcmSivDecryptFinish(ctx, val, len);\n    ...\n}\n\nstatic int32_t GcmSivDecryptFinish(struct ModesGcmSivCtx *ctx, uint8_t *tagOut, uint32_t tagLen)\n{\n    if (!ctx->hasExpectedTag) {\n        BSL_ERR_PUSH_ERROR(CRYPT_EAL_ERR_STATE);\n        return CRYPT_EAL_ERR_STATE;\n    }\n\n    const uint8_t *recvTag = ctx->expectedTag;\n    uint32_t ctLen = ctx->msgLen;\n    ...\n}"
+  }
+]

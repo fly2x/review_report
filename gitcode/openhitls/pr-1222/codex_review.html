@@ -1,0 +1,278 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Code Review: openHiTLS/openhitls#1222 - CODEX</title>
+    <style>
+        :root { --critical: #dc2626; --high: #ea580c; --medium: #ca8a04; --low: #65a30d; }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: system-ui, sans-serif; background: #f8fafc; color: #1e293b; padding: 2rem; line-height: 1.6; }
+        .container { max-width: 900px; margin: 0 auto; }
+        h1 { font-size: 1.5rem; margin-bottom: 0.5rem; }
+        .subtitle { color: #64748b; margin-bottom: 2rem; }
+        .section { margin-bottom: 2rem; }
+        .section-title { font-size: 1.1rem; font-weight: 600; padding: 0.5rem 1rem; border-radius: 0.5rem 0.5rem 0 0; color: white; }
+        .section-title.critical { background: var(--critical); }
+        .section-title.high { background: var(--high); }
+        .section-title.medium { background: var(--medium); }
+        .section-title.low { background: var(--low); }
+        .issue { background: white; border: 1px solid #e2e8f0; border-top: none; padding: 1rem; }
+        .issue:last-child { border-radius: 0 0 0.5rem 0.5rem; }
+        .issue-title { font-weight: 600; margin-bottom: 0.25rem; }
+        .issue-location { font-family: monospace; font-size: 0.875rem; color: #64748b; margin-bottom: 0.75rem; }
+        .issue-source { font-size: 0.75rem; color: #94a3b8; margin-top: 0.5rem; }
+        pre { background: #1e293b; color: #e2e8f0; padding: 0.75rem; border-radius: 0.375rem; overflow-x: auto; font-size: 0.875rem; margin: 0.5rem 0; }
+        .problem { margin: 0.75rem 0; }
+        .fix-label { font-weight: 600; margin-top: 0.75rem; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Code Review: openHiTLS/openhitls#1222 - CODEX</h1>
+        <div class="subtitle"></div>
+        
+<div class="section"><div class="section-title high">High</div>
+<div class="issue">
+                <div class="issue-title">Deferred output writes can overflow or corrupt caller buffers</div>
+                <div class="issue-location">crypto/modes/src/modes_gcm_siv.c:236-319</div>
+                <pre>if (out != NULL &amp;&amp; modeCtx-&gt;outPtr == NULL) {
+    modeCtx-&gt;outPtr = out;
+}
+...
+*outLen = 0;
+...
+if (ctx-&gt;msgLen &gt; 0) {
+    ret = AesCtrGcmSiv(encKey, encKeyLen, ctr, ctx-&gt;msgBuf, ctx-&gt;msgLen, ctx-&gt;outPtr);
+}
+...
+if (ctLen &gt; 0) {
+    ...
+    if (ctLen &gt; 0 &amp;&amp; plain != NULL) {
+        (void)memcpy_s(ctx-&gt;outPtr, ctLen, plain, ctLen);
+    }
+}</pre>
+                <div class="problem"><strong>Issue:</strong> `MODES_GCM_SIV_Update()` buffers all input, forces `*outLen = 0`, and only remembers the first `out` pointer. `GET_TAG` later writes the entire buffered message to that raw pointer without checking how much space the caller actually advertised, and without validating later `Update()` calls use the same contiguous buffer. A caller can therefore pass a tiny first buffer or different per-chunk buffers and trigger an out-of-bounds write when `GET_TAG` runs.</div>
+                <div class="fix-label">Fix:</div><pre>/* add to ModesGcmSivCtx */
+uint32_t outCap;
+
+int32_t MODES_GCM_SIV_Update(struct ModesGcmSivCtx *modeCtx, const uint8_t *in, uint32_t inLen,
+    uint8_t *out, uint32_t *outLen)
+{
+    ...
+    if (inLen == 0) {
+        *outLen = 0;
+        return CRYPT_SUCCESS;
+    }
+    if (out == NULL || *outLen &lt; inLen) {
+        BSL_ERR_PUSH_ERROR(CRYPT_MODE_BUFF_LEN_NOT_ENOUGH);
+        return CRYPT_MODE_BUFF_LEN_NOT_ENOUGH;
+    }
+
+    if (modeCtx-&gt;outPtr == NULL) {
+        modeCtx-&gt;outPtr = out;
+        modeCtx-&gt;outCap = *outLen;
+    } else {
+        if (out != modeCtx-&gt;outPtr + modeCtx-&gt;msgLen) {
+            BSL_ERR_PUSH_ERROR(CRYPT_EAL_ERR_STATE);
+            return CRYPT_EAL_ERR_STATE;
+        }
+        if (modeCtx-&gt;outCap &lt; modeCtx-&gt;msgLen + *outLen) {
+            modeCtx-&gt;outCap = modeCtx-&gt;msgLen + *outLen;
+        }
+    }
+
+    ...
+    *outLen = 0;
+    return CRYPT_SUCCESS;
+}
+
+static int32_t GcmSivEncryptFinish(struct ModesGcmSivCtx *ctx, uint8_t *tagBuf, uint32_t tagLen)
+{
+    ...
+    if (ctx-&gt;msgLen &gt; ctx-&gt;outCap) {
+        BSL_ERR_PUSH_ERROR(CRYPT_MODE_BUFF_LEN_NOT_ENOUGH);
+        return CRYPT_MODE_BUFF_LEN_NOT_ENOUGH;
+    }
+    ...
+}
+
+static int32_t GcmSivDecryptFinish(struct ModesGcmSivCtx *ctx, uint8_t *tagOut, uint32_t tagLen)
+{
+    ...
+    if (ctLen &gt; ctx-&gt;outCap) {
+        BSL_ERR_PUSH_ERROR(CRYPT_MODE_BUFF_LEN_NOT_ENOUGH);
+        return CRYPT_MODE_BUFF_LEN_NOT_ENOUGH;
+    }
+    ...
+}</pre>
+                <div class="issue-source">Reviewer: codex</div>
+            </div>
+</div>
+<div class="section"><div class="section-title medium">Medium</div>
+<div class="issue">
+                <div class="issue-title">Buffered message length can wrap on repeated Update calls</div>
+                <div class="issue-location">crypto/modes/src/modes_gcm_siv.c:462-469</div>
+                <pre>uint8_t *nbuf = BSL_SAL_Realloc(modeCtx-&gt;msgBuf, modeCtx-&gt;msgLen + inLen, modeCtx-&gt;msgLen);
+if (nbuf == NULL) {
+    BSL_ERR_PUSH_ERROR(CRYPT_MEM_ALLOC_FAIL);
+    return CRYPT_MEM_ALLOC_FAIL;
+}
+modeCtx-&gt;msgBuf = nbuf;
+(void)memcpy_s(modeCtx-&gt;msgBuf + modeCtx-&gt;msgLen, inLen, in, inLen);
+modeCtx-&gt;msgLen += inLen;</pre>
+                <div class="problem"><strong>Issue:</strong> `modeCtx->msgLen + inLen` is computed in `uint32_t` with no overflow check before `BSL_SAL_Realloc()`. After enough `Update()` calls, the addition wraps, a too-small buffer is allocated, and the subsequent `memcpy_s()` / `msgLen += inLen` operate on an invalid logical size.</div>
+                <div class="fix-label">Fix:</div><pre>if (modeCtx-&gt;msgLen &gt; UINT32_MAX - inLen) {
+    BSL_ERR_PUSH_ERROR(CRYPT_MODES_CRYPTLEN_OVERFLOW);
+    return CRYPT_MODES_CRYPTLEN_OVERFLOW;
+}
+
+uint32_t newLen = modeCtx-&gt;msgLen + inLen;
+uint8_t *nbuf = BSL_SAL_Realloc(modeCtx-&gt;msgBuf, newLen, modeCtx-&gt;msgLen);
+if (nbuf == NULL) {
+    BSL_ERR_PUSH_ERROR(CRYPT_MEM_ALLOC_FAIL);
+    return CRYPT_MEM_ALLOC_FAIL;
+}
+modeCtx-&gt;msgBuf = nbuf;
+(void)memcpy_s(modeCtx-&gt;msgBuf + modeCtx-&gt;msgLen, newLen - modeCtx-&gt;msgLen, in, inLen);
+modeCtx-&gt;msgLen = newLen;</pre>
+                <div class="issue-source">Reviewer: codex</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">POLYVAL input size arithmetic can under-allocate for large inputs</div>
+                <div class="issue-location">crypto/modes/src/modes_gcm_siv.c:166-176</div>
+                <pre>static uint32_t Pad16Len(uint32_t len)
+{
+    return (len + GCM_BLOCKSIZE - 1u) &amp; ~(GCM_BLOCKSIZE - 1u);
+}
+...
+uint32_t padAad = Pad16Len(ctx-&gt;aadLen);
+uint32_t padPt = Pad16Len(ptLen);
+uint32_t total = padAad + padPt + GCM_BLOCKSIZE;
+uint8_t *buf = BSL_SAL_Malloc(total);</pre>
+                <div class="problem"><strong>Issue:</strong> `Pad16Len()` and `total = padAad + padPt + GCM_BLOCKSIZE` both use unchecked 32-bit arithmetic. Large AAD or plaintext lengths can wrap during padding/total-size calculation, causing `BSL_SAL_Malloc(total)` to allocate too little memory and making the later `memcpy_s()` writes inconsistent with the logical input sizes.</div>
+                <div class="fix-label">Fix:</div><pre>static int32_t Pad16Len(uint32_t len, uint32_t *padded)
+{
+    if (len &gt; UINT32_MAX - (GCM_BLOCKSIZE - 1u)) {
+        BSL_ERR_PUSH_ERROR(CRYPT_MODES_CRYPTLEN_OVERFLOW);
+        return CRYPT_MODES_CRYPTLEN_OVERFLOW;
+    }
+    *padded = (len + GCM_BLOCKSIZE - 1u) &amp; ~(GCM_BLOCKSIZE - 1u);
+    return CRYPT_SUCCESS;
+}
+
+static int32_t BuildPolyInput(struct ModesGcmSivCtx *ctx, const uint8_t *plaintext, uint32_t ptLen,
+    uint8_t **polyBuf, uint32_t *polyLen)
+{
+    uint32_t padAad;
+    uint32_t padPt;
+    int32_t ret = Pad16Len(ctx-&gt;aadLen, &amp;padAad);
+    if (ret != CRYPT_SUCCESS) {
+        return ret;
+    }
+    ret = Pad16Len(ptLen, &amp;padPt);
+    if (ret != CRYPT_SUCCESS) {
+        return ret;
+    }
+    if (padAad &gt; UINT32_MAX - padPt - GCM_BLOCKSIZE) {
+        BSL_ERR_PUSH_ERROR(CRYPT_MODES_CRYPTLEN_OVERFLOW);
+        return CRYPT_MODES_CRYPTLEN_OVERFLOW;
+    }
+
+    uint32_t total = padAad + padPt + GCM_BLOCKSIZE;
+    ...
+}</pre>
+                <div class="issue-source">Reviewer: codex</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">DupCtx clones a caller-owned output pointer into the new context</div>
+                <div class="issue-location">crypto/modes/src/modes_gcm_siv.c:615-634</div>
+                <pre>const struct ModesGcmSivCtx *src = modeCtx;
+struct ModesGcmSivCtx *ctx = BSL_SAL_Dump(src, sizeof(struct ModesGcmSivCtx));
+if (ctx == NULL) {
+    BSL_ERR_PUSH_ERROR(CRYPT_MEM_ALLOC_FAIL);
+    return NULL;
+}
+ctx-&gt;aadBuf = NULL;
+ctx-&gt;msgBuf = NULL;
+...
+return ctx;</pre>
+                <div class="problem"><strong>Issue:</strong> `BSL_SAL_Dump(src, sizeof(struct ModesGcmSivCtx))` copies the entire struct, including `outPtr`, which points into caller memory rather than internal state. If the context is duplicated after `Update()`, the duplicate will later write ciphertext/plaintext into the original caller buffer on `GET_TAG`, corrupting memory and violating `CopyCtx`/`DupCtx` semantics.</div>
+                <div class="fix-label">Fix:</div><pre>MODES_GCM_SIV_Ctx *MODES_GCM_SIV_DupCtx(const MODES_GCM_SIV_Ctx *modeCtx)
+{
+    if (modeCtx == NULL) {
+        return NULL;
+    }
+    const struct ModesGcmSivCtx *src = modeCtx;
+
+    /* Safe immediate fix: do not duplicate an in-progress context that depends on caller buffers. */
+    if (src-&gt;msgLen != 0 || src-&gt;outPtr != NULL) {
+        BSL_ERR_PUSH_ERROR(CRYPT_EAL_ERR_STATE);
+        return NULL;
+    }
+
+    struct ModesGcmSivCtx *ctx = BSL_SAL_Dump(src, sizeof(struct ModesGcmSivCtx));
+    if (ctx == NULL) {
+        BSL_ERR_PUSH_ERROR(CRYPT_MEM_ALLOC_FAIL);
+        return NULL;
+    }
+    ctx-&gt;outPtr = NULL;
+    ctx-&gt;aadBuf = NULL;
+    ctx-&gt;msgBuf = NULL;
+    ...
+}</pre>
+                <div class="issue-source">Reviewer: codex</div>
+            </div>
+<div class="issue">
+                <div class="issue-title">GCM-SIV decryption breaks the existing AEAD API contract</div>
+                <div class="issue-location">crypto/modes/src/modes_gcm_siv.c:286-299</div>
+                <pre>if (ctx-&gt;msgLen &lt; GCM_BLOCKSIZE) {
+    BSL_ERR_PUSH_ERROR(CRYPT_INVALID_ARG);
+    return CRYPT_INVALID_ARG;
+}
+uint32_t ctLen = ctx-&gt;msgLen - GCM_BLOCKSIZE;
+...
+const uint8_t *recvTag = ctx-&gt;msgBuf + ctLen;
+...
+ret = AesCtrGcmSiv(encKey, encKeyLen, ctr, ctx-&gt;msgBuf, ctLen, plain);</pre>
+                <div class="problem"><strong>Issue:</strong> The implementation treats the last 16 bytes passed to `Update()` as the authentication tag. That is not how the existing `CRYPT_EAL_Cipher*` AEAD API works for GCM/CCM/ChaCha20-Poly1305, where `Update()` consumes ciphertext and `CipherCtrl(GET_TAG)` handles the tag separately. As written, generic AEAD callers cannot use AES-GCM-SIV correctly without a hidden `ciphertext || tag` special case.</div>
+                <div class="fix-label">Fix:</div><pre>/* add to ModesGcmSivCtx */
+uint8_t expectedTag[GCM_BLOCKSIZE];
+bool hasExpectedTag;
+
+static int32_t SetExpectedTag(struct ModesGcmSivCtx *ctx, const uint8_t *tag, uint32_t len)
+{
+    if (tag == NULL || len != GCM_BLOCKSIZE) {
+        BSL_ERR_PUSH_ERROR(CRYPT_MODES_TAGLEN_ERROR);
+        return CRYPT_MODES_TAGLEN_ERROR;
+    }
+    (void)memcpy_s(ctx-&gt;expectedTag, sizeof(ctx-&gt;expectedTag), tag, len);
+    ctx-&gt;hasExpectedTag = true;
+    return CRYPT_SUCCESS;
+}
+
+int32_t MODES_GCM_SIV_Ctrl(MODES_GCM_SIV_Ctx *modeCtx, int32_t cmd, void *val, uint32_t len)
+{
+    ...
+    case CRYPT_CTRL_SET_TAG:
+        return SetExpectedTag(ctx, val, len);
+    case CRYPT_CTRL_GET_TAG:
+        return ctx-&gt;enc ? GcmSivEncryptFinish(ctx, val, len) : GcmSivDecryptFinish(ctx, val, len);
+    ...
+}
+
+static int32_t GcmSivDecryptFinish(struct ModesGcmSivCtx *ctx, uint8_t *tagOut, uint32_t tagLen)
+{
+    if (!ctx-&gt;hasExpectedTag) {
+        BSL_ERR_PUSH_ERROR(CRYPT_EAL_ERR_STATE);
+        return CRYPT_EAL_ERR_STATE;
+    }
+
+    const uint8_t *recvTag = ctx-&gt;expectedTag;
+    uint32_t ctLen = ctx-&gt;msgLen;
+    ...
+}</pre>
+                <div class="issue-source">Reviewer: codex</div>
+            </div>
+</div>
+</div></body></html>
